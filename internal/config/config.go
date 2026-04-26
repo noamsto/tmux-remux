@@ -25,10 +25,8 @@ type Config struct {
 	DBPath        string
 	ScrollbackDir string
 	LockPath      string
-	LogPath       string
 
 	// Save behavior
-	SaveInterval         time.Duration
 	MinSaveInterval      time.Duration
 	SnapshotHistoryLimit int
 	CloseEventLimit      int
@@ -63,9 +61,7 @@ func Default() Config {
 		DBPath:        filepath.Join(root, "state.db"),
 		ScrollbackDir: filepath.Join(root, "scrollbacks"),
 		LockPath:      filepath.Join(rt, "write.lock"),
-		LogPath:       filepath.Join(root, "log"),
 
-		SaveInterval:         60 * time.Second,
 		MinSaveInterval:      30 * time.Second,
 		SnapshotHistoryLimit: 20,
 		CloseEventLimit:      50,

@@ -27,7 +27,7 @@ func TestDefaultsResolveFromXDG(t *testing.T) {
 
 func TestDefaultsRespectThresholds(t *testing.T) {
 	c := config.Default()
-	if c.SaveInterval == 0 || c.MinSaveInterval == 0 {
+	if c.MinSaveInterval == 0 {
 		t.Fatal("default thresholds must be non-zero")
 	}
 	if c.SnapshotHistoryLimit < 1 || c.CloseEventLimit < 1 {
