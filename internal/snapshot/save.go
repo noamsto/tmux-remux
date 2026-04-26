@@ -55,7 +55,10 @@ func (s *Saver) Save(ctx context.Context, reason string) error {
 	prevFP, _ := s.db.GetMeta(ctx, "last_save_fingerprint")
 	prevTSStr, _ := s.db.GetMeta(ctx, "last_save_ts")
 	prevTS, _ := strconv.ParseInt(prevTSStr, 10, 64)
-	if fp == prevFP && time.Since(time.UnixMilli(prevTS)) < s.opts.MinSaveInterval {
+	if fp == prevFP {
+		return nil
+	}
+	if time.Since(time.UnixMilli(prevTS)) < s.opts.MinSaveInterval {
 		return nil
 	}
 
