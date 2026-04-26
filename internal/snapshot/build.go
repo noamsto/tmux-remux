@@ -14,7 +14,8 @@ type Lister interface {
 }
 
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
-// for each pane is left zero — populate via /proc separately if desired.
+// is populated best-effort from /proc; errors are ignored (missing PID just
+// leaves it zero).
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
 	sessions, err := l.ListSessions(ctx)
 	if err != nil {
@@ -48,9 +49,11 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		for _, w := range winsBySess[s.Name] {
 			win := Window{Index: w.Index, Name: w.Name, Layout: w.Layout}
 			for _, p := range pansByWin[s.Name][w.Index] {
+				cc, _ := ChildCount(p.PID)
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
-					LastUsed: p.LastUsed,
+					LastUsed:   p.LastUsed,
+					ChildCount: cc,
 				})
 			}
 			sess.Windows = append(sess.Windows, win)

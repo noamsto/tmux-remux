@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/snapshot"
@@ -48,5 +49,26 @@ func TestBuildAssemblesTree(t *testing.T) {
 	}
 	if len(m.Sessions[0].Windows[0].Panes) != 2 {
 		t.Fatalf("panes: %+v", m.Sessions[0].Windows[0].Panes)
+	}
+}
+
+func TestBuildPopulatesChildCountFromPID(t *testing.T) {
+	// Use the current process PID as a sentinel — it has at least 0 children
+	// and we can verify the field is set (not whatever the zero value is from
+	// an uninitialized PID).
+	selfPID := os.Getpid()
+	fc := &fakeClient{
+		sessions: []tmux.SessionRow{{Name: "s"}},
+		windows:  []tmux.WindowRow{{Session: "s", Index: 1}},
+		panes:    []tmux.PaneRow{{Session: "s", WindowIndex: 1, PaneIndex: 1, PID: selfPID}},
+	}
+	m, err := snapshot.Build(context.Background(), fc, "h", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ChildCount should equal the actual count for this PID (>=0, deterministic).
+	expected, _ := snapshot.ChildCount(selfPID)
+	if m.Sessions[0].Windows[0].Panes[0].ChildCount != expected {
+		t.Errorf("ChildCount = %d, want %d", m.Sessions[0].Windows[0].Panes[0].ChildCount, expected)
 	}
 }
