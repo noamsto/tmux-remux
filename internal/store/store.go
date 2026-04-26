@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -103,4 +104,49 @@ func (s *Store) applyMigration(ctx context.Context, version int, body string) er
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
+}
+
+// Event is a row in the events table.
+type Event struct {
+	ID            int64
+	Ts            int64
+	Kind          string
+	Scope         string
+	Reason        string
+	Host          string
+	ParentEventID *int64
+	ManifestJSON  string
+}
+
+// InsertEvent inserts a new event row and returns its id.
+func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO events (ts, kind, scope, reason, host, parent_event_id, manifest_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, ev.Ts, ev.Kind, ev.Scope, ev.Reason, ev.Host, ev.ParentEventID, ev.ManifestJSON)
+	if err != nil {
+		return 0, fmt.Errorf("insert event: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// LatestSnapshot returns the newest snapshot event by timestamp, or (nil, nil)
+// when no snapshot exists.
+func (s *Store) LatestSnapshot(ctx context.Context) (*Event, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
+		FROM events
+		WHERE kind = 'snapshot'
+		ORDER BY ts DESC
+		LIMIT 1
+	`)
+	var ev Event
+	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query latest snapshot: %w", err)
+	}
+	return &ev, nil
 }
