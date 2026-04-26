@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/noamsto/tmux-state/internal/config"
+	"github.com/noamsto/tmux-state/internal/filter"
+	"github.com/noamsto/tmux-state/internal/restore"
 	"github.com/noamsto/tmux-state/internal/scrollback"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 	"github.com/noamsto/tmux-state/internal/store"
@@ -94,9 +97,62 @@ func newSaveCmd() *cobra.Command {
 	return cmd
 }
 
-// newRestoreCmd returns the restore subcommand. Wired in a later task.
+// newRestoreCmd returns the restore subcommand.
 func newRestoreCmd() *cobra.Command {
-	return &cobra.Command{Use: "restore", RunE: func(*cobra.Command, []string) error { return nil }}
+	var auto bool
+	cmd := &cobra.Command{
+		Use:   "restore",
+		Short: "Restore the latest snapshot through the smart filter",
+		RunE: func(*cobra.Command, []string) error {
+			ctx, cancel := signalCtx()
+			defer cancel()
+			cfg := loadConfig()
+			if cfg.RestoreMode == config.RestoreOff && auto {
+				return nil
+			}
+			db, err := store.Open(ctx, cfg.DBPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+			ev, err := db.LatestSnapshot(ctx)
+			if err != nil {
+				return err
+			}
+			if ev == nil {
+				return nil
+			}
+
+			var m snapshot.Manifest
+			if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
+				return err
+			}
+
+			f := filter.Filter{
+				MaxSessionAge:      cfg.RestoreMaxSessionAge,
+				MaxSnapshotAge:     cfg.RestoreMaxSnapshotAge,
+				SkipIdleShells:     cfg.RestoreSkipIdleShells,
+				SkipIdleWindows:    cfg.RestoreSkipIdleWindows,
+				DedupRunningServer: cfg.DedupRunningServer,
+			}
+			if f.SkipSnapshot(ev.Ts) {
+				return nil
+			}
+
+			t := tmux.NewClient("tmux")
+			running := map[string]bool{}
+			rows, _ := t.ListSessions(ctx)
+			for _, s := range rows {
+				running[s.Name] = true
+			}
+
+			plan := restore.BuildPlan(m, f, running, cfg.CommandAllowList)
+			sb := scrollback.New(cfg.ScrollbackDir)
+			return restore.ApplyWithScrollback(ctx, t, sb, plan)
+		},
+	}
+	cmd.Flags().BoolVar(&auto, "auto", false, "respect restore_mode=off")
+	return cmd
 }
 
 // newUndoCmd returns the undo subcommand. Wired in a later task.
