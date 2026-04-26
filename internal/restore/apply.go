@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 )
@@ -79,16 +78,14 @@ func pasteScrollback(ctx context.Context, t Runner, sb ScrollbackReader, v Resto
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := io.Copy(tmp, byteReader(content)); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
+	tmpName := tmp.Name()
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := os.WriteFile(tmpName, content, 0o600); err != nil {
 		return err
 	}
 	bufID := "tmux-state-" + randHex()
-	if _, err := t.Run(ctx, []string{"load-buffer", "-b", bufID, tmp.Name()}); err != nil {
+	if _, err := t.Run(ctx, []string{"load-buffer", "-b", bufID, tmpName}); err != nil {
 		return err
 	}
 	if _, err := t.Run(ctx, []string{"paste-buffer", "-b", bufID, "-t", v.Pane}); err != nil {
@@ -98,22 +95,6 @@ func pasteScrollback(ctx context.Context, t Runner, sb ScrollbackReader, v Resto
 		return err
 	}
 	return nil
-}
-
-func byteReader(b []byte) io.Reader { return &bytesReader{b: b} }
-
-type bytesReader struct {
-	b   []byte
-	pos int
-}
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
 }
 
 func randHex() string {
