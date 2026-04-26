@@ -216,3 +216,108 @@ func TestPruneSnapshotsKeepsNewest(t *testing.T) {
 		t.Errorf("expected newest 3 (10,9,8), got %d,%d,%d", all[0].Ts, all[1].Ts, all[2].Ts)
 	}
 }
+
+func TestUpsertScrollbackIncrementsRefcount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := db.UpsertScrollback(ctx, "abc123", 42, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertScrollback(ctx, "abc123", 42, 200); err != nil {
+		t.Fatal(err)
+	}
+
+	var refcount int
+	var lastUsed int64
+	err = db.DB().QueryRowContext(ctx, "SELECT refcount, last_used_ts FROM scrollbacks WHERE sha256=?", "abc123").Scan(&refcount, &lastUsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refcount != 0 {
+		t.Errorf("refcount on upsert should be 0 (linking happens via event_scrollbacks); got %d", refcount)
+	}
+	if lastUsed != 200 {
+		t.Errorf("last_used_ts = %d, want 200", lastUsed)
+	}
+}
+
+func TestLinkEventScrollbackBumpsRefcount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	id, _ := db.InsertEvent(ctx, store.Event{Ts: 1, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"})
+	_ = db.UpsertScrollback(ctx, "sha1", 10, 1)
+	if err := db.LinkEventScrollback(ctx, id, "s:1:1", "sha1"); err != nil {
+		t.Fatal(err)
+	}
+
+	var refcount int
+	_ = db.DB().QueryRowContext(ctx, "SELECT refcount FROM scrollbacks WHERE sha256='sha1'").Scan(&refcount)
+	if refcount != 1 {
+		t.Errorf("refcount = %d, want 1", refcount)
+	}
+}
+
+func TestDeletingEventDecrementsRefcount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	id, _ := db.InsertEvent(ctx, store.Event{Ts: 1, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"})
+	_ = db.UpsertScrollback(ctx, "sha1", 10, 1)
+	_ = db.LinkEventScrollback(ctx, id, "s:1:1", "sha1")
+
+	if _, err := db.DB().ExecContext(ctx, "DELETE FROM events WHERE id=?", id); err != nil {
+		t.Fatal(err)
+	}
+
+	var refcount int
+	_ = db.DB().QueryRowContext(ctx, "SELECT refcount FROM scrollbacks WHERE sha256='sha1'").Scan(&refcount)
+	if refcount != 0 {
+		t.Errorf("refcount = %d, want 0", refcount)
+	}
+}
+
+func TestSetGetMeta(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := db.SetMeta(ctx, "k", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetMeta(ctx, "k")
+	if err != nil || got != "v1" {
+		t.Fatalf("GetMeta(k) = %q, %v; want v1, nil", got, err)
+	}
+	if err := db.SetMeta(ctx, "k", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = db.GetMeta(ctx, "k")
+	if got != "v2" {
+		t.Errorf("update did not stick: got %q", got)
+	}
+	missing, err := db.GetMeta(ctx, "nope")
+	if err != nil || missing != "" {
+		t.Errorf("missing key: got %q, %v; want \"\", nil", missing, err)
+	}
+}

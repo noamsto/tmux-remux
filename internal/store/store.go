@@ -242,3 +242,93 @@ func (s *Store) PruneCloseEvents(ctx context.Context, keep int) error {
 	}
 	return nil
 }
+
+// UpsertScrollback inserts or updates a scrollback row by sha256, leaving
+// refcount alone (linking happens via LinkEventScrollback).
+func (s *Store) UpsertScrollback(ctx context.Context, sha string, bytes, lastUsedTs int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO scrollbacks (sha256, bytes, refcount, last_used_ts)
+		VALUES (?, ?, 0, ?)
+		ON CONFLICT(sha256) DO UPDATE SET last_used_ts = excluded.last_used_ts
+	`, sha, bytes, lastUsedTs)
+	if err != nil {
+		return fmt.Errorf("upsert scrollback: %w", err)
+	}
+	return nil
+}
+
+// LinkEventScrollback links a scrollback to an event, bumping refcount in the
+// same transaction.
+func (s *Store) LinkEventScrollback(ctx context.Context, eventID int64, paneKey, sha string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO event_scrollbacks (event_id, pane_key, scrollback_sha) VALUES (?, ?, ?)`,
+		eventID, paneKey, sha); err != nil {
+		return fmt.Errorf("link event_scrollback: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE scrollbacks SET refcount = refcount + 1 WHERE sha256 = ?`, sha); err != nil {
+		return fmt.Errorf("bump refcount: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// SetMeta upserts a key/value into the meta table.
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, key, value)
+	if err != nil {
+		return fmt.Errorf("set meta: %w", err)
+	}
+	return nil
+}
+
+// GetMeta returns the value for key, or "" if absent.
+func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get meta: %w", err)
+	}
+	return v, nil
+}
+
+// ScrollbacksWithZeroRef returns the sha256 of every scrollback whose refcount
+// has dropped to zero or less. Used by GC.
+func (s *Store) ScrollbacksWithZeroRef(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT sha256 FROM scrollbacks WHERE refcount <= 0`)
+	if err != nil {
+		return nil, fmt.Errorf("query orphans: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, err
+		}
+		out = append(out, sha)
+	}
+	return out, rows.Err()
+}
+
+// DeleteScrollback removes the scrollback row by sha256.
+func (s *Store) DeleteScrollback(ctx context.Context, sha string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM scrollbacks WHERE sha256 = ?`, sha)
+	if err != nil {
+		return fmt.Errorf("delete scrollback: %w", err)
+	}
+	return nil
+}
