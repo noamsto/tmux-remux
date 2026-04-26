@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+// RestoreMode controls how tmux-state behaves when a tmux server starts.
+// See [RestoreAuto], [RestoreInteractive], [RestoreOff].
+type RestoreMode string
+
+// Restore mode constants.
+const (
+	RestoreAuto        RestoreMode = "auto"
+	RestoreInteractive RestoreMode = "interactive"
+	RestoreOff         RestoreMode = "off"
+)
+
 // Config holds runtime settings for tmux-state. Construct via [Default].
 type Config struct {
 	// Storage paths
@@ -24,7 +35,7 @@ type Config struct {
 	CaptureScrollback    bool
 
 	// Restore behavior
-	RestoreMode            string // "auto" | "interactive" | "off"
+	RestoreMode            RestoreMode
 	RestoreMaxSessionAge   time.Duration
 	RestoreMaxSnapshotAge  time.Duration
 	RestoreSkipIdleShells  bool
@@ -60,7 +71,7 @@ func Default() Config {
 		CloseEventLimit:      50,
 		CaptureScrollback:    true,
 
-		RestoreMode:            "auto",
+		RestoreMode:            RestoreAuto,
 		RestoreMaxSessionAge:   14 * 24 * time.Hour,
 		RestoreMaxSnapshotAge:  30 * 24 * time.Hour,
 		RestoreSkipIdleShells:  true,

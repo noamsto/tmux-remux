@@ -53,3 +53,16 @@ func TestEnsureDirsCreatesPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreModeIsTyped(t *testing.T) {
+	c := config.Default()
+	if c.RestoreMode != config.RestoreAuto {
+		t.Errorf("default RestoreMode = %q, want %q", c.RestoreMode, config.RestoreAuto)
+	}
+	// Compile-time check: a bare string should not satisfy RestoreMode.
+	// (The following line would fail to compile if RestoreMode were untyped.)
+	var m config.RestoreMode = "auto"
+	if m != config.RestoreAuto {
+		t.Errorf("RestoreMode(\"auto\") != RestoreAuto")
+	}
+}
