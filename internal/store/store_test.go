@@ -149,3 +149,70 @@ func TestLatestSnapshotReturnsNilWhenEmpty(t *testing.T) {
 		t.Errorf("expected nil, got %+v", ev)
 	}
 }
+
+func TestListEventsByKind(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	insert := func(ts int64, kind string) {
+		t.Helper()
+		if _, err := db.InsertEvent(ctx, store.Event{
+			Ts: ts, Kind: kind, Scope: "session", Host: "h", ManifestJSON: "{}",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert(10, "snapshot")
+	insert(20, "pane-died")
+	insert(30, "snapshot")
+	insert(40, "session-closed")
+
+	closes, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(closes) != 2 {
+		t.Fatalf("got %d events, want 2", len(closes))
+	}
+	if closes[0].Ts != 40 || closes[1].Ts != 20 {
+		t.Errorf("expected ts=40,20 (DESC), got %d,%d", closes[0].Ts, closes[1].Ts)
+	}
+}
+
+func TestPruneSnapshotsKeepsNewest(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for ts := int64(1); ts <= 10; ts++ {
+		if _, err := db.InsertEvent(ctx, store.Event{
+			Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.PruneSnapshots(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("got %d, want 3", len(all))
+	}
+	if all[0].Ts != 10 || all[1].Ts != 9 || all[2].Ts != 8 {
+		t.Errorf("expected newest 3 (10,9,8), got %d,%d,%d", all[0].Ts, all[1].Ts, all[2].Ts)
+	}
+}

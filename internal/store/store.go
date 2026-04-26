@@ -150,3 +150,95 @@ func (s *Store) LatestSnapshot(ctx context.Context) (*Event, error) {
 	}
 	return &ev, nil
 }
+
+// ListOpts filters and limits ListEvents queries.
+type ListOpts struct {
+	Kinds        []string // include only these kinds (OR semantics); empty = no filter
+	ExcludeKinds []string // exclude these kinds (AND semantics)
+	Limit        int      // 0 = no limit
+}
+
+// ListEvents returns events matching opts, ordered by ts DESC.
+func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) {
+	var b strings.Builder
+	b.WriteString(`SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json FROM events`)
+	var clauses []string
+	var args []any
+	if len(opts.Kinds) > 0 {
+		placeholders := make([]string, len(opts.Kinds))
+		for i, k := range opts.Kinds {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		clauses = append(clauses, "kind IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(opts.ExcludeKinds) > 0 {
+		placeholders := make([]string, len(opts.ExcludeKinds))
+		for i, k := range opts.ExcludeKinds {
+			placeholders[i] = "?"
+			args = append(args, k)
+		}
+		clauses = append(clauses, "kind NOT IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(clauses) > 0 {
+		b.WriteString(" WHERE ")
+		b.WriteString(strings.Join(clauses, " AND "))
+	}
+	b.WriteString(" ORDER BY ts DESC")
+	if opts.Limit > 0 {
+		b.WriteString(" LIMIT ?")
+		args = append(args, opts.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Event
+	for rows.Next() {
+		var ev Event
+		if err := rows.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// PruneSnapshots deletes snapshot events beyond the keep newest.
+func (s *Store) PruneSnapshots(ctx context.Context, keep int) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE kind = 'snapshot'
+		  AND id NOT IN (
+		      SELECT id FROM events
+		      WHERE kind = 'snapshot'
+		      ORDER BY ts DESC
+		      LIMIT ?
+		  )
+	`, keep)
+	if err != nil {
+		return fmt.Errorf("prune snapshots: %w", err)
+	}
+	return nil
+}
+
+// PruneCloseEvents deletes non-snapshot events beyond the keep newest.
+func (s *Store) PruneCloseEvents(ctx context.Context, keep int) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE kind != 'snapshot'
+		  AND id NOT IN (
+		      SELECT id FROM events
+		      WHERE kind != 'snapshot'
+		      ORDER BY ts DESC
+		      LIMIT ?
+		  )
+	`, keep)
+	if err != nil {
+		return fmt.Errorf("prune close events: %w", err)
+	}
+	return nil
+}
