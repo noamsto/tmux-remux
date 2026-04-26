@@ -39,3 +39,35 @@ func TestOpenIsIdempotent(t *testing.T) {
 		db.Close()
 	}
 }
+
+func TestMigrateRespectsUserVersion(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	// First open creates the schema and sets user_version=1.
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	var v int
+	if err := db.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if v != 1 {
+		t.Errorf("after first open: user_version = %d, want 1", v)
+	}
+	db.Close()
+
+	// Second open is a no-op for migrations.
+	db, err = store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
+	}
+	defer db.Close()
+	if err := db.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if v != 1 {
+		t.Errorf("after second open: user_version = %d, want 1", v)
+	}
+}

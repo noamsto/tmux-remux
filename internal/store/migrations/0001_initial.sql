@@ -1,5 +1,3 @@
-PRAGMA user_version = 1;
-
 CREATE TABLE events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ts              INTEGER NOT NULL,

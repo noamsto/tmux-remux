@@ -44,11 +44,6 @@ func (s *Store) DB() *sql.DB { return s.db }
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate(ctx context.Context) error {
-	var current int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
-	}
-
 	files, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("list migrations: %w", err)
@@ -66,16 +61,46 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := fmt.Sscanf(name, "%04d_", &version); err != nil {
 			return fmt.Errorf("parse migration name %q: %w", name, err)
 		}
+
+		var current int
+		if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
+			return fmt.Errorf("read user_version: %w", err)
+		}
 		if version <= current {
 			continue
 		}
+		if version != current+1 {
+			return fmt.Errorf("migration gap: have %d, next is %d", current, version)
+		}
+
 		body, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			return fmt.Errorf("read migration %q: %w", name, err)
 		}
-		if _, err := s.db.ExecContext(ctx, string(body)); err != nil {
+
+		if err := s.applyMigration(ctx, version, string(body)); err != nil {
 			return fmt.Errorf("apply migration %q: %w", name, err)
 		}
+	}
+	return nil
+}
+
+func (s *Store) applyMigration(ctx context.Context, version int, body string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		return fmt.Errorf("exec body: %w", err)
+	}
+	// PRAGMA does not accept bound parameters — use Sprintf.
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		return fmt.Errorf("set user_version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
