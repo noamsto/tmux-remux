@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,11 @@ import (
 
 // Version is the released version. Bumped on tagged releases.
 const Version = "0.1.0"
+
+var hostname = sync.OnceValue(func() string {
+	h, _ := os.Hostname()
+	return h
+})
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -84,7 +90,7 @@ func newSaveCmd() *cobra.Command {
 			defer func() { _ = db.Close() }()
 			sb := scrollback.New(cfg.ScrollbackDir)
 			t := tmux.NewClient("tmux")
-			host, _ := os.Hostname()
+			host := hostname()
 			saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 				Host:              host,
 				CaptureScrollback: cfg.CaptureScrollback,
@@ -287,7 +293,7 @@ func newCaptureEventCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			host, _ := os.Hostname()
+			host := hostname()
 			_, err = closeevent.Capture(ctx, db, closeevent.Args{
 				Kind:      args[0],
 				SessionID: session,
