@@ -2,7 +2,10 @@ module github.com/noamsto/tmux-state
 
 go 1.25.5
 
-require modernc.org/sqlite v1.50.0
+require (
+	github.com/klauspost/compress v1.18.5
+	modernc.org/sqlite v1.50.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
