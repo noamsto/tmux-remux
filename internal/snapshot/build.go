@@ -3,6 +3,8 @@ package snapshot
 import (
 	"context"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/noamsto/tmux-state/internal/tmux"
 )
 
@@ -17,16 +19,27 @@ type Lister interface {
 // is populated best-effort from /proc; errors are ignored (missing PID just
 // leaves it zero).
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
-	sessions, err := l.ListSessions(ctx)
-	if err != nil {
-		return Manifest{}, err
-	}
-	windows, err := l.ListWindows(ctx)
-	if err != nil {
-		return Manifest{}, err
-	}
-	panes, err := l.ListPanes(ctx)
-	if err != nil {
+	var sessions []tmux.SessionRow
+	var windows []tmux.WindowRow
+	var panes []tmux.PaneRow
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		s, err := l.ListSessions(gctx)
+		sessions = s
+		return err
+	})
+	g.Go(func() error {
+		w, err := l.ListWindows(gctx)
+		windows = w
+		return err
+	})
+	g.Go(func() error {
+		p, err := l.ListPanes(gctx)
+		panes = p
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return Manifest{}, err
 	}
 
