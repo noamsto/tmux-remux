@@ -10,7 +10,7 @@
 
 **Spec:** `docs/specs/2026-04-26-tmux-state-design.md`
 
-**Out of scope for v0.1.0:** Bubble Tea explorer TUI (phase 3, separate plan). Lazytmux integration (phase 2, separate plan in lazytmux repo). nvim cooperation. Cross-host portability.
+**Out of scope for v0.1.0:** Rich history explorer TUI (phase 3 — lives in `lazytmux/picker` as a new `--state` mode, not in this repo). Lazytmux integration (phase 2, separate plan in lazytmux repo). nvim cooperation. Cross-host portability. `pkg/` re-exports (added in phase 3 when lazytmux/picker starts importing the store).
 
 **Testing model:** TDD. Each task: write failing test → run to confirm fail → implement minimal code → run to confirm pass → commit. Integration test (real tmux server) gates the final tasks.
 
@@ -4429,7 +4429,8 @@ Replace `newListCmd`, `newPruneCmd`, `newGCCmd`:
 
 ```go
 func newListCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List events",
 		RunE: func(*cobra.Command, []string) error {
@@ -4445,12 +4446,23 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				for _, ev := range evs {
+					if err := enc.Encode(ev); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
 			for _, ev := range evs {
 				fmt.Println(picker.FormatRow(ev))
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit one JSON object per line (newline-delimited)")
+	return cmd
 }
 
 func newPruneCmd() *cobra.Command {
@@ -4998,7 +5010,7 @@ git tag v0.1.0 -m "v0.1.0: save, restore, undo, pick"
 
 ---
 
-## Phases 2 and 3 (separate plans)
+## Phases 2 and 3 (separate plans, in different repos)
 
-- **Phase 2:** Lazytmux integration. Lives in `lazytmux` repo as a separate plan: `docs/superpowers/plans/2026-XX-XX-tmux-state-integration.md`. Adds the `tmux-state` flake input, wires hooks/keybindings into `config/tmux.conf.nix`, removes resurrect/continuum, and adds the home-manager options block + systemd timer/service.
-- **Phase 3:** Bubble Tea history explorer (`tmux-state explore`, `prefix + E`). Lives in this repo as `docs/plans/2026-XX-XX-tmux-state-explore.md`. Targets v0.2.0.
+- **Phase 2:** Lazytmux integration. Lives in `lazytmux` repo as `docs/superpowers/plans/2026-XX-XX-tmux-state-integration.md`. Adds the `tmux-state` flake input, wires hooks/keybindings into `config/tmux.conf.nix`, removes resurrect/continuum, and adds the home-manager options block + systemd timer/service.
+- **Phase 3:** Rich history explorer mode in `lazytmux/picker`. Lives in `lazytmux` repo as `docs/superpowers/plans/2026-XX-XX-tmux-state-explore.md`. Extends the existing `picker/main.go` and `picker/tui.go` (Bubble Tea v2, Catppuccin theming, viewport preview, search) with a new `--state` mode that imports `github.com/noamsto/tmux-state/pkg/store` (via re-export added in this repo at the start of Phase 3) or shells out to `tmux-state list --json`. Binds to `prefix + E`. Targets `tmux-state` v0.2.0 once `pkg/` re-exports are added.
