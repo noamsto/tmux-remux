@@ -1,0 +1,17 @@
+# Binaries
+/tmux-state
+/result
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Direnv
+.direnv/
+.envrc.local
