@@ -8,8 +8,11 @@ import (
 	"github.com/noamsto/tmux-state/internal/snapshot"
 )
 
-// Action is one step of a restore plan. Concrete types implement kind().
-type Action interface{ kind() string }
+// Action is one step of a restore plan. Concrete types are in this file.
+// Apply() type-switches on the concrete type.
+type Action interface {
+	isAction()
+}
 
 // CreateSession creates a new tmux session.
 type CreateSession struct {
@@ -17,7 +20,7 @@ type CreateSession struct {
 	Cwd  string
 }
 
-func (CreateSession) kind() string { return "CreateSession" }
+func (CreateSession) isAction() {}
 
 // CreateWindow creates a new tmux window inside a session.
 type CreateWindow struct {
@@ -27,7 +30,7 @@ type CreateWindow struct {
 	Cwd     string
 }
 
-func (CreateWindow) kind() string { return "CreateWindow" }
+func (CreateWindow) isAction() {}
 
 // SplitPane creates a new pane inside a window via split-window.
 type SplitPane struct {
@@ -35,7 +38,7 @@ type SplitPane struct {
 	Cwd    string
 }
 
-func (SplitPane) kind() string { return "SplitPane" }
+func (SplitPane) isAction() {}
 
 // SetLayout applies a tmux layout string to a window.
 type SetLayout struct {
@@ -43,7 +46,7 @@ type SetLayout struct {
 	Layout string
 }
 
-func (SetLayout) kind() string { return "SetLayout" }
+func (SetLayout) isAction() {}
 
 // RelaunchCommand re-issues an allow-listed command to a pane.
 type RelaunchCommand struct {
@@ -52,7 +55,7 @@ type RelaunchCommand struct {
 	Args    []string
 }
 
-func (RelaunchCommand) kind() string { return "RelaunchCommand" }
+func (RelaunchCommand) isAction() {}
 
 // RestoreScrollback pastes a stored scrollback into a pane.
 //
@@ -62,7 +65,7 @@ type RestoreScrollback struct {
 	SHA  string
 }
 
-func (RestoreScrollback) kind() string { return "RestoreScrollback" }
+func (RestoreScrollback) isAction() {}
 
 // BuildPlan builds an ordered slice of Actions to restore the manifest,
 // honoring the filter and the allow-list of commands.
