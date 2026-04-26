@@ -101,29 +101,6 @@ func (s *Store) Delete(_ context.Context, sha string) error {
 	return nil
 }
 
-// Walk yields every sha256 currently on disk, regardless of refcount.
-// Used by gc to find files orphaned by mid-write crashes. Returns early if
-// yield returns false.
-func (s *Store) Walk(yield func(sha string) bool) error {
-	return filepath.WalkDir(s.dir, func(_ string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		const ext = ".zst"
-		if len(name) != 64+len(ext) || name[64:] != ext {
-			return nil
-		}
-		if !yield(name[:64]) {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-}
-
 func (s *Store) path(sha string) string {
 	return filepath.Join(s.dir, sha[:2], sha+".zst")
 }
