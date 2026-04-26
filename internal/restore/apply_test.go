@@ -2,6 +2,7 @@ package restore_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/restore"
@@ -48,4 +49,28 @@ func equalArgs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+type sbReader struct{ data map[string][]byte }
+
+func (s *sbReader) Get(_ context.Context, sha string) ([]byte, error) {
+	v, ok := s.data[sha]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	return v, nil
+}
+
+func TestApplyPastesScrollback(t *testing.T) {
+	rt := &recordingTmux{}
+	sb := &sbReader{data: map[string][]byte{"abc": []byte("history\n")}}
+	plan := []restore.Action{
+		restore.RestoreScrollback{Pane: "s1:1.1", SHA: "abc"},
+	}
+	if err := restore.ApplyWithScrollback(context.Background(), rt, sb, plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.calls) != 3 {
+		t.Fatalf("expected 3 calls, got %d: %v", len(rt.calls), rt.calls)
+	}
 }
