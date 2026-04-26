@@ -13,7 +13,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -race ./...
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: go test -tags=integration -race ./...
 
   lint:
     runs-on: ubuntu-latest

@@ -23,8 +23,16 @@
       }: {
         pre-commit.settings.hooks = {
           gofmt.enable = true;
-          govet.enable = true;
-          golangci-lint.enable = true;
+          govet = {
+            enable = true;
+            # integration_test.go has //go:build integration; without the tag the
+            # root package has no buildable files, which trips `go vet -C .`.
+            excludes = ["^integration_test\\.go$"];
+          };
+          golangci-lint = {
+            enable = true;
+            excludes = ["^integration_test\\.go$"];
+          };
           typos.enable = true;
           check-merge-conflicts.enable = true;
           trim-trailing-whitespace.enable = true;
