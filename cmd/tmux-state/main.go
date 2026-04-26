@@ -10,6 +10,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/noamsto/tmux-state/internal/config"
+	"github.com/noamsto/tmux-state/internal/scrollback"
+	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-state/internal/tmux"
 )
 
 // Version is the released version. Bumped on tagged releases.
@@ -54,9 +58,40 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// newSaveCmd returns the save subcommand. Wired in a later task.
+// newSaveCmd returns the save subcommand.
 func newSaveCmd() *cobra.Command {
-	return &cobra.Command{Use: "save", RunE: func(*cobra.Command, []string) error { return nil }}
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "save",
+		Short: "Save a snapshot of the current tmux server",
+		RunE: func(*cobra.Command, []string) error {
+			ctx, cancel := signalCtx()
+			defer cancel()
+			cfg := loadConfig()
+			if err := cfg.EnsureDirs(); err != nil {
+				return err
+			}
+			db, err := store.Open(ctx, cfg.DBPath)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+			sb := scrollback.New(cfg.ScrollbackDir)
+			t := tmux.NewClient("tmux")
+			host, _ := os.Hostname()
+			saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
+				Host:              host,
+				CaptureScrollback: cfg.CaptureScrollback,
+				MinSaveInterval:   cfg.MinSaveInterval,
+			})
+			if err := saver.Save(ctx, reason); err != nil {
+				return err
+			}
+			return db.PruneSnapshots(ctx, cfg.SnapshotHistoryLimit)
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "manual", "reason for save (e.g. 'timer', 'hook:session-created')")
+	return cmd
 }
 
 // newRestoreCmd returns the restore subcommand. Wired in a later task.
@@ -99,10 +134,8 @@ func newGCCmd() *cobra.Command {
 	return &cobra.Command{Use: "gc", RunE: func(*cobra.Command, []string) error { return nil }}
 }
 
-//nolint:unused // wired by save/restore/etc. subcommands in subsequent tasks
 func signalCtx() (context.Context, func()) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-//nolint:unused // wired by save/restore/etc. subcommands in subsequent tasks
 func loadConfig() config.Config { return config.Default() }
