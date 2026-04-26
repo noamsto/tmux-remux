@@ -2,8 +2,8 @@ package closeevent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/noamsto/tmux-state/internal/store"
@@ -36,7 +36,7 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 			return 0, err
 		}
 		for _, ev := range evs {
-			if ev.Ts >= cutoff && containsQuoted(ev.ManifestJSON, a.SessionID) {
+			if ev.Ts >= cutoff && eventReferencesSession(ev.ManifestJSON, a.SessionID) {
 				return 0, nil
 			}
 		}
@@ -50,7 +50,7 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 			return 0, err
 		}
 		for _, ev := range evs {
-			if ev.Ts >= cutoff && containsQuoted(ev.ManifestJSON, a.SessionID) && containsQuoted(ev.ManifestJSON, a.WindowID) {
+			if ev.Ts >= cutoff && eventReferencesWindow(ev.ManifestJSON, a.SessionID, a.WindowID) {
 				return 0, nil
 			}
 		}
@@ -95,13 +95,29 @@ func scopeFor(kind string) string {
 	}
 }
 
-// containsQuoted is true if the JSON manifest contains the quoted form of id
-// (e.g., id="$1" matches `"$1"` in the JSON). Used as a cheap heuristic to
-// determine whether an event references a particular session/window id.
-func containsQuoted(manifest, id string) bool {
-	if id == "" {
+type envelope struct {
+	SessionID string `json:"session_id"`
+	WindowID  string `json:"window_id"`
+}
+
+func eventReferencesSession(manifest, sessionID string) bool {
+	if sessionID == "" {
 		return false
 	}
-	target := fmt.Sprintf("%q", id)
-	return strings.Contains(manifest, target)
+	var e envelope
+	if json.Unmarshal([]byte(manifest), &e) != nil {
+		return false
+	}
+	return e.SessionID == sessionID
+}
+
+func eventReferencesWindow(manifest, sessionID, windowID string) bool {
+	if windowID == "" {
+		return false
+	}
+	var e envelope
+	if json.Unmarshal([]byte(manifest), &e) != nil {
+		return false
+	}
+	return e.SessionID == sessionID && e.WindowID == windowID
 }
