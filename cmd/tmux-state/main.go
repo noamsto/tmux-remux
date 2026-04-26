@@ -15,6 +15,7 @@ import (
 	"github.com/noamsto/tmux-state/internal/closeevent"
 	"github.com/noamsto/tmux-state/internal/config"
 	"github.com/noamsto/tmux-state/internal/filter"
+	"github.com/noamsto/tmux-state/internal/lockfile"
 	"github.com/noamsto/tmux-state/internal/picker"
 	"github.com/noamsto/tmux-state/internal/restore"
 	"github.com/noamsto/tmux-state/internal/scrollback"
@@ -60,8 +61,9 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
-// withStore opens the DB after ensuring storage directories exist, runs fn,
-// and closes the DB. Used by every subcommand RunE.
+// withStore opens the DB after ensuring storage directories exist, takes an
+// exclusive flock on cfg.LockPath to serialize writers, runs fn, and closes
+// the DB. Used by every subcommand RunE.
 func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) error) error {
 	ctx, cancel := signalCtx()
 	defer cancel()
@@ -69,6 +71,11 @@ func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) 
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
+	lock, err := lockfile.Acquire(cfg.LockPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
 	db, err := store.Open(ctx, cfg.DBPath)
 	if err != nil {
 		return err

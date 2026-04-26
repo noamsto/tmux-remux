@@ -56,7 +56,7 @@
             pname = "tmux-state";
             version = "0.1.0";
             src = ./.;
-            vendorHash = "sha256-KT5Dm3rRT/Gdk5zqh4B9zssIH1w8+cUjvF1arwMj1iQ=";
+            vendorHash = "sha256-JD4zKkerNr55R7HDjIgsaXh+RryxvPII0kynkNQ/4jw=";
             subPackages = ["cmd/tmux-state"];
             doCheck = true;
             meta = {
