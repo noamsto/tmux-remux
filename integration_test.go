@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/scrollback"
@@ -37,8 +36,6 @@ func (s scopedTmux) ListSessions(ctx context.Context) ([]tmux.SessionRow, error)
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
-	// Fresh detached sessions have empty session_last_attached; default to 0.
-	out = fillEmptyField(out, 1, "0")
 	return tmux.ParseSessions(out)
 }
 func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
@@ -53,33 +50,11 @@ func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
-	// Fresh detached panes may have empty pane_last_used; default to 0.
-	out = fillEmptyField(out, 6, "0")
 	return tmux.ParsePanes(out)
 }
 func (s scopedTmux) CapturePane(ctx context.Context, target string) ([]byte, error) {
 	out, err := s.Run(ctx, []string{"capture-pane", "-pJ", "-t", target, "-S", "-"})
 	return []byte(out), err
-}
-
-// fillEmptyField rewrites tmux -F output, replacing empty values at the given
-// 0-based field index (separator \x1f) with replacement. Tmux emits empty
-// strings for never-set numeric fields like session_last_attached on a freshly
-// created detached session, which the strict parsers cannot handle.
-func fillEmptyField(s string, idx int, replacement string) string {
-	const sep = "\x1f"
-	if s == "" {
-		return s
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, line := range lines {
-		fields := strings.Split(line, sep)
-		if idx < len(fields) && fields[idx] == "" {
-			fields[idx] = replacement
-			lines[i] = strings.Join(fields, sep)
-		}
-	}
-	return strings.Join(lines, "\n") + "\n"
 }
 
 func TestSaveRestoreRoundtrip(t *testing.T) {

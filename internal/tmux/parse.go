@@ -27,7 +27,7 @@ func ParseSessions(s string) ([]SessionRow, error) {
 		if len(fields) != 2 {
 			return nil, fmt.Errorf("line %d: expected 2 fields, got %d (%q)", i+1, len(fields), line)
 		}
-		la, err := strconv.ParseInt(fields[1], 10, 64)
+		la, err := parseIntOrZero(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("line %d: parse last_attached: %w", i+1, err)
 		}
@@ -108,7 +108,7 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pane line %d: pid: %w", i+1, err)
 		}
-		lu, err := strconv.ParseInt(fields[6], 10, 64)
+		lu, err := parseIntOrZero(fields[6])
 		if err != nil {
 			return nil, fmt.Errorf("pane line %d: last_used: %w", i+1, err)
 		}
@@ -118,4 +118,14 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		})
 	}
 	return out, nil
+}
+
+// parseIntOrZero parses s as an int64 in base 10. Empty strings return 0
+// (handles tmux's empty session_last_attached / pane_last_used for never-
+// attached sessions and freshly-created panes).
+func parseIntOrZero(s string) (int64, error) {
+	if s == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(s, 10, 64)
 }

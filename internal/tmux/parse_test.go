@@ -62,3 +62,30 @@ func TestParsePanes(t *testing.T) {
 		t.Errorf("ParsePanes mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestParseSessionsEmptyLastAttached(t *testing.T) {
+	// tmux emits empty session_last_attached for sessions that have never been attached.
+	got, err := tmux.ParseSessions("never-attached\x1f\nlazytmux\x1f1745700000\n")
+	if err != nil {
+		t.Fatalf("ParseSessions: %v", err)
+	}
+	want := []tmux.SessionRow{
+		{Name: "never-attached", LastAttached: 0},
+		{Name: "lazytmux", LastAttached: 1745700000},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParsePanesEmptyLastUsed(t *testing.T) {
+	// tmux emits empty pane_last_used for freshly-created panes.
+	input := "s1\x1f1\x1f1\x1f/x\x1fbash\x1f1234\x1f\n"
+	got, err := tmux.ParsePanes(input)
+	if err != nil {
+		t.Fatalf("ParsePanes: %v", err)
+	}
+	if got[0].LastUsed != 0 {
+		t.Errorf("LastUsed = %d, want 0 for empty input", got[0].LastUsed)
+	}
+}
