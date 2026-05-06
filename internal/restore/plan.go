@@ -124,7 +124,7 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 						Command: p.Command, Args: p.CommandArgs,
 					})
 				}
-				if p.ScrollbackSHA != "" {
+				if f.RestoreScrollback && p.ScrollbackSHA != "" {
 					plan = append(plan, RestoreScrollback{
 						Pane: fmt.Sprintf("%s:%d.%d", sess.Name, win.Index, p.Index),
 						SHA:  p.ScrollbackSHA,

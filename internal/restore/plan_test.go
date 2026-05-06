@@ -58,6 +58,37 @@ func TestBuildPlanFiltersIdleShellPanes(t *testing.T) {
 	}
 }
 
+func TestBuildPlanScrollbackGating(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{{
+				Index: 1, Name: "main", Layout: "L",
+				Panes: []snapshot.Pane{
+					{Index: 1, Cwd: "/a", Command: "nvim", ChildCount: 1, ScrollbackSHA: "deadbeef"},
+				},
+			}},
+		}},
+	}
+	off := restore.BuildPlan(m, filter.Filter{}, nil, nil)
+	for _, a := range off {
+		if _, ok := a.(restore.RestoreScrollback); ok {
+			t.Errorf("scrollback restore must not be emitted when Filter.RestoreScrollback is false")
+		}
+	}
+	on := restore.BuildPlan(m, filter.Filter{RestoreScrollback: true}, nil, nil)
+	var found bool
+	for _, a := range on {
+		if _, ok := a.(restore.RestoreScrollback); ok {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("scrollback restore must be emitted when Filter.RestoreScrollback is true")
+	}
+}
+
 func TestBuildPlanFiltersDeduplicatedSessions(t *testing.T) {
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{

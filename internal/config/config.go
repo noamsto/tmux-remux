@@ -39,6 +39,13 @@ type Config struct {
 	RestoreSkipIdleShells  bool
 	RestoreSkipIdleWindows bool
 	DedupRunningServer     bool
+	// RestoreScrollback opts in to pasting captured scrollback into restored
+	// panes via tmux paste-buffer. Off by default: paste-buffer delivers
+	// content as keystrokes to the shell, and captured scrollback is raw
+	// terminal output (prompts, command output, ANSI), so each line becomes
+	// a phantom command — triggering command_not_found storms. With this off,
+	// CaptureScrollback also becomes a no-op (capture without restore is waste).
+	RestoreScrollback bool
 
 	// Allow-list of commands to relaunch on restore
 	CommandAllowList []string
@@ -65,7 +72,10 @@ func Default() Config {
 		MinSaveInterval:      30 * time.Second,
 		SnapshotHistoryLimit: 20,
 		CloseEventLimit:      50,
-		CaptureScrollback:    true,
+		// CaptureScrollback defaults off to match RestoreScrollback — capturing
+		// without restoring is wasted disk + goroutines per save. Flip both to
+		// true to opt in.
+		CaptureScrollback: false,
 
 		RestoreMode:            RestoreAuto,
 		RestoreMaxSessionAge:   14 * 24 * time.Hour,
@@ -73,6 +83,7 @@ func Default() Config {
 		RestoreSkipIdleShells:  true,
 		RestoreSkipIdleWindows: true,
 		DedupRunningServer:     true,
+		// RestoreScrollback intentionally omitted — zero-value false is the safe default.
 
 		CommandAllowList: []string{
 			"nvim", "vim", "vi",

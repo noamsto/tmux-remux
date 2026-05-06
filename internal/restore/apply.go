@@ -88,7 +88,10 @@ func pasteScrollback(ctx context.Context, t Runner, sb ScrollbackReader, v Resto
 	if _, err := t.Run(ctx, []string{"load-buffer", "-b", bufID, tmpName}); err != nil {
 		return err
 	}
-	if _, err := t.Run(ctx, []string{"paste-buffer", "-b", bufID, "-t", v.Pane}); err != nil {
+	// -p wraps the buffer in bracketed paste markers (\e[200~ … \e[201~) so
+	// shells with bracketed-paste support treat the content as one edit
+	// instead of executing each line as a command.
+	if _, err := t.Run(ctx, []string{"paste-buffer", "-p", "-b", bufID, "-t", v.Pane}); err != nil {
 		return err
 	}
 	if _, err := t.Run(ctx, []string{"delete-buffer", "-b", bufID}); err != nil {

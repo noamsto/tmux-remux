@@ -104,9 +104,12 @@ func newSaveCmd() *cobra.Command {
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
 				sb := scrollback.New(cfg.ScrollbackDir)
 				t := tmux.NewClient("tmux")
+				if cfg.CaptureScrollback && !cfg.RestoreScrollback {
+					fmt.Fprintln(os.Stderr, "tmux-state: warning: CaptureScrollback is set but RestoreScrollback is off; skipping capture (capture without restore is wasted disk).")
+				}
 				saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 					Host:              hostname(),
-					CaptureScrollback: cfg.CaptureScrollback,
+					CaptureScrollback: cfg.CaptureScrollback && cfg.RestoreScrollback,
 					MinSaveInterval:   cfg.MinSaveInterval,
 				})
 				if err := saver.Save(ctx, reason); err != nil {
@@ -150,6 +153,7 @@ func newRestoreCmd() *cobra.Command {
 					SkipIdleShells:     cfg.RestoreSkipIdleShells,
 					SkipIdleWindows:    cfg.RestoreSkipIdleWindows,
 					DedupRunningServer: cfg.DedupRunningServer,
+					RestoreScrollback:  cfg.RestoreScrollback,
 				}
 				if f.SkipSnapshot(ev.Ts) {
 					return nil
@@ -198,7 +202,7 @@ func newUndoCmd() *cobra.Command {
 					_ = json.Unmarshal(wrapped.Index, &m)
 				}
 				t := tmux.NewClient("tmux")
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, cfg.CommandAllowList)
+				plan := restore.BuildPlan(m, filter.Filter{RestoreScrollback: cfg.RestoreScrollback}, nil, cfg.CommandAllowList)
 				sb := scrollback.New(cfg.ScrollbackDir)
 				if err := restore.ApplyWithScrollback(ctx, t, sb, plan); err != nil {
 					return err
@@ -262,7 +266,7 @@ func newPickCmd() *cobra.Command {
 					}
 				}
 				t := tmux.NewClient("tmux")
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, cfg.CommandAllowList)
+				plan := restore.BuildPlan(m, filter.Filter{RestoreScrollback: cfg.RestoreScrollback}, nil, cfg.CommandAllowList)
 				sb := scrollback.New(cfg.ScrollbackDir)
 				return restore.ApplyWithScrollback(ctx, t, sb, plan)
 			})
