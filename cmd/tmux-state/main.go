@@ -235,7 +235,7 @@ func newPickCmd() *cobra.Command {
 				for _, ev := range evs {
 					items = append(items, picker.Item{Key: fmt.Sprint(ev.ID), Display: picker.FormatRow(ev)})
 				}
-				selected, err := picker.Pick(ctx, "fzf", items)
+				selected, err := picker.Pick(ctx, items)
 				if err != nil || selected == "" {
 					return err
 				}
