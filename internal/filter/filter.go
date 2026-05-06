@@ -20,7 +20,10 @@ type Filter struct {
 	SkipIdleShells     bool
 	SkipIdleWindows    bool
 	DedupRunningServer bool
-	IdleShellNames     map[string]bool // override default set
+	// RestoreScrollback opts in to emitting RestoreScrollback plan actions —
+	// see config.RestoreScrollback for why this is off by default.
+	RestoreScrollback bool
+	IdleShellNames    map[string]bool // override default set
 }
 
 // SkipSnapshot returns true if the whole snapshot should be skipped due to age.

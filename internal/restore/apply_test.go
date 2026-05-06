@@ -3,6 +3,7 @@ package restore_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/restore"
@@ -72,5 +73,8 @@ func TestApplyPastesScrollback(t *testing.T) {
 	}
 	if len(rt.calls) != 3 {
 		t.Fatalf("expected 3 calls, got %d: %v", len(rt.calls), rt.calls)
+	}
+	if !slices.Contains(rt.calls[1], "-p") {
+		t.Errorf("paste-buffer must use -p (bracketed paste); got %v", rt.calls[1])
 	}
 }
