@@ -3,6 +3,9 @@ package scrollback_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"testing"
 
@@ -78,5 +81,42 @@ func TestDeleteRemovesFile(t *testing.T) {
 	}
 	if _, err := store.Get(ctx, sha); err == nil {
 		t.Error("Get after Delete should error")
+	}
+}
+
+func TestStreamReadsExistingSha(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := scrollback.New(dir)
+	content := []byte("hello scrollback")
+	sha, _, err := store.Put(ctx, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := store.Stream(ctx, sha)
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func TestStreamMissingShaReturnsNotExist(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := scrollback.New(dir)
+	_, err := store.Stream(ctx, "deadbeef00000000000000000000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected error for missing sha")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected fs.ErrNotExist, got %v", err)
 	}
 }

@@ -92,6 +92,39 @@ func (s *Store) Get(_ context.Context, sha string) ([]byte, error) {
 	return io.ReadAll(dec)
 }
 
+// Stream returns a streaming reader of the decompressed scrollback identified
+// by sha. The caller MUST Close the returned ReadCloser. If the file does not
+// exist, the returned error wraps fs.ErrNotExist.
+//
+// ctx is accepted for signature symmetry with the rest of the package and
+// is not honored during reads. To interrupt an in-flight stream, the caller
+// closes the returned ReadCloser.
+func (s *Store) Stream(_ context.Context, sha string) (io.ReadCloser, error) {
+	f, err := os.Open(s.path(sha))
+	if err != nil {
+		return nil, fmt.Errorf("open scrollback: %w", err)
+	}
+	dec, err := zstd.NewReader(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("zstd reader: %w", err)
+	}
+	return &streamReader{file: f, dec: dec}, nil
+}
+
+// streamReader couples a zstd.Decoder with its backing file so Close releases both.
+type streamReader struct {
+	file *os.File
+	dec  *zstd.Decoder
+}
+
+func (r *streamReader) Read(p []byte) (int, error) { return r.dec.Read(p) }
+
+func (r *streamReader) Close() error {
+	r.dec.Close()
+	return r.file.Close()
+}
+
 // Delete removes the scrollback file identified by sha. Missing files are not
 // an error.
 func (s *Store) Delete(_ context.Context, sha string) error {
