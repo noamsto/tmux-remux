@@ -163,9 +163,9 @@ func newRestoreCmd() *cobra.Command {
 					running[s.Name] = true
 				}
 
-				plan := restore.BuildPlan(m, f, running, cfg.CommandAllowList)
-				sb := scrollback.New(cfg.ScrollbackDir)
-				return restore.ApplyWithScrollback(ctx, t, sb, plan)
+				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
+				plan := restore.BuildPlan(m, f, running, opts)
+				return restore.Apply(ctx, t, plan)
 			})
 		},
 	}
@@ -199,9 +199,9 @@ func newUndoCmd() *cobra.Command {
 					_ = json.Unmarshal(wrapped.Index, &m)
 				}
 				t := tmux.NewClient("tmux")
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, cfg.CommandAllowList)
-				sb := scrollback.New(cfg.ScrollbackDir)
-				if err := restore.ApplyWithScrollback(ctx, t, sb, plan); err != nil {
+				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
+				plan := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}
 				_, err = db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", evs[0].ID)
@@ -263,9 +263,9 @@ func newPickCmd() *cobra.Command {
 					}
 				}
 				t := tmux.NewClient("tmux")
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, cfg.CommandAllowList)
-				sb := scrollback.New(cfg.ScrollbackDir)
-				return restore.ApplyWithScrollback(ctx, t, sb, plan)
+				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
+				plan := restore.BuildPlan(m, filter.Filter{}, nil, buildOpts)
+				return restore.Apply(ctx, t, plan)
 			})
 		},
 	}
@@ -400,3 +400,21 @@ func signalCtx() (context.Context, func()) {
 }
 
 func loadConfig() config.Config { return config.Default() }
+
+// resolveBuildOptions builds the BuildOptions consumed by restore.BuildPlan.
+// Errors are silently swallowed in favor of reasonable defaults: an
+// empty Self disables scrollback rendering in emitted startup commands,
+// and /bin/sh is the ultimate shell fallback. Resolved once per restore.
+func resolveBuildOptions(ctx context.Context, t restore.Runner, allowList []string) restore.BuildOptions {
+	self, err := os.Executable()
+	if err != nil {
+		self = ""
+	}
+	shell, isBash := restore.DefaultShell(ctx, t, os.Getenv("SHELL"))
+	return restore.BuildOptions{
+		Self:         self,
+		DefaultShell: shell,
+		IsBash:       isBash,
+		AllowList:    allowList,
+	}
+}
