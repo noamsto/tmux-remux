@@ -57,6 +57,7 @@ func newRootCmd() *cobra.Command {
 		newListCmd(),
 		newPruneCmd(),
 		newGCCmd(),
+		newCatScrollbackCmd(),
 	)
 	return root
 }
