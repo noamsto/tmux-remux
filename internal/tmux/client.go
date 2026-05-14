@@ -4,9 +4,23 @@ package tmux
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 )
+
+// ErrNoServer is returned by Run (and surfaced via ListSessions/Windows/Panes
+// as a nil result with no error) when tmux reports that no server is running
+// on the target socket. Two phrasings exist in tmux 3.x:
+//
+//   - "no server running on /path"        socket file exists but no server
+//   - "error connecting to /path (...)"  socket file does not exist
+//
+// Callers that want to handle "no server" as an error rather than empty state
+// can match with errors.Is.
+var ErrNoServer = errors.New("tmux: no server running")
 
 // Client invokes a tmux-compatible binary. Defaults to the "tmux" command
 // when binary is empty.
@@ -22,17 +36,57 @@ func NewClient(binary string) *Client {
 	return &Client{binary: binary}
 }
 
-// Run executes the binary with the given args and returns stdout. Stderr
-// is included in the error message on non-zero exit.
+// Run executes the binary with the given args and returns stdout. Non-zero
+// exit with a "no server" stderr is mapped to ErrNoServer; other failures are
+// wrapped with stderr.
+//
+// When TMUX is not set in the calling environment, Run synthesizes a TMUX
+// value pointing at the default socket. tmux 3.x rewrites control bytes
+// (0x01-0x1f) in -F format output to "_" when invoked outside a client,
+// which silently corrupts the \x1f field separator used by ParseSessions and
+// friends. Setting TMUX to any non-empty value with a real socket path makes
+// tmux preserve those bytes. See parse.go FieldSep.
 func (c *Client) Run(ctx context.Context, args []string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.binary, args...) //nolint:gosec // binary and args are trusted callers
+	cmd.Env = withSynthesizedTmuxEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s %v: %w (stderr: %s)", c.binary, args, err, stderr.String())
+		msg := stderr.String()
+		if isNoServerStderr(msg) {
+			return "", ErrNoServer
+		}
+		return "", fmt.Errorf("%s %v: %w (stderr: %s)", c.binary, args, err, msg)
 	}
 	return stdout.String(), nil
+}
+
+func isNoServerStderr(s string) bool {
+	return strings.Contains(s, "no server running on ") ||
+		strings.Contains(s, "error connecting to ")
+}
+
+// withSynthesizedTmuxEnv returns env unchanged when TMUX is already set,
+// otherwise appends a synthesized TMUX=<socket>,0,0 entry. The socket path
+// follows tmux's own default-socket logic: $TMUX_TMPDIR/tmux-<UID>/default,
+// with /tmp as the TMUX_TMPDIR fallback. The pid/session-id components are
+// dummies — tmux only checks that TMUX is non-empty and that the socket path
+// resolves to a running server.
+func withSynthesizedTmuxEnv(env []string) []string {
+	tmpdir := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX=") {
+			return env
+		}
+		if v, ok := strings.CutPrefix(e, "TMUX_TMPDIR="); ok {
+			tmpdir = v
+		}
+	}
+	if tmpdir == "" {
+		tmpdir = "/tmp"
+	}
+	return append(env, fmt.Sprintf("TMUX=%s/tmux-%d/default,0,0", tmpdir, os.Getuid()))
 }
 
 const (
@@ -42,30 +96,40 @@ const (
 )
 
 // ListSessions runs `tmux list-sessions -F …` and parses the result.
-// Returns nil (no error) when no sessions exist.
+// Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListSessions(ctx context.Context) ([]SessionRow, error) {
 	out, err := c.Run(ctx, []string{"list-sessions", "-F", sessionFormat})
+	if errors.Is(err, ErrNoServer) {
+		return nil, nil
+	}
 	if err != nil {
-		// no sessions = exit 1; treat as empty
-		return nil, nil //nolint:nilerr // tmux returns non-zero when no sessions exist; that is not an error for us
+		return nil, err
 	}
 	return ParseSessions(out)
 }
 
 // ListWindows runs `tmux list-windows -a -F …` and parses the result.
+// Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 	out, err := c.Run(ctx, []string{"list-windows", "-a", "-F", windowFormat})
+	if errors.Is(err, ErrNoServer) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil, nil //nolint:nilerr // tmux returns non-zero when no windows exist; that is not an error for us
+		return nil, err
 	}
 	return ParseWindows(out)
 }
 
 // ListPanes runs `tmux list-panes -a -F …` and parses the result.
+// Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListPanes(ctx context.Context) ([]PaneRow, error) {
 	out, err := c.Run(ctx, []string{"list-panes", "-a", "-F", paneFormat})
+	if errors.Is(err, ErrNoServer) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil, nil //nolint:nilerr // tmux returns non-zero when no panes exist; that is not an error for us
+		return nil, err
 	}
 	return ParsePanes(out)
 }
