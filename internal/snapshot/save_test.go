@@ -97,3 +97,26 @@ func TestSaveSkipsWhenFingerprintUnchangedAndThrottled(t *testing.T) {
 		t.Errorf("expected 1 event (second was throttled), got %d", len(all))
 	}
 }
+
+// TestSaveSkipsWhenNoSessions covers the "no tmux server running" case:
+// Build returns an empty manifest, and Save must not insert an event.
+// Without this guard the systemd save timer pollutes the event log with
+// sessions:null rows, which `restore` then picks as "latest snapshot".
+func TestSaveSkipsWhenNoSessions(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"))
+	defer db.Close()
+	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
+
+	empty := &captureClient{fakeClient: &fakeClient{}, captured: map[string][]byte{}}
+	saver := snapshot.NewSaver(db, sb, empty, snapshot.SaverOptions{Host: "h"})
+
+	if err := saver.Save(ctx, "timer"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	all, _ := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: 10})
+	if len(all) != 0 {
+		t.Errorf("expected 0 snapshot events, got %d", len(all))
+	}
+}

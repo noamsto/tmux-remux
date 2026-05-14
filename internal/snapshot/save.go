@@ -43,12 +43,20 @@ func NewSaver(db *store.Store, sb *scrollback.Store, t CaptureLister, opts Saver
 }
 
 // Save snapshots the live tmux server. Returns nil if the snapshot was
-// skipped due to throttling.
+// skipped (no tmux server running, throttled, or fingerprint unchanged).
 func (s *Saver) Save(ctx context.Context, reason string) error {
 	now := time.Now()
 	manifest, err := Build(ctx, s.tmux, s.opts.Host, now.UnixMilli())
 	if err != nil {
 		return fmt.Errorf("build manifest: %w", err)
+	}
+
+	// No sessions ⇒ no tmux server (tmux exits when the last session closes).
+	// Writing an empty `sessions:null` event pollutes the history — `restore`
+	// picks the latest by timestamp and would no-op on it. Skip silently;
+	// the next hook-driven save will capture real state.
+	if len(manifest.Sessions) == 0 {
+		return nil
 	}
 
 	fp := manifest.Fingerprint()
