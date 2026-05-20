@@ -101,5 +101,78 @@ func paneLabel(p *snapshot.Pane) string {
 // footer counter. The runningSessions argument is consulted only when
 // f.DedupRunningServer is true.
 func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]bool) Counts {
-	return Counts{} // intentionally unimplemented; Task 5 fills this in
+	var c Counts
+	if root == nil {
+		return c
+	}
+	for _, sess := range root.Children {
+		s, _ := sess.Ref.(*snapshot.Session)
+		if s == nil {
+			continue
+		}
+		sessionSkipped := f.SkipSession(*s, runningSessions)
+		if sessionSkipped {
+			sess.Skipped = true
+			sess.SkipReason = sessionSkipReason(f, *s, runningSessions)
+			c.SkippedSessions++
+		} else {
+			c.KeptSessions++
+		}
+
+		for _, win := range sess.Children {
+			w, _ := win.Ref.(*snapshot.Window)
+			if w == nil {
+				continue
+			}
+			// A window is "skipped" if its session is skipped OR every pane in it
+			// would be skipped. filter.Filter.SkipWindow already encodes the
+			// all-panes-idle check; we OR with session-skipped here.
+			windowSkipped := sessionSkipped || f.SkipWindow(*w)
+			if windowSkipped {
+				win.Skipped = true
+				if win.SkipReason == "" {
+					if sessionSkipped {
+						win.SkipReason = sess.SkipReason
+					} else {
+						win.SkipReason = "all panes idle"
+					}
+				}
+				c.SkippedWindows++
+			} else {
+				c.KeptWindows++
+			}
+
+			for _, pane := range win.Children {
+				p, _ := pane.Ref.(*snapshot.Pane)
+				if p == nil {
+					continue
+				}
+				paneSkipped := windowSkipped || f.SkipPane(*p)
+				if paneSkipped {
+					pane.Skipped = true
+					if pane.SkipReason == "" {
+						switch {
+						case sessionSkipped:
+							pane.SkipReason = sess.SkipReason
+						case f.SkipPane(*p):
+							pane.SkipReason = "idle shell"
+						default:
+							pane.SkipReason = "all panes idle"
+						}
+					}
+					c.SkippedPanes++
+				} else {
+					c.KeptPanes++
+				}
+			}
+		}
+	}
+	return c
+}
+
+func sessionSkipReason(f filter.Filter, s snapshot.Session, running map[string]bool) string {
+	if f.DedupRunningServer && running[s.Name] {
+		return "running"
+	}
+	return "stale"
 }
