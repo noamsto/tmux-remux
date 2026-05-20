@@ -1,6 +1,8 @@
 package picker
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -89,6 +91,18 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case key.Matches(msg, m.keys.Down):
+		if m.cursor < len(m.events)-1 {
+			m.cursor++
+			(&m).ensureManifest()
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		if m.cursor > 0 {
+			m.cursor--
+			(&m).ensureManifest()
+		}
+		return m, nil
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Tab):
@@ -123,3 +137,58 @@ func (m PickerModel) SelectedManifest() snapshot.Manifest {
 
 // Focus returns the current focus zone (exported for tests).
 func (m PickerModel) Focus() FocusZone { return m.focus }
+
+// Cursor returns the current cursor position (exported for tests).
+func (m PickerModel) Cursor() int { return m.cursor }
+
+// TreeFor returns the cached tree for the event with the given ID, or nil.
+func (m PickerModel) TreeFor(id int64) *TreeNode { return m.trees[id] }
+
+// ensureManifest parses + builds + decorates the tree for the cursor's event,
+// caching the result. No-op on cache hit. Records parse errors in
+// m.manifestErrors so View can render "(invalid manifest)".
+func (m *PickerModel) ensureManifest() {
+	if m.cursor < 0 || m.cursor >= len(m.events) {
+		return
+	}
+	ev := m.events[m.cursor]
+	if _, ok := m.manifests[ev.ID]; ok {
+		return
+	}
+	if _, bad := m.manifestErrors[ev.ID]; bad {
+		return
+	}
+	man, err := parseEventManifest(ev)
+	if err != nil {
+		m.manifestErrors[ev.ID] = err
+		return
+	}
+	m.manifests[ev.ID] = man
+	tree := BuildTree(man)
+	FilterDecorate(tree, m.filter, m.runningSet)
+	m.trees[ev.ID] = tree
+}
+
+func parseEventManifest(ev store.Event) (snapshot.Manifest, error) {
+	var m snapshot.Manifest
+	if ev.Kind == "snapshot" {
+		if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
+			return snapshot.Manifest{}, err
+		}
+		return m, nil
+	}
+	// Close events wrap the index inside an "index" key.
+	var wrapped struct {
+		Index json.RawMessage `json:"index"`
+	}
+	if err := json.Unmarshal([]byte(ev.ManifestJSON), &wrapped); err != nil {
+		return snapshot.Manifest{}, err
+	}
+	if len(wrapped.Index) == 0 {
+		return snapshot.Manifest{}, fmt.Errorf("close event has no index")
+	}
+	if err := json.Unmarshal(wrapped.Index, &m); err != nil {
+		return snapshot.Manifest{}, err
+	}
+	return m, nil
+}
