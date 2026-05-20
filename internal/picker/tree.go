@@ -31,8 +31,8 @@ type TreeNode struct {
 // Counts is what FilterDecorate returns so the View can render
 // "<KeptPanes> panes / <SkippedPanes> skipped" in the footer.
 type Counts struct {
-	KeptSessions, KeptWindows, KeptPanes           int
-	SkippedSessions, SkippedWindows, SkippedPanes  int
+	KeptSessions, KeptWindows, KeptPanes          int
+	SkippedSessions, SkippedWindows, SkippedPanes int
 }
 
 // BuildTree converts a manifest into a virtual root whose Children are session
