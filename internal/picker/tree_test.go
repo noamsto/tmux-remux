@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/picker"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 )
@@ -92,5 +93,41 @@ func TestBuildTree_PaneLabel_HomeRelativeCwd(t *testing.T) {
 	got := root.Children[0].Children[0].Children[0].Label
 	if !strings.Contains(got, "~/work") {
 		t.Errorf("pane label = %q, want it to contain ~/work", got)
+	}
+}
+
+func TestFilterDecorate_NoToggles_AllKept(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s",
+			Windows: []snapshot.Window{{
+				Name: "w",
+				Panes: []snapshot.Pane{
+					{Index: 0, Command: "fish"},
+					{Index: 1, Command: "nvim", ChildCount: 1},
+				},
+			}},
+		}},
+	}
+	root := picker.BuildTree(m)
+	counts := picker.FilterDecorate(root, filter.Filter{}, nil)
+
+	if counts.KeptPanes != 2 || counts.SkippedPanes != 0 {
+		t.Errorf("counts = %+v, want kept=2 skipped=0", counts)
+	}
+	for _, sess := range root.Children {
+		if sess.Skipped {
+			t.Errorf("session %q skipped with default filter", sess.Label)
+		}
+		for _, w := range sess.Children {
+			if w.Skipped {
+				t.Errorf("window %q skipped with default filter", w.Label)
+			}
+			for _, p := range w.Children {
+				if p.Skipped {
+					t.Errorf("pane %q skipped with default filter", p.Label)
+				}
+			}
+		}
 	}
 }
