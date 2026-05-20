@@ -177,9 +177,6 @@ func (m PickerModel) CurrentCounts() Counts {
 	return FilterDecorate(tree, m.filter, m.runningSet)
 }
 
-// View is implemented in view.go.
-func (m PickerModel) View() tea.View { return tea.NewView("") }
-
 // Filter returns the current filter for caller-side BuildPlan.
 func (m PickerModel) Filter() filter.Filter { return m.filter }
 
