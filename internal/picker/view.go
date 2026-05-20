@@ -23,8 +23,8 @@ func (m PickerModel) View() tea.View {
 		return tea.NewView(lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width)))
 	}
 
-	_ = treeWidth // tree pane lands in Task 14
-	body := list  // for now; Task 14 adds the joined tree
+	tree := renderTree(m, treeWidth)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
 	return tea.NewView(lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width)))
 }
 
@@ -73,6 +73,58 @@ func renderList(m PickerModel, width int) string {
 		b.WriteString("\n")
 	}
 	return listFrame.Width(width).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+func renderTree(m PickerModel, width int) string {
+	if m.cursor < 0 || m.cursor >= len(m.events) {
+		return treeFrame.Width(width).Render("")
+	}
+	ev := m.events[m.cursor]
+	if err, bad := m.manifestErrors[ev.ID]; bad {
+		return treeFrame.Width(width).Render(footerWarn.Render("(invalid manifest)") + "\n" + skipReason.Render(err.Error()))
+	}
+	tree := m.trees[ev.ID]
+	if tree == nil {
+		return treeFrame.Width(width).Render(rowDim.Render("(loading...)"))
+	}
+	if len(tree.Children) == 0 {
+		return treeFrame.Width(width).Render(rowDim.Render("(empty snapshot)"))
+	}
+
+	var b strings.Builder
+	header := fmt.Sprintf("Contents (#%d)", ev.ID)
+	b.WriteString(lipgloss.NewStyle().Foreground(colBlue).Bold(true).Render(header))
+	b.WriteString("\n")
+	for _, sess := range tree.Children {
+		writeNode(&b, sess, 0)
+	}
+	return treeFrame.Width(width).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+func writeNode(b *strings.Builder, n *TreeNode, depth int) {
+	indent := strings.Repeat("  ", depth)
+	bullet := "•"
+	if len(n.Children) > 0 {
+		if n.Expanded {
+			bullet = "▾"
+		} else {
+			bullet = "▸"
+		}
+	}
+	label := n.Label
+	style := nodeKept
+	if n.Skipped {
+		style = nodeSkipped
+		if n.SkipReason != "" {
+			label = label + "  " + skipReason.Render("("+n.SkipReason+")")
+		}
+	}
+	b.WriteString(fmt.Sprintf("%s%s %s\n", indent, bullet, style.Render(label)))
+	if n.Expanded {
+		for _, c := range n.Children {
+			writeNode(b, c, depth+1)
+		}
+	}
 }
 
 // shortReason truncates "hook:window-linked" to "wlink", "timer" to "timer",
