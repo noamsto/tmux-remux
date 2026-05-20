@@ -119,13 +119,22 @@ func renderTree(m PickerModel, width int) string {
 	header := fmt.Sprintf("Contents (#%d)", ev.ID)
 	b.WriteString(lipgloss.NewStyle().Foreground(colBlue).Bold(true).Render(header))
 	b.WriteString("\n")
+
+	highlightIdx := -1
+	if m.focus == focusTree {
+		highlightIdx = m.treeCursor
+	}
+	idx := 0
 	for _, sess := range tree.Children {
-		writeNode(&b, sess, 0)
+		writeNode(&b, sess, 0, &idx, highlightIdx)
 	}
 	return treeFrame.Width(width).Render(strings.TrimRight(b.String(), "\n"))
 }
 
-func writeNode(b *strings.Builder, n *TreeNode, depth int) {
+// writeNode appends a rendered row for n and its visible descendants.
+// idx tracks the position in the flat visible-node list; *idx is incremented
+// for each row written. highlightIdx is the target row to highlight (-1 = none).
+func writeNode(b *strings.Builder, n *TreeNode, depth int, idx *int, highlightIdx int) {
 	indent := strings.Repeat("  ", depth)
 	bullet := "•"
 	if len(n.Children) > 0 {
@@ -143,10 +152,16 @@ func writeNode(b *strings.Builder, n *TreeNode, depth int) {
 			label = label + "  " + skipReason.Render("("+n.SkipReason+")")
 		}
 	}
-	b.WriteString(fmt.Sprintf("%s%s %s\n", indent, bullet, style.Render(label)))
+	rendered := fmt.Sprintf("%s%s %s", indent, bullet, style.Render(label))
+	if *idx == highlightIdx {
+		rendered = rowActive.Render(rendered)
+	}
+	b.WriteString(rendered)
+	b.WriteString("\n")
+	*idx++
 	if n.Expanded {
 		for _, c := range n.Children {
-			writeNode(b, c, depth+1)
+			writeNode(b, c, depth+1, idx, highlightIdx)
 		}
 	}
 }

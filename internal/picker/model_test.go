@@ -159,3 +159,24 @@ func TestModel_ViewRendersWithoutPanic(t *testing.T) {
 		t.Errorf("expected session label in view, got:\n%s", out)
 	}
 }
+
+func TestModel_ViewHighlightsTreeCursor(t *testing.T) {
+	events := []store.Event{{
+		ID: 1, Ts: time.Now().UnixMilli(), Kind: "snapshot",
+		ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[{"index":0,"command":"fish"}]}]}]}`,
+	}}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+	// Resize so two-pane mode kicks in.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	pm := upd.(picker.PickerModel)
+	// Move focus to tree.
+	upd, _ = pm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	pm = upd.(picker.PickerModel)
+	out := pm.View().Content
+	// Active row style sets a mauve background (#cba6f7 = 203;166;247 in 24-bit SGR).
+	// When focus is on the tree pane, the first visible node must be highlighted.
+	if !strings.Contains(out, "203;166;247") {
+		t.Errorf("expected mauve-background highlight in tree pane, got:\n%s", out)
+	}
+}
