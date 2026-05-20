@@ -42,6 +42,7 @@ type PickerModel struct {
 	mode           Mode
 	events         []store.Event
 	cursor         int
+	treeCursor     int                         // index into the flattened visible-node list
 	manifests      map[int64]snapshot.Manifest // lazy parse cache
 	trees          map[int64]*TreeNode         // lazy build cache
 	manifestErrors map[int64]error             // remember parse failures
@@ -89,17 +90,79 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// visibleNodes flattens the current tree honoring Expanded.
+func (m PickerModel) visibleNodes() []*TreeNode {
+	if m.cursor < 0 || m.cursor >= len(m.events) {
+		return nil
+	}
+	tree := m.trees[m.events[m.cursor].ID]
+	if tree == nil {
+		return nil
+	}
+	var out []*TreeNode
+	var walk func(n *TreeNode)
+	walk = func(n *TreeNode) {
+		out = append(out, n)
+		if n.Expanded {
+			for _, c := range n.Children {
+				walk(c)
+			}
+		}
+	}
+	for _, sess := range tree.Children {
+		walk(sess)
+	}
+	return out
+}
+
+// VisibleNodes exports visibleNodes for tests.
+func (m PickerModel) VisibleNodes() []*TreeNode { return m.visibleNodes() }
+
 func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Focus-tree key handling for ModeSnapshot: intercept Up/Down/Left/Right.
+	if m.mode == ModeSnapshot && m.focus == focusTree {
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.treeCursor > 0 {
+				m.treeCursor--
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Down):
+			nodes := m.visibleNodes()
+			if m.treeCursor < len(nodes)-1 {
+				m.treeCursor++
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Right):
+			nodes := m.visibleNodes()
+			if m.treeCursor < len(nodes) && len(nodes[m.treeCursor].Children) > 0 {
+				nodes[m.treeCursor].Expanded = true
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Left):
+			nodes := m.visibleNodes()
+			if m.treeCursor < len(nodes) {
+				n := nodes[m.treeCursor]
+				if n.Expanded && len(n.Children) > 0 {
+					n.Expanded = false
+				}
+			}
+			return m, nil
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.events)-1 {
 			m.cursor++
+			m.treeCursor = 0
 			(&m).ensureManifest()
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
+			m.treeCursor = 0
 			(&m).ensureManifest()
 		}
 		return m, nil

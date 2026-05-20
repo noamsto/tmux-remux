@@ -111,6 +111,35 @@ func TestModel_EnterBlockedOnParseError(t *testing.T) {
 	}
 }
 
+func TestModel_TreeRightExpands_LeftCollapses(t *testing.T) {
+	events := []store.Event{{
+		ID: 1, Kind: "snapshot",
+		ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[
+			{"index":0,"command":"fish"}
+		]}]}]}`,
+	}}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+	// Move focus to tree.
+	upd, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	pm := upd.(picker.PickerModel)
+	// Default: session expanded, window expanded, pane collapsed.
+	// Cursor is at the session (index 0). Press Left to collapse.
+	upd, _ = pm.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	pm = upd.(picker.PickerModel)
+	nodes := pm.VisibleNodes()
+	if len(nodes) != 1 {
+		t.Errorf("after collapse: visible=%d, want 1 (just the session)", len(nodes))
+	}
+	// Press Right to expand again.
+	upd, _ = pm.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	pm = upd.(picker.PickerModel)
+	nodes = pm.VisibleNodes()
+	if len(nodes) < 2 {
+		t.Errorf("after expand: visible=%d, want >=2", len(nodes))
+	}
+}
+
 func TestModel_ViewRendersWithoutPanic(t *testing.T) {
 	events := []store.Event{
 		{ID: 1, Ts: time.Now().UnixMilli(), Kind: "snapshot",
