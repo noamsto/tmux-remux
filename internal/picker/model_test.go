@@ -71,3 +71,40 @@ func TestModel_CursorMoveTriggersManifestParse(t *testing.T) {
 		t.Errorf("tree for event 2 not built correctly: %+v", tree)
 	}
 }
+
+func TestModel_EnterRecordsSelectedID(t *testing.T) {
+	events := []store.Event{
+		{ID: 7, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[]}]}`},
+	}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	pm := updated.(picker.PickerModel)
+	if pm.SelectedID() != 7 {
+		t.Errorf("selectedID=%d, want 7", pm.SelectedID())
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd, got nil")
+	}
+}
+
+func TestModel_EnterBlockedOnParseError(t *testing.T) {
+	events := []store.Event{
+		{ID: 9, Kind: "snapshot", ManifestJSON: `{not json`},
+	}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	pm := updated.(picker.PickerModel)
+	if pm.SelectedID() != 0 {
+		t.Errorf("selectedID=%d, want 0 (blocked)", pm.SelectedID())
+	}
+	if cmd != nil {
+		t.Error("expected no quit cmd on parse error")
+	}
+	if pm.FooterNote() == "" {
+		t.Error("expected footer warning to be set")
+	}
+}

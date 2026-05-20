@@ -129,6 +129,21 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.dimOlderThan = 0
 		}
 		return m, nil
+	case key.Matches(msg, m.keys.Enter):
+		if m.cursor < 0 || m.cursor >= len(m.events) {
+			return m, nil
+		}
+		ev := m.events[m.cursor]
+		if _, bad := m.manifestErrors[ev.ID]; bad {
+			m.footerNote = "(invalid manifest — cannot restore)"
+			return m, nil
+		}
+		if _, ok := m.manifests[ev.ID]; !ok {
+			m.footerNote = "(manifest not loaded yet)"
+			return m, nil
+		}
+		m.selectedID = ev.ID
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -184,6 +199,9 @@ func (m PickerModel) Focus() FocusZone { return m.focus }
 
 // Cursor returns the current cursor position (exported for tests).
 func (m PickerModel) Cursor() int { return m.cursor }
+
+// FooterNote returns the transient warning text (exported for tests + view).
+func (m PickerModel) FooterNote() string { return m.footerNote }
 
 // TreeFor returns the cached tree for the event with the given ID, or nil.
 func (m PickerModel) TreeFor(id int64) *TreeNode { return m.trees[id] }
