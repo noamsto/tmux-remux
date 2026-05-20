@@ -204,3 +204,41 @@ func TestFilterDecorate_Table(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterDecorate_IsIdempotent_AndClearsStale(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s",
+			Windows: []snapshot.Window{{
+				Name: "w",
+				Panes: []snapshot.Pane{
+					{Index: 0, Command: "fish", ChildCount: 0}, // idle
+					{Index: 1, Command: "nvim", ChildCount: 0},
+				},
+			}},
+		}},
+	}
+	root := picker.BuildTree(m)
+
+	// 1. With skip-idle ON: fish is skipped.
+	c := picker.FilterDecorate(root, filter.Filter{SkipIdleShells: true}, nil)
+	if c.SkippedPanes != 1 {
+		t.Fatalf("first call: SkippedPanes=%d, want 1", c.SkippedPanes)
+	}
+	fishNode := root.Children[0].Children[0].Children[0]
+	if !fishNode.Skipped {
+		t.Fatalf("first call: fish pane should be Skipped")
+	}
+
+	// 2. With skip-idle OFF: fish must no longer be marked skipped.
+	c = picker.FilterDecorate(root, filter.Filter{}, nil)
+	if c.SkippedPanes != 0 {
+		t.Errorf("after toggle off: SkippedPanes=%d, want 0", c.SkippedPanes)
+	}
+	if fishNode.Skipped {
+		t.Errorf("after toggle off: fish pane.Skipped=true, want false")
+	}
+	if fishNode.SkipReason != "" {
+		t.Errorf("after toggle off: fish pane.SkipReason=%q, want empty", fishNode.SkipReason)
+	}
+}

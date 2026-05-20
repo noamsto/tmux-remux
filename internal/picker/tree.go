@@ -110,6 +110,8 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 		if s == nil {
 			continue
 		}
+		sess.Skipped = false
+		sess.SkipReason = ""
 		sessionSkipped := f.SkipSession(*s, runningSessions)
 		if sessionSkipped {
 			sess.Skipped = true
@@ -124,18 +126,18 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 			if w == nil {
 				continue
 			}
+			win.Skipped = false
+			win.SkipReason = ""
 			// A window is "skipped" if its session is skipped OR every pane in it
 			// would be skipped. filter.Filter.SkipWindow already encodes the
 			// all-panes-idle check; we OR with session-skipped here.
 			windowSkipped := sessionSkipped || f.SkipWindow(*w)
 			if windowSkipped {
 				win.Skipped = true
-				if win.SkipReason == "" {
-					if sessionSkipped {
-						win.SkipReason = sess.SkipReason
-					} else {
-						win.SkipReason = "all panes idle"
-					}
+				if sessionSkipped {
+					win.SkipReason = sess.SkipReason
+				} else {
+					win.SkipReason = "all panes idle"
 				}
 				c.SkippedWindows++
 			} else {
@@ -147,18 +149,18 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 				if p == nil {
 					continue
 				}
+				pane.Skipped = false
+				pane.SkipReason = ""
 				paneSkipped := windowSkipped || f.SkipPane(*p)
 				if paneSkipped {
 					pane.Skipped = true
-					if pane.SkipReason == "" {
-						switch {
-						case sessionSkipped:
-							pane.SkipReason = sess.SkipReason
-						case f.SkipPane(*p):
-							pane.SkipReason = "idle shell"
-						default:
-							pane.SkipReason = "all panes idle"
-						}
+					switch {
+					case sessionSkipped:
+						pane.SkipReason = sess.SkipReason
+					case f.SkipPane(*p):
+						pane.SkipReason = "idle shell"
+					default:
+						pane.SkipReason = "all panes idle"
 					}
 					c.SkippedPanes++
 				} else {
