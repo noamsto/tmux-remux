@@ -1,7 +1,7 @@
 # Restore Picker — Tree Preview & Filter Toggles
 
 **Date:** 2026-05-20
-**Status:** Approved (design)
+**Status:** Draft — awaiting user review
 **Supersedes:** the fzf wrapper in `internal/picker/picker.go`
 
 ## Problem
@@ -60,7 +60,7 @@ Before hitting enter the user has no way to see *what's in* a snapshot — which
 
 ### Narrow terminal fallback
 
-If `width < 80` cells, collapse to single pane (list-only). Pressing enter on a row opens a modal-style tree overlay; esc returns to the list. This degrades automatically without a separate code path beyond a width check in the View.
+If `width < 80` cells, collapse to single pane (list-only). Pressing enter on a row opens a modal-style tree overlay; esc returns to the list. The footer stays visible at the bottom in both states, so filter toggles remain accessible whether you're in the list or the modal. This degrades automatically without a separate code path beyond a width check in the View.
 
 ### Keys
 
@@ -97,7 +97,7 @@ cmd/tmux-state/main.go → newPickCmd() wires the model and runs tea.NewProgram
 
 Two units carry most of the logic:
 
-**`tree.go` (pure)** — owns the data transform. No tea, no I/O.
+**`tree.go` (deterministic, no I/O)** — owns the data transform. `BuildTree` is pure; `FilterDecorate` mutates `Skipped`/`SkipReason` on the input tree in place (the alternative — a parallel decoration map — costs allocations on every keystroke for no semantic gain).
 
 ```go
 type NodeKind int
@@ -117,10 +117,17 @@ type TreeNode struct {
 }
 
 func BuildTree(m snapshot.Manifest) *TreeNode
-func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]bool) (kept, skipped int)
+func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]bool) Counts
+
+type Counts struct {
+    KeptSessions, KeptWindows, KeptPanes        int
+    SkippedSessions, SkippedWindows, SkippedPanes int
+}
 ```
 
 Critically, `FilterDecorate` calls into the existing `filter.Filter` methods (`SkipSession`, `SkipWindow`, `SkipPane`). The picker can never drift from `restore --auto` because both code paths go through the same predicate.
+
+The footer counter renders `<KeptPanes> panes / <SkippedPanes> skipped` — panes are the unit users actually care about (a "kept" session with all panes skipped restores nothing useful). Sessions and window counts are available to the View if a richer breakdown is wanted later.
 
 **`model.go`** — owns TUI state only.
 
@@ -145,7 +152,7 @@ type PickerModel struct {
 - `tea.Quit` with `selectedID == 0` on cancel (esc/ctrl-c/q).
 - Stays in-place when the highlighted event has an unparsable manifest (footer shows the parse error briefly).
 
-The `cmd/tmux-state` wiring runs the program, then — if a non-zero `selectedID` came back — calls `restore.BuildPlan(manifest, model.Filter(), nil, buildOpts)` followed by `restore.Apply(ctx, t, plan)`. The actual restore stays outside the Tea model so it doesn't have to swallow tmux I/O.
+The `cmd/tmux-state` wiring runs the program, then — if a non-zero `selectedID` came back — pulls the cached manifest via `model.SelectedManifest()` and the filter via `model.Filter()`, calls `restore.BuildPlan(manifest, model.Filter(), nil, buildOpts)`, then `restore.Apply(ctx, t, plan)`. The actual restore stays outside the Tea model so it doesn't have to swallow tmux I/O.
 
 ### Data flow
 
@@ -155,13 +162,17 @@ The `cmd/tmux-state` wiring runs the program, then — if a non-zero `selectedID
 4. **Enter**: model exits with `selectedID`. Caller runs `BuildPlan` + `Apply`. Errors surface to stderr as today.
 5. **Cancel**: model exits with `selectedID == 0`. Caller returns nil — same path as fzf exit-130 today.
 
-## Filter defaults
+## Filter behavior
 
-| Toggle | Default | Notes |
-|---|---|---|
-| skip idle shells | off | Matches today's `pick` behavior (everything restores). |
-| dedup running | **on** | Almost always wanted — avoids spawning a duplicate of a session already attached. |
-| age ≤ 24h | off | List dims older snapshots when on; tree pane unaffected. |
+Two of the three footer toggles map directly to fields on `filter.Filter`; the third is a list-pane predicate that never reaches `BuildPlan`.
+
+| Toggle | Default | Maps to | Scope |
+|---|---|---|---|
+| `s` skip idle shells | off | `filter.Filter.SkipIdleShells = true` | Tree (and restore) |
+| `d` dedup running | **on** | `filter.Filter.DedupRunningServer = true`; `runningSet` is always populated at boot and passed unchanged — the toggle flips the bool, not the map | Tree (and restore) |
+| `a` age ≤ 24h | off | **None.** This is a list-pane predicate that dims rows older than 24h. It does NOT set `filter.Filter.MaxSnapshotAge` (which has the different meaning of "auto-skip the whole snapshot"). | List only |
+
+The caller pulls only the first two via `model.Filter() filter.Filter` and passes that to `restore.BuildPlan`. The `a` toggle lives on `PickerModel` as a separate `dimOlderThan time.Duration` field and only affects list rendering.
 
 Filter state is session-only. No persistence to config. If usage patterns reveal a consistent preference we'll revisit and read from the `config.Config` block that already drives `restoreMode = auto`.
 
