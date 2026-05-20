@@ -28,12 +28,29 @@ func (m PickerModel) View() tea.View {
 	return tea.NewView(lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width)))
 }
 
-// renderFooter is implemented as a stub here; full logic lands in Task 15.
+// renderFooter renders the footer bar with toggle indicators, pane counter, and
+// an optional transient warning note.
 func (m PickerModel) renderFooter(width int) string {
-	if m.footerNote != "" {
-		return footerWarn.Render(m.footerNote)
+	on := func(b bool, label string) string {
+		if b {
+			return footerOn.Render("[" + label + ":●]")
+		}
+		return footerOff.Render("[" + label + ":◯]")
 	}
-	return ""
+	c := m.CurrentCounts()
+	counter := fmt.Sprintf("%d panes / %d skipped", c.KeptPanes, c.SkippedPanes)
+	parts := []string{
+		on(m.filter.SkipIdleShells, "skip idle"),
+		on(m.filter.DedupRunningServer, "dedup running"),
+		on(m.dimOlderThan > 0, "age≤24h"),
+		"  " + counter,
+		"  ↵ restore",
+	}
+	line := strings.Join(parts, "  ")
+	if m.footerNote != "" {
+		line = footerWarn.Render(m.footerNote) + "  " + line
+	}
+	return footerBar.Width(width).Render(line)
 }
 
 // paneWidths splits the available width between list and tree. Returns

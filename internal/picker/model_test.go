@@ -1,7 +1,9 @@
 package picker_test
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/noamsto/tmux-state/internal/picker"
@@ -106,5 +108,25 @@ func TestModel_EnterBlockedOnParseError(t *testing.T) {
 	}
 	if pm.FooterNote() == "" {
 		t.Error("expected footer warning to be set")
+	}
+}
+
+func TestModel_ViewRendersWithoutPanic(t *testing.T) {
+	events := []store.Event{
+		{ID: 1, Ts: time.Now().UnixMilli(), Kind: "snapshot",
+			ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[{"index":0,"command":"fish"}]}]}]}`},
+	}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+	// Simulate a sane terminal size.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	pm := upd.(picker.PickerModel)
+	view := pm.View()
+	out := view.Content // tea.View exposes rendered content via the Content field
+	if out == "" {
+		t.Fatal("View() returned empty string")
+	}
+	if !strings.Contains(out, "s (1w)") {
+		t.Errorf("expected session label in view, got:\n%s", out)
 	}
 }
