@@ -1,6 +1,8 @@
 package picker_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/picker"
@@ -70,4 +72,25 @@ func TestBuildTree_TwoSessionsTwoWindowsTwoPanes(t *testing.T) {
 	}
 	// Pane label format: "zsh    ~/lazytmux" (HOME-relative via shellexpand).
 	// Exact home-relative formatting is asserted in a focused test below.
+}
+
+func TestBuildTree_PaneLabel_HomeRelativeCwd(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no HOME")
+	}
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s",
+			Windows: []snapshot.Window{{
+				Name:  "w",
+				Panes: []snapshot.Pane{{Cwd: home + "/work", Command: "fish"}},
+			}},
+		}},
+	}
+	root := picker.BuildTree(m)
+	got := root.Children[0].Children[0].Children[0].Label
+	if !strings.Contains(got, "~/work") {
+		t.Errorf("pane label = %q, want it to contain ~/work", got)
+	}
 }

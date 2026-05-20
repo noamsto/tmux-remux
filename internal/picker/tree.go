@@ -2,6 +2,10 @@
 package picker
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 )
@@ -39,7 +43,57 @@ type Counts struct {
 // nodes. The root itself has Kind=NodeSession and Label="" — callers iterate
 // root.Children rather than rendering the root.
 func BuildTree(m snapshot.Manifest) *TreeNode {
-	return nil // intentionally unimplemented; Task 3 fills this in
+	root := &TreeNode{Kind: NodeSession, Expanded: true}
+	for i := range m.Sessions {
+		s := &m.Sessions[i]
+		sessionNode := &TreeNode{
+			Kind:     NodeSession,
+			Label:    sessionLabel(s),
+			Ref:      s,
+			Expanded: true,
+		}
+		for j := range s.Windows {
+			w := &s.Windows[j]
+			windowNode := &TreeNode{
+				Kind:     NodeWindow,
+				Label:    windowLabel(w),
+				Ref:      w,
+				Expanded: true,
+			}
+			for k := range w.Panes {
+				p := &w.Panes[k]
+				windowNode.Children = append(windowNode.Children, &TreeNode{
+					Kind:     NodePane,
+					Label:    paneLabel(p),
+					Ref:      p,
+					Expanded: false,
+				})
+			}
+			sessionNode.Children = append(sessionNode.Children, windowNode)
+		}
+		root.Children = append(root.Children, sessionNode)
+	}
+	return root
+}
+
+func sessionLabel(s *snapshot.Session) string {
+	return fmt.Sprintf("%s (%dw)", s.Name, len(s.Windows))
+}
+
+func windowLabel(w *snapshot.Window) string {
+	return fmt.Sprintf("%d: %s (%dp)", w.Index, w.Name, len(w.Panes))
+}
+
+func paneLabel(p *snapshot.Pane) string {
+	cwd := p.Cwd
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+		cwd = "~" + strings.TrimPrefix(cwd, home)
+	}
+	cmd := p.Command
+	if cmd == "" {
+		cmd = "(none)"
+	}
+	return fmt.Sprintf("%-7s %s", cmd, cwd)
 }
 
 // FilterDecorate walks the tree and marks each node Skipped/SkipReason based on
