@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -339,7 +340,8 @@ func newListCmd() *cobra.Command {
 					return nil
 				}
 				for _, ev := range evs {
-					fmt.Println(picker.FormatRow(ev))
+					t := time.UnixMilli(ev.Ts).Format("2006-01-02 15:04:05")
+					fmt.Printf("%d\t%s  %-15s  %s\n", ev.ID, t, ev.Kind, ev.Reason)
 				}
 				return nil
 			})
