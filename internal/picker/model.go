@@ -114,8 +114,52 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case key.Matches(msg, m.keys.ToggleIdle):
+		m.filter.SkipIdleShells = !m.filter.SkipIdleShells
+		(&m).redecorate()
+		return m, nil
+	case key.Matches(msg, m.keys.ToggleDedup):
+		m.filter.DedupRunningServer = !m.filter.DedupRunningServer
+		(&m).redecorate()
+		return m, nil
+	case key.Matches(msg, m.keys.ToggleAge):
+		if m.dimOlderThan == 0 {
+			m.dimOlderThan = 24 * time.Hour
+		} else {
+			m.dimOlderThan = 0
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+// redecorate runs FilterDecorate over every cached tree with the current
+// filter state. Cheap — O(nodes) and only over what's been viewed.
+func (m *PickerModel) redecorate() {
+	for _, tree := range m.trees {
+		FilterDecorate(tree, m.filter, m.runningSet)
+	}
+}
+
+// Bootstrap parses the manifest for the initial cursor position. Call once
+// after construction; the cobra wiring does this so View has data on first
+// render. Idempotent.
+func (m *PickerModel) Bootstrap() {
+	m.ensureManifest()
+}
+
+// CurrentCounts returns FilterDecorate's most recent output for the cursor's
+// event. Used by the footer and by tests.
+func (m PickerModel) CurrentCounts() Counts {
+	if m.cursor < 0 || m.cursor >= len(m.events) {
+		return Counts{}
+	}
+	tree := m.trees[m.events[m.cursor].ID]
+	if tree == nil {
+		return Counts{}
+	}
+	// FilterDecorate mutates in place; rerun to read counts cheaply.
+	return FilterDecorate(tree, m.filter, m.runningSet)
 }
 
 // View is implemented in view.go.

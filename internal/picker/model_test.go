@@ -27,6 +27,33 @@ func TestModel_TabSwitchesFocus_SnapshotMode(t *testing.T) {
 	}
 }
 
+func TestModel_ToggleIdleUpdatesCounter(t *testing.T) {
+	events := []store.Event{
+		{
+			ID: 1, Kind: "snapshot",
+			ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[
+				{"index":0,"command":"fish","child_count":0},
+				{"index":1,"command":"nvim","child_count":0}
+			]}]}]}`,
+		},
+	}
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m.Bootstrap()
+
+	// Before toggle: 2 panes kept.
+	if c := m.CurrentCounts(); c.KeptPanes != 2 || c.SkippedPanes != 0 {
+		t.Fatalf("before toggle: counts=%+v", c)
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's'})
+	pm := updated.(picker.PickerModel)
+
+	// After "skip idle shells": fish (idle) skipped, nvim kept.
+	if c := pm.CurrentCounts(); c.KeptPanes != 1 || c.SkippedPanes != 1 {
+		t.Errorf("after toggle: counts=%+v", c)
+	}
+}
+
 func TestModel_CursorMoveTriggersManifestParse(t *testing.T) {
 	events := []store.Event{
 		{ID: 1, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[{"name":"a","windows":[]}]}`},
