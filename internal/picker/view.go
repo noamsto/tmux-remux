@@ -12,20 +12,27 @@ import (
 // View renders the full picker UI. Called by Bubble Tea after every Update.
 func (m PickerModel) View() tea.View {
 	if m.showHelp {
-		return tea.NewView(m.help.View(m.keys))
+		v := tea.NewView(m.help.View(m.keys))
+		v.AltScreen = true
+		return v
 	}
 
 	listWidth, treeWidth := m.paneWidths()
 	list := renderList(m, listWidth)
 
+	var content string
 	if m.mode == ModeClose || m.width < 80 {
 		// Close mode and narrow mode: list-only at this scale.
-		return tea.NewView(lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width)))
+		content = lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width))
+	} else {
+		tree := renderTree(m, treeWidth)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
+		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
 	}
 
-	tree := renderTree(m, treeWidth)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
-	return tea.NewView(lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width)))
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 // renderFooter renders the footer bar with toggle indicators, pane counter, and
