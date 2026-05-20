@@ -192,6 +192,9 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.dimOlderThan = 0
 		}
 		return m, nil
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = !m.showHelp
+		return m, nil
 	case key.Matches(msg, m.keys.Enter):
 		if m.cursor < 0 || m.cursor >= len(m.events) {
 			return m, nil
