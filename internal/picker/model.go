@@ -157,19 +157,19 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.treeCursor > 0 {
 				m.treeCursor--
 			}
-			return m, nil
+			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Down):
 			nodes := m.visibleNodes()
 			if m.treeCursor < len(nodes)-1 {
 				m.treeCursor++
 			}
-			return m, nil
+			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Right):
 			nodes := m.visibleNodes()
 			if m.treeCursor < len(nodes) && len(nodes[m.treeCursor].Children) > 0 {
 				nodes[m.treeCursor].Expanded = true
 			}
-			return m, nil
+			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Left):
 			nodes := m.visibleNodes()
 			if m.treeCursor < len(nodes) {
@@ -178,7 +178,7 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					n.Expanded = false
 				}
 			}
-			return m, nil
+			return m, (&m).PreviewCmd()
 		}
 	}
 
@@ -189,14 +189,14 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.treeCursor = 0
 			(&m).ensureManifest()
 		}
-		return m, nil
+		return m, (&m).PreviewCmd()
 	case key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 			m.treeCursor = 0
 			(&m).ensureManifest()
 		}
-		return m, nil
+		return m, (&m).PreviewCmd()
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Tab):
@@ -207,7 +207,7 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.focus = focusList
 			}
 		}
-		return m, nil
+		return m, (&m).PreviewCmd()
 	case key.Matches(msg, m.keys.ToggleIdle):
 		m.filter.SkipIdleShells = !m.filter.SkipIdleShells
 		(&m).redecorate()
@@ -299,6 +299,49 @@ func (m PickerModel) FooterNote() string { return m.footerNote }
 
 // TreeFor returns the cached tree for the event with the given ID, or nil.
 func (m PickerModel) TreeFor(id int64) *TreeNode { return m.trees[id] }
+
+// PreviewCmd returns a tea.Cmd that loads the scrollback for the currently
+// focused tree-pane node, or nil if no load is needed (wrong focus, no SHA,
+// cached, already loading, or no scrollback store).
+func (m *PickerModel) PreviewCmd() tea.Cmd {
+	sha := m.focusedPaneSHA()
+	if sha == "" || m.scrollbackStore == nil {
+		return nil
+	}
+	if _, cached := m.scrollbacks[sha]; cached {
+		return nil
+	}
+	if _, errored := m.scrollbackErrors[sha]; errored {
+		return nil
+	}
+	if m.loadingSHAs[sha] {
+		return nil
+	}
+	m.loadingSHAs[sha] = true
+	return loadScrollbackCmd(m.scrollbackStore, sha)
+}
+
+// focusedPaneSHA returns the ScrollbackSHA of the currently focused tree-pane
+// node, or "" if focus is not on the tree, the node is not a pane, or the
+// pane has no scrollback.
+func (m PickerModel) focusedPaneSHA() string {
+	if m.mode != ModeSnapshot || m.focus != focusTree {
+		return ""
+	}
+	nodes := m.visibleNodes()
+	if m.treeCursor < 0 || m.treeCursor >= len(nodes) {
+		return ""
+	}
+	n := nodes[m.treeCursor]
+	if n.Kind != NodePane {
+		return ""
+	}
+	p, ok := n.Ref.(*snapshot.Pane)
+	if !ok || p == nil {
+		return ""
+	}
+	return p.ScrollbackSHA
+}
 
 // ensureManifest parses + builds + decorates the tree for the cursor's event,
 // caching the result. No-op on cache hit. Records parse errors in

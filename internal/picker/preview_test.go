@@ -2,12 +2,15 @@ package picker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"strings"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/scrollback"
+	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-state/internal/store"
 )
 
 func TestLoadScrollbackCmd_ReturnsContent(t *testing.T) {
@@ -80,5 +83,60 @@ func TestPickerModel_RemembersScrollbackError(t *testing.T) {
 	final := updated.(PickerModel)
 	if got := final.ScrollbackError("deadbeef"); !errors.Is(got, wantErr) {
 		t.Fatalf("expected %v, got %v", wantErr, got)
+	}
+}
+
+func TestPickerModel_FocusedPaneTriggersLoad(t *testing.T) {
+	// Build a minimal manifest with one pane carrying a scrollback SHA.
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{{
+				Index: 0, Name: "w1",
+				Panes: []snapshot.Pane{{Index: 0, Cwd: "/tmp", Command: "bash", ScrollbackSHA: "abc123"}},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	tmp := t.TempDir()
+	sb := scrollback.New(tmp)
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, sb)
+	m.Bootstrap()
+	// Focus tree, then walk cursor down session → window → pane.
+	m.focus = focusTree
+	m.treeCursor = 2 // session(0) → window(1) → pane(2)
+
+	cmd := m.PreviewCmd()
+	if cmd == nil {
+		t.Fatal("PreviewCmd returned nil for a pane with scrollback")
+	}
+}
+
+func TestPickerModel_NoLoadWhenAlreadyCached(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Windows: []snapshot.Window{{
+				Panes: []snapshot.Pane{{ScrollbackSHA: "abc123"}},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+	tmp := t.TempDir()
+	sb := scrollback.New(tmp)
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, sb)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = 2
+	m.scrollbacks["abc123"] = []byte("cached")
+
+	if cmd := m.PreviewCmd(); cmd != nil {
+		t.Fatal("PreviewCmd should be nil when SHA already cached")
 	}
 }
