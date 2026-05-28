@@ -78,7 +78,7 @@ func TestPickerModel_RemembersScrollbackError(t *testing.T) {
 	msg := scrollbackLoadedMsg{sha: "deadbeef", err: wantErr}
 	updated, _ := m.Update(msg)
 	final := updated.(PickerModel)
-	if err := final.ScrollbackError("deadbeef"); err == nil {
-		t.Fatal("expected cached error, got nil")
+	if got := final.ScrollbackError("deadbeef"); !errors.Is(got, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, got)
 	}
 }
