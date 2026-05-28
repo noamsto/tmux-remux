@@ -162,7 +162,6 @@ func TestModel_ViewRendersWithoutPanic(t *testing.T) {
 }
 
 func TestNewPickerModel_AcceptsScrollbackStore(t *testing.T) {
-	t.Helper()
 	tmp := t.TempDir()
 	sb := scrollback.New(tmp)
 	m := picker.NewPickerModel(picker.ModeSnapshot, nil, nil, sb)
