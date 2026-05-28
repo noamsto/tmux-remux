@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/noamsto/tmux-state/internal/filter"
+	"github.com/noamsto/tmux-state/internal/scrollback"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 	"github.com/noamsto/tmux-state/internal/store"
 )
@@ -39,41 +40,47 @@ const (
 
 // PickerModel is the Bubble Tea model for the restore picker.
 type PickerModel struct {
-	mode           Mode
-	events         []store.Event
-	cursor         int
-	treeCursor     int                         // index into the flattened visible-node list
-	manifests      map[int64]snapshot.Manifest // lazy parse cache
-	trees          map[int64]*TreeNode         // lazy build cache
-	manifestErrors map[int64]error             // remember parse failures
-	filter         filter.Filter
-	dimOlderThan   time.Duration // list-pane only; 0 = no dimming
-	runningSet     map[string]bool
-	keys           keyMap
-	help           help.Model
-	width, height  int
-	focus          focusZone
-	showHelp       bool
-	footerNote     string // transient warning text
-	selectedID     int64  // 0 = no selection (cancelled)
+	mode            Mode
+	events          []store.Event
+	cursor          int
+	treeCursor      int                         // index into the flattened visible-node list
+	manifests       map[int64]snapshot.Manifest // lazy parse cache
+	trees           map[int64]*TreeNode         // lazy build cache
+	manifestErrors  map[int64]error             // remember parse failures
+	filter          filter.Filter
+	dimOlderThan    time.Duration // list-pane only; 0 = no dimming
+	runningSet      map[string]bool
+	keys            keyMap
+	help            help.Model
+	width, height   int
+	focus           focusZone
+	showHelp        bool
+	footerNote      string // transient warning text
+	selectedID      int64  // 0 = no selection (cancelled)
+	scrollbackStore *scrollback.Store
 }
 
 // NewPickerModel builds the initial state. The caller is responsible for
 // fetching events and the running session set before constructing it.
-func NewPickerModel(mode Mode, events []store.Event, running map[string]bool) PickerModel {
+func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb *scrollback.Store) PickerModel {
 	return PickerModel{
-		mode:           mode,
-		events:         events,
-		manifests:      make(map[int64]snapshot.Manifest, len(events)),
-		trees:          make(map[int64]*TreeNode, len(events)),
-		manifestErrors: make(map[int64]error),
-		filter:         filter.Filter{DedupRunningServer: true},
-		runningSet:     running,
-		keys:           defaultKeys(),
-		help:           help.New(),
-		focus:          focusList,
+		mode:            mode,
+		events:          events,
+		manifests:       make(map[int64]snapshot.Manifest, len(events)),
+		trees:           make(map[int64]*TreeNode, len(events)),
+		manifestErrors:  make(map[int64]error),
+		filter:          filter.Filter{DedupRunningServer: true},
+		runningSet:      running,
+		keys:            defaultKeys(),
+		help:            help.New(),
+		focus:           focusList,
+		scrollbackStore: sb,
 	}
 }
+
+// ScrollbackStore returns the scrollback store passed to the constructor.
+// Exported for tests; production code does not call this.
+func (m PickerModel) ScrollbackStore() *scrollback.Store { return m.scrollbackStore }
 
 // Init satisfies tea.Model.
 func (m PickerModel) Init() tea.Cmd { return nil }

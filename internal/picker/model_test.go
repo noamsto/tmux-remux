@@ -7,12 +7,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/noamsto/tmux-state/internal/picker"
+	"github.com/noamsto/tmux-state/internal/scrollback"
 	"github.com/noamsto/tmux-state/internal/store"
 )
 
 func TestModel_TabSwitchesFocus_SnapshotMode(t *testing.T) {
 	events := []store.Event{{ID: 1, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[]}`}}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 
 	// Initial focus is list. After tab, should be tree.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -39,7 +40,7 @@ func TestModel_ToggleIdleUpdatesCounter(t *testing.T) {
 			]}]}]}`,
 		},
 	}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 
 	// Before toggle: 2 panes kept.
@@ -61,7 +62,7 @@ func TestModel_CursorMoveTriggersManifestParse(t *testing.T) {
 		{ID: 1, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[{"name":"a","windows":[]}]}`},
 		{ID: 2, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[{"name":"b","windows":[]}]}`},
 	}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	pm := updated.(picker.PickerModel)
@@ -78,7 +79,7 @@ func TestModel_EnterRecordsSelectedID(t *testing.T) {
 	events := []store.Event{
 		{ID: 7, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[]}]}`},
 	}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -95,7 +96,7 @@ func TestModel_EnterBlockedOnParseError(t *testing.T) {
 	events := []store.Event{
 		{ID: 9, Kind: "snapshot", ManifestJSON: `{not json`},
 	}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -118,7 +119,7 @@ func TestModel_TreeRightExpands_LeftCollapses(t *testing.T) {
 			{"index":0,"command":"fish"}
 		]}]}]}`,
 	}}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 	// Move focus to tree.
 	upd, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -145,7 +146,7 @@ func TestModel_ViewRendersWithoutPanic(t *testing.T) {
 		{ID: 1, Ts: time.Now().UnixMilli(), Kind: "snapshot",
 			ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[{"index":0,"command":"fish"}]}]}]}`},
 	}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 	// Simulate a sane terminal size.
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -160,12 +161,22 @@ func TestModel_ViewRendersWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestNewPickerModel_AcceptsScrollbackStore(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	sb := scrollback.New(tmp)
+	m := picker.NewPickerModel(picker.ModeSnapshot, nil, nil, sb)
+	if m.ScrollbackStore() != sb {
+		t.Fatalf("scrollback store not threaded through constructor")
+	}
+}
+
 func TestModel_ViewHighlightsTreeCursor(t *testing.T) {
 	events := []store.Event{{
 		ID: 1, Ts: time.Now().UnixMilli(), Kind: "snapshot",
 		ManifestJSON: `{"v":1,"sessions":[{"name":"s","windows":[{"name":"w","panes":[{"index":0,"command":"fish"}]}]}]}`,
 	}}
-	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil)
+	m := picker.NewPickerModel(picker.ModeSnapshot, events, nil, nil)
 	m.Bootstrap()
 	// Resize so two-pane mode kicks in.
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})

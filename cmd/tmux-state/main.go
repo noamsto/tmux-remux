@@ -244,7 +244,8 @@ func newPickCmd() *cobra.Command {
 					}
 				}
 
-				m := picker.NewPickerModel(mode, evs, runningSet)
+				sb := scrollback.New(cfg.ScrollbackDir)
+				m := picker.NewPickerModel(mode, evs, runningSet, sb)
 				m.Bootstrap()
 
 				prog := tea.NewProgram(m, tea.WithOutput(os.Stderr))
