@@ -9,7 +9,7 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 - **Periodic save** — snapshots every tmux session, window, pane (cwd, command, layout, scrollback) every 60s and on every structural change.
 - **Smart restore** — on tmux start, applies a filter that drops stale sessions, idle plain-shell panes, and duplicates of sessions already running. No more "all my closed splits from last week reappear."
 - **Undo** — `prefix + u` instantly re-opens the last pane, window, or session you closed by accident (e.g. `Ctrl+D` cascade).
-- **History** — every snapshot and close event lives in a SQLite store you can query, browse with `fzf`, and prune.
+- **History** — every snapshot and close event lives in a SQLite store you can query, browse interactively, and prune.
 - **One static binary** — no plugin manager, no shell scripts, no cron. systemd user timer + tmux hooks do the work.
 
 ## Why not tmux-resurrect / tmux-continuum?
@@ -100,8 +100,8 @@ That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see w
 | `tmux-state save` | Snapshot the running server now (idempotent — skipped if nothing changed) |
 | `tmux-state restore --auto` | Restore latest snapshot through smart filter |
 | `tmux-state undo --pop` | Restore the most recent close event (pane / window / session) |
-| `tmux-state pick --kind=close` | fzf picker over close events |
-| `tmux-state pick --kind=snapshot` | fzf picker over snapshot history |
+| `tmux-state pick --kind=close` | Interactive picker over close events |
+| `tmux-state pick --kind=snapshot` | Interactive picker over snapshot history (default) |
 | `tmux-state capture-event KIND` | Record a close event (called from tmux hooks; not for direct use) |
 | `tmux-state index-update --session=$N` | Update live shadow index (called from layout hooks; not for direct use) |
 | `tmux-state list` | List events, human-readable |
@@ -109,6 +109,15 @@ That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see w
 | `tmux-state prune` | Apply retention limits (default: 20 snapshots, 50 close events) |
 | `tmux-state gc` | Reap orphan scrollback files (refcount = 0) |
 | `tmux-state version` | Print version |
+
+### `pick`
+
+Open an interactive picker over snapshot or close events. The picker is a Bubble Tea TUI that shows each snapshot's full session → window → pane tree before you restore it, and exposes the smart-restore filter as live footer toggles.
+
+- `--kind=snapshot` (default) — two-pane view (snapshots on the left, tree on the right). Toggle `s` to skip idle shells, `d` to dedup sessions already running, `a` to dim snapshots older than 24h.
+- `--kind=close` — list-only view of close events, used by `prefix + U` in lazytmux.
+
+Tab switches focus between panes. `?` shows the full keymap. `enter` restores; `esc` cancels.
 
 ## Smart restore filter
 
@@ -162,24 +171,22 @@ Don't sync `$XDG_DATA_HOME/tmux-state/` to cloud storage, don't commit it, don't
 - `internal/restore` — plan builder + apply (best-effort tmux command sequence)
 - `internal/closeevent` — pane/window/session close hooks with cascade dedup
 - `internal/lockfile` — advisory `flock` to serialize concurrent writers
-- `internal/picker` — fzf wrapper for `tmux-state pick`
+- `internal/picker` — Bubble Tea TUI for `tmux-state pick` (master/detail tree preview + filter toggles)
 - `internal/config` — XDG-resolved paths and threshold defaults
 
 Full design at [`docs/specs/2026-04-26-tmux-state-design.md`](docs/specs/2026-04-26-tmux-state-design.md).
 
 ## Status and roadmap
 
-**v0.1.0 — current.** Save, restore (manual + auto), undo, fzf picker, list/prune/gc, systemd timer.
+**v0.1.0 — current.** Save, restore (manual + auto), undo, Bubble Tea picker, list/prune/gc, systemd timer.
 
 **v0.2.0 — planned.**
-- Rich Bubble Tea history explorer (in [`lazytmux`](https://github.com/noamsto/lazytmux)'s picker module — `tmux-state` ships only the simple fzf picker for vanilla-tmux users)
 - Per-unit restore (restore *just* this pane / window / session from a snapshot)
 - nvim cooperation (companion Lua module that writes `mksession` files on `VimLeave`)
 - Cross-host cwd remap rules
 
 **Out of scope (likely forever):**
 - Cloud sync — wrong threat model (see "Privacy and security")
-- Fancy TUI polish — `lazytmux/picker` handles that for lazytmux users; vanilla users get fzf
 - Plugin-manager packaging (TPM, etc.) — Nix is the supported install path; from-source works for everyone else
 
 ## Contributing

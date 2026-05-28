@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/noamsto/tmux-state/internal/closeevent"
@@ -218,53 +219,48 @@ func newPickCmd() *cobra.Command {
 	var kind string
 	cmd := &cobra.Command{
 		Use:   "pick",
-		Short: "Open an fzf picker over events",
+		Short: "Open an interactive picker over events",
 		RunE: func(*cobra.Command, []string) error {
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
 				opts := store.ListOpts{Limit: 50}
+				mode := picker.ModeSnapshot
 				switch kind {
 				case "snapshot":
 					opts.Kinds = []string{"snapshot"}
 				case "close":
 					opts.ExcludeKinds = []string{"snapshot"}
+					mode = picker.ModeClose
 				}
 				evs, err := db.ListEvents(ctx, opts)
 				if err != nil {
 					return err
 				}
-				items := make([]picker.Item, 0, len(evs))
-				for _, ev := range evs {
-					items = append(items, picker.Item{Key: fmt.Sprint(ev.ID), Display: picker.FormatRow(ev)})
-				}
-				selected, err := picker.Pick(ctx, "fzf", items)
-				if err != nil || selected == "" {
-					return err
-				}
 
-				id, _ := strconv.ParseInt(selected, 10, 64)
-				var ev store.Event
-				row := db.DB().QueryRowContext(ctx, `SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json FROM events WHERE id=?`, id)
-				if err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON); err != nil {
-					return err
-				}
-
-				var m snapshot.Manifest
-				if ev.Kind == "snapshot" {
-					if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
-						return err
-					}
-				} else {
-					var wrapped struct {
-						Index json.RawMessage `json:"index"`
-					}
-					_ = json.Unmarshal([]byte(ev.ManifestJSON), &wrapped)
-					if len(wrapped.Index) > 0 {
-						_ = json.Unmarshal(wrapped.Index, &m)
-					}
-				}
 				t := tmux.NewClient("tmux")
+				runningSet := map[string]bool{}
+				if sessions, err := t.ListSessions(ctx); err == nil {
+					for _, s := range sessions {
+						runningSet[s.Name] = true
+					}
+				}
+
+				sb := scrollback.New(cfg.ScrollbackDir)
+				m := picker.NewPickerModel(mode, evs, runningSet, sb)
+				m.Bootstrap()
+
+				prog := tea.NewProgram(m, tea.WithOutput(os.Stderr))
+				finalModel, err := prog.Run()
+				if err != nil {
+					return fmt.Errorf("picker: %w", err)
+				}
+				final, ok := finalModel.(picker.PickerModel)
+				if !ok || final.SelectedID() == 0 {
+					return nil // cancelled
+				}
+
+				manifest := final.SelectedManifest()
 				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, buildOpts)
+				plan := restore.BuildPlan(manifest, final.Filter(), nil, buildOpts)
 				return restore.Apply(ctx, t, plan)
 			})
 		},
@@ -345,7 +341,8 @@ func newListCmd() *cobra.Command {
 					return nil
 				}
 				for _, ev := range evs {
-					fmt.Println(picker.FormatRow(ev))
+					t := time.UnixMilli(ev.Ts).Format("2006-01-02 15:04:05")
+					fmt.Printf("%d\t%s  %-15s  %s\n", ev.ID, t, ev.Kind, ev.Reason)
 				}
 				return nil
 			})
