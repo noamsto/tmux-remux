@@ -180,3 +180,25 @@ func paneNodeIndex(t *testing.T, m PickerModel) int {
 	t.Fatal("no pane node in visible tree")
 	return -1
 }
+
+func TestPaneWidths_ThreePane(t *testing.T) {
+	m := PickerModel{mode: ModeSnapshot, width: 160}
+	l, tr, pv := m.paneWidthsThree()
+	if l+tr+pv != 160 {
+		t.Errorf("widths must sum to total: got %d+%d+%d != 160", l, tr, pv)
+	}
+	if l < 28 || tr < 32 || pv < 40 {
+		t.Errorf("min widths violated: l=%d tr=%d pv=%d", l, tr, pv)
+	}
+}
+
+func TestPaneWidths_NarrowFallsBackToTwoPane(t *testing.T) {
+	m := PickerModel{mode: ModeSnapshot, width: 100}
+	l, tr, pv := m.paneWidthsThree()
+	if pv != 0 {
+		t.Errorf("preview should be 0 at width=100, got %d", pv)
+	}
+	if l+tr != 100 {
+		t.Errorf("widths must sum to total: got %d+%d != 100", l, tr)
+	}
+}

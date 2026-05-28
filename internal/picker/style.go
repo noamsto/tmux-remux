@@ -18,8 +18,9 @@ var (
 )
 
 var (
-	listFrame = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
-	treeFrame = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
+	listFrame    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
+	treeFrame    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
+	previewFrame = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
 
 	rowActive  = lipgloss.NewStyle().Foreground(colBase).Background(colMauve).Bold(true)
 	rowDefault = lipgloss.NewStyle().Foreground(colText)

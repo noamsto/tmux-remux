@@ -19,6 +19,11 @@ type scrollbackLoadedMsg struct {
 	err     error
 }
 
+// renderPreview is the stub completed in Task 6.
+func (m PickerModel) renderPreview(width int) string {
+	return previewFrame.Width(width).Render("(preview)")
+}
+
 // loadScrollbackCmd returns a tea.Cmd that reads the scrollback for sha off
 // the UI goroutine. Returns nil if sb is nil or sha is empty (caller short-
 // circuits and never schedules a load).

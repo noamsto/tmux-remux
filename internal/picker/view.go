@@ -17,16 +17,21 @@ func (m PickerModel) View() tea.View {
 		return v
 	}
 
-	listWidth, treeWidth := m.paneWidths()
+	listWidth, treeWidth, previewWidth := m.paneWidthsThree()
 	list := renderList(m, listWidth)
 
 	var content string
-	if m.mode == ModeClose || m.width < 80 {
-		// Close mode and narrow mode: list-only at this scale.
+	switch {
+	case m.mode == ModeClose || m.width < 80:
 		content = lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width))
-	} else {
+	case previewWidth == 0:
 		tree := renderTree(m, treeWidth)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
+		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
+	default:
+		tree := renderTree(m, treeWidth)
+		preview := m.renderPreview(previewWidth)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree, preview)
 		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
 	}
 
@@ -60,18 +65,37 @@ func (m PickerModel) renderFooter(width int) string {
 	return footerBar.Width(width).Render(line)
 }
 
-// paneWidths splits the available width between list and tree. Returns
-// (listWidth, 0) when narrow or close mode.
-func (m PickerModel) paneWidths() (int, int) {
+// paneWidthsThree splits the available width between list, tree, and preview.
+// Returns (list, tree, preview) where preview==0 means the preview pane is
+// hidden at this width (or in close mode).
+func (m PickerModel) paneWidthsThree() (int, int, int) {
 	if m.width < 80 || m.mode == ModeClose {
-		return m.width, 0
+		return m.width, 0, 0
 	}
-	listW := m.width / 3
+	if m.width < 120 {
+		// Two-pane fallback (current behavior).
+		listW := m.width / 3
+		if listW < 28 {
+			listW = 28
+		}
+		return listW, m.width - listW, 0
+	}
+	// Three-pane: 1/4 list, 1/3 tree, remainder preview, with minimums.
+	listW := m.width / 4
 	if listW < 28 {
 		listW = 28
 	}
-	treeW := m.width - listW
-	return listW, treeW
+	treeW := m.width / 3
+	if treeW < 32 {
+		treeW = 32
+	}
+	previewW := m.width - listW - treeW
+	if previewW < 40 {
+		// Squeeze tree to give preview its minimum.
+		treeW = m.width - listW - 40
+		previewW = 40
+	}
+	return listW, treeW, previewW
 }
 
 func renderList(m PickerModel, width int) string {
