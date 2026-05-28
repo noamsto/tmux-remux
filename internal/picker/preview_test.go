@@ -57,3 +57,28 @@ func TestLoadScrollbackCmd_MissingFile(t *testing.T) {
 		t.Errorf("expected fs.ErrNotExist-chain error, got %v", loaded.err)
 	}
 }
+
+func TestPickerModel_HandlesScrollbackLoadedMsg(t *testing.T) {
+	m := NewPickerModel(ModeSnapshot, nil, nil, nil)
+	msg := scrollbackLoadedMsg{sha: "deadbeef", content: []byte("hi"), err: nil}
+	updated, _ := m.Update(msg)
+	final := updated.(PickerModel)
+	got, ok := final.ScrollbackFor("deadbeef")
+	if !ok {
+		t.Fatalf("cache miss for sha after loaded msg")
+	}
+	if string(got) != "hi" {
+		t.Errorf("content mismatch: got %q want %q", got, "hi")
+	}
+}
+
+func TestPickerModel_RemembersScrollbackError(t *testing.T) {
+	m := NewPickerModel(ModeSnapshot, nil, nil, nil)
+	wantErr := errors.New("boom")
+	msg := scrollbackLoadedMsg{sha: "deadbeef", err: wantErr}
+	updated, _ := m.Update(msg)
+	final := updated.(PickerModel)
+	if err := final.ScrollbackError("deadbeef"); err == nil {
+		t.Fatal("expected cached error, got nil")
+	}
+}

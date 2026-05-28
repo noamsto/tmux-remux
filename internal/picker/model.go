@@ -47,17 +47,20 @@ type PickerModel struct {
 	manifests       map[int64]snapshot.Manifest // lazy parse cache
 	trees           map[int64]*TreeNode         // lazy build cache
 	manifestErrors  map[int64]error             // remember parse failures
-	filter          filter.Filter
-	dimOlderThan    time.Duration // list-pane only; 0 = no dimming
-	runningSet      map[string]bool
-	keys            keyMap
-	help            help.Model
-	width, height   int
-	focus           focusZone
-	showHelp        bool
-	footerNote      string // transient warning text
-	selectedID      int64  // 0 = no selection (cancelled)
-	scrollbackStore *scrollback.Store
+	filter           filter.Filter
+	dimOlderThan     time.Duration // list-pane only; 0 = no dimming
+	runningSet       map[string]bool
+	keys             keyMap
+	help             help.Model
+	width, height    int
+	focus            focusZone
+	showHelp         bool
+	footerNote       string // transient warning text
+	selectedID       int64  // 0 = no selection (cancelled)
+	scrollbackStore  *scrollback.Store
+	scrollbacks      map[string][]byte // sha → bytes
+	scrollbackErrors map[string]error  // sha → load error
+	loadingSHAs      map[string]bool   // sha → in-flight load
 }
 
 // NewPickerModel builds the initial state. The caller is responsible for
@@ -69,18 +72,31 @@ func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb
 		manifests:       make(map[int64]snapshot.Manifest, len(events)),
 		trees:           make(map[int64]*TreeNode, len(events)),
 		manifestErrors:  make(map[int64]error),
-		filter:          filter.Filter{DedupRunningServer: true},
-		runningSet:      running,
-		keys:            defaultKeys(),
-		help:            help.New(),
-		focus:           focusList,
-		scrollbackStore: sb,
+		filter:           filter.Filter{DedupRunningServer: true},
+		runningSet:       running,
+		keys:             defaultKeys(),
+		help:             help.New(),
+		focus:            focusList,
+		scrollbackStore:  sb,
+		scrollbacks:      make(map[string][]byte),
+		scrollbackErrors: make(map[string]error),
+		loadingSHAs:      make(map[string]bool),
 	}
 }
 
 // ScrollbackStore returns the scrollback store passed to the constructor.
 // Exported for tests; production code does not call this.
 func (m PickerModel) ScrollbackStore() *scrollback.Store { return m.scrollbackStore }
+
+// ScrollbackFor returns the cached scrollback bytes for sha and whether the
+// entry was present.
+func (m PickerModel) ScrollbackFor(sha string) ([]byte, bool) {
+	b, ok := m.scrollbacks[sha]
+	return b, ok
+}
+
+// ScrollbackError returns the cached load error for sha, or nil.
+func (m PickerModel) ScrollbackError(sha string) error { return m.scrollbackErrors[sha] }
 
 // Init satisfies tea.Model.
 func (m PickerModel) Init() tea.Cmd { return nil }
@@ -90,6 +106,14 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case scrollbackLoadedMsg:
+		delete(m.loadingSHAs, msg.sha)
+		if msg.err != nil {
+			m.scrollbackErrors[msg.sha] = msg.err
+		} else {
+			m.scrollbacks[msg.sha] = msg.content
+		}
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
