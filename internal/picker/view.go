@@ -80,22 +80,12 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 		}
 		return listW, m.width - listW, 0
 	}
-	// Three-pane: 1/4 list, 1/3 tree, remainder preview, with minimums.
+	// Three-pane: 1/4 list, 1/3 tree, remainder preview. At width ≥ 120 the
+	// proportions guarantee previewW ≥ 50 and both min-clamps (28/32) are
+	// already satisfied by the proportional values, so no squeeze is needed.
 	listW := m.width / 4
-	if listW < 28 {
-		listW = 28
-	}
 	treeW := m.width / 3
-	if treeW < 32 {
-		treeW = 32
-	}
-	previewW := m.width - listW - treeW
-	if previewW < 40 {
-		// Squeeze tree to give preview its minimum.
-		treeW = m.width - listW - 40
-		previewW = 40
-	}
-	return listW, treeW, previewW
+	return listW, treeW, m.width - listW - treeW
 }
 
 func renderList(m PickerModel, width int) string {
