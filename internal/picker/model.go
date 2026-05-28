@@ -40,13 +40,13 @@ const (
 
 // PickerModel is the Bubble Tea model for the restore picker.
 type PickerModel struct {
-	mode            Mode
-	events          []store.Event
-	cursor          int
-	treeCursor      int                         // index into the flattened visible-node list
-	manifests       map[int64]snapshot.Manifest // lazy parse cache
-	trees           map[int64]*TreeNode         // lazy build cache
-	manifestErrors  map[int64]error             // remember parse failures
+	mode             Mode
+	events           []store.Event
+	cursor           int
+	treeCursor       int                         // index into the flattened visible-node list
+	manifests        map[int64]snapshot.Manifest // lazy parse cache
+	trees            map[int64]*TreeNode         // lazy build cache
+	manifestErrors   map[int64]error             // remember parse failures
 	filter           filter.Filter
 	dimOlderThan     time.Duration // list-pane only; 0 = no dimming
 	runningSet       map[string]bool
@@ -67,11 +67,11 @@ type PickerModel struct {
 // fetching events and the running session set before constructing it.
 func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb *scrollback.Store) PickerModel {
 	return PickerModel{
-		mode:            mode,
-		events:          events,
-		manifests:       make(map[int64]snapshot.Manifest, len(events)),
-		trees:           make(map[int64]*TreeNode, len(events)),
-		manifestErrors:  make(map[int64]error),
+		mode:             mode,
+		events:           events,
+		manifests:        make(map[int64]snapshot.Manifest, len(events)),
+		trees:            make(map[int64]*TreeNode, len(events)),
+		manifestErrors:   make(map[int64]error),
 		filter:           filter.Filter{DedupRunningServer: true},
 		runningSet:       running,
 		keys:             defaultKeys(),
