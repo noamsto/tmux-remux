@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -202,3 +203,71 @@ func TestPaneWidths_NarrowFallsBackToTwoPane(t *testing.T) {
 		t.Errorf("widths must sum to total: got %d+%d != 100", l, tr)
 	}
 }
+
+func TestRenderPreview_NoPaneFocused(t *testing.T) {
+	m := PickerModel{mode: ModeSnapshot, width: 160, height: 30, focus: focusList}
+	got := m.renderPreview(60)
+	if !strings.Contains(stripANSI(got), "focus a pane") {
+		t.Errorf("expected hint, got: %q", got)
+	}
+}
+
+func TestRenderPreview_PaneWithoutSHA(t *testing.T) {
+	man := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Windows: []snapshot.Window{{Panes: []snapshot.Pane{{}}}},
+	}}}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: string(raw)}
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+
+	got := m.renderPreview(60)
+	if !strings.Contains(stripANSI(got), "no scrollback recorded") {
+		t.Errorf("expected hint, got: %q", got)
+	}
+}
+
+func TestRenderPreview_Loaded(t *testing.T) {
+	man := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Windows: []snapshot.Window{{Panes: []snapshot.Pane{{ScrollbackSHA: "abc"}}}},
+	}}}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: string(raw)}
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+	m.scrollbacks["abc"] = []byte("$ echo hi\nhi\n$ ")
+
+	got := stripANSI(m.renderPreview(60))
+	if !strings.Contains(got, "echo hi") {
+		t.Errorf("expected content, got: %q", got)
+	}
+}
+
+func TestRenderPreview_Error(t *testing.T) {
+	man := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Windows: []snapshot.Window{{Panes: []snapshot.Pane{{ScrollbackSHA: "abc"}}}},
+	}}}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: string(raw)}
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+	m.scrollbackErrors["abc"] = errors.New("file gone")
+
+	got := stripANSI(m.renderPreview(60))
+	if !strings.Contains(got, "unavailable") {
+		t.Errorf("expected error label, got: %q", got)
+	}
+}
+
+// stripANSI removes ANSI escapes for assertion ergonomics.
+func stripANSI(s string) string {
+	return ansiRegexp.ReplaceAllString(s, "")
+}
+
+var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
