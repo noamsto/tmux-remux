@@ -303,6 +303,9 @@ func (m PickerModel) TreeFor(id int64) *TreeNode { return m.trees[id] }
 // PreviewCmd returns a tea.Cmd that loads the scrollback for the currently
 // focused tree-pane node, or nil if no load is needed (wrong focus, no SHA,
 // cached, already loading, or no scrollback store).
+//
+// Side effect: marks the SHA as in-flight in m.loadingSHAs before returning.
+// Pointer receiver is required to write through to that map.
 func (m *PickerModel) PreviewCmd() tea.Cmd {
 	sha := m.focusedPaneSHA()
 	if sha == "" || m.scrollbackStore == nil {

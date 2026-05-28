@@ -108,7 +108,7 @@ func TestPickerModel_FocusedPaneTriggersLoad(t *testing.T) {
 	m.Bootstrap()
 	// Focus tree, then walk cursor down session → window → pane.
 	m.focus = focusTree
-	m.treeCursor = 2 // session(0) → window(1) → pane(2)
+	m.treeCursor = paneNodeIndex(t, m)
 
 	cmd := m.PreviewCmd()
 	if cmd == nil {
@@ -133,10 +133,50 @@ func TestPickerModel_NoLoadWhenAlreadyCached(t *testing.T) {
 	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, sb)
 	m.Bootstrap()
 	m.focus = focusTree
-	m.treeCursor = 2
+	m.treeCursor = paneNodeIndex(t, m)
 	m.scrollbacks["abc123"] = []byte("cached")
 
 	if cmd := m.PreviewCmd(); cmd != nil {
 		t.Fatal("PreviewCmd should be nil when SHA already cached")
 	}
+}
+
+func TestPickerModel_NoLoadWhenAlreadyInFlight(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Windows: []snapshot.Window{{
+				Panes: []snapshot.Pane{{ScrollbackSHA: "abc123"}},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+	tmp := t.TempDir()
+	sb := scrollback.New(tmp)
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, sb)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+
+	if cmd := m.PreviewCmd(); cmd == nil {
+		t.Fatal("first PreviewCmd should return a Cmd")
+	}
+	if cmd := m.PreviewCmd(); cmd != nil {
+		t.Fatal("second PreviewCmd should be nil when SHA is in-flight")
+	}
+}
+
+// paneNodeIndex returns the index of the first NodePane in m's visible tree,
+// failing the test if none exists. Use this instead of hard-coded cursor indices.
+func paneNodeIndex(t *testing.T, m PickerModel) int {
+	t.Helper()
+	for i, n := range m.VisibleNodes() {
+		if n.Kind == NodePane {
+			return i
+		}
+	}
+	t.Fatal("no pane node in visible tree")
+	return -1
 }
