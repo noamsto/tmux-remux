@@ -2,6 +2,8 @@ package picker
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -39,6 +41,7 @@ func TestLoadScrollbackCmd_ReturnsContent(t *testing.T) {
 func TestLoadScrollbackCmd_MissingFile(t *testing.T) {
 	tmp := t.TempDir()
 	sb := scrollback.New(tmp)
+	// all-zeros is not a valid sha256 output for any input, so this file is guaranteed absent
 	const missing = "0000000000000000000000000000000000000000000000000000000000000000"
 
 	cmd := loadScrollbackCmd(sb, missing)
@@ -50,7 +53,7 @@ func TestLoadScrollbackCmd_MissingFile(t *testing.T) {
 	if loaded.err == nil {
 		t.Fatal("expected err for missing scrollback, got nil")
 	}
-	if !strings.Contains(loaded.err.Error(), "no such file") {
-		t.Logf("missing-file error: %v (acceptable as long as err != nil)", loaded.err)
+	if !errors.Is(loaded.err, fs.ErrNotExist) {
+		t.Errorf("expected fs.ErrNotExist-chain error, got %v", loaded.err)
 	}
 }
