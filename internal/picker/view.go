@@ -58,6 +58,9 @@ func (m PickerModel) renderFooter(width int) string {
 		"  " + counter,
 		"  ↵ restore",
 	}
+	if m.width >= 120 && m.mode == ModeSnapshot {
+		parts = append(parts, "  tab: focus tree to preview")
+	}
 	line := strings.Join(parts, "  ")
 	if m.footerNote != "" {
 		line = footerWarn.Render(m.footerNote) + "  " + line
