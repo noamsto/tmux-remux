@@ -63,7 +63,7 @@ func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	calls := 0
 	failOn := 1
 	rt := failingTmux{
-		runFn: func(args []string) (string, error) {
+		runFn: func(_ []string) (string, error) {
 			calls++
 			if calls == failOn+1 {
 				return "", context.Canceled

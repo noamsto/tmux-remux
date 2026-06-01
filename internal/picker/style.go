@@ -2,36 +2,59 @@ package picker
 
 import "charm.land/lipgloss/v2"
 
-// Catppuccin Mocha (matches lazytmux's picker for visual continuity).
+// Style globals are initialized by applyTheme. NewPickerModel calls applyTheme
+// with NewTheme() so consumers get sensible defaults without wiring; tests can
+// call applyTheme(Theme{}) for deterministic Mocha colors.
 var (
-	colBase     = lipgloss.Color("#1e1e2e")
-	colSurface0 = lipgloss.Color("#313244")
-	colSurface1 = lipgloss.Color("#45475a")
-	colText     = lipgloss.Color("#cdd6f4")
-	colSubtext  = lipgloss.Color("#a6adc8")
-	colOverlay  = lipgloss.Color("#7f849c")
-	colMauve    = lipgloss.Color("#cba6f7")
-	colBlue     = lipgloss.Color("#89b4fa")
-	colGreen    = lipgloss.Color("#a6e3a2")
-	colYellow   = lipgloss.Color("#f9e2af")
-	colRed      = lipgloss.Color("#f38ba8")
+	listFrame    lipgloss.Style
+	treeFrame    lipgloss.Style
+	previewFrame lipgloss.Style
+
+	rowActive  lipgloss.Style
+	rowDefault lipgloss.Style
+	rowDim     lipgloss.Style
+
+	nodeSession lipgloss.Style
+	nodeWindow  lipgloss.Style
+	nodePane    lipgloss.Style
+	skipReason  lipgloss.Style
+
+	footerBar  lipgloss.Style
+	footerWarn lipgloss.Style
+	footerOn   lipgloss.Style
+	footerOff  lipgloss.Style
+	footerKey  lipgloss.Style
+	footerSep  lipgloss.Style
+
+	previewHeader lipgloss.Style
 )
 
-var (
-	listFrame    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
-	treeFrame    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
-	previewFrame = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colSurface1).Padding(0, 1)
+func init() { applyTheme(Theme{}) }
 
-	rowActive  = lipgloss.NewStyle().Foreground(colBase).Background(colMauve).Bold(true)
-	rowDefault = lipgloss.NewStyle().Foreground(colText)
-	rowDim     = lipgloss.NewStyle().Foreground(colOverlay)
+func applyTheme(t Theme) {
+	border := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Surface1()).
+		Padding(0, 1)
+	listFrame = border
+	treeFrame = border
+	previewFrame = border
 
-	nodeKept    = lipgloss.NewStyle().Foreground(colText)
-	nodeSkipped = lipgloss.NewStyle().Foreground(colOverlay).Strikethrough(true)
-	skipReason  = lipgloss.NewStyle().Foreground(colSubtext).Italic(true)
+	rowActive = lipgloss.NewStyle().Foreground(t.Base()).Background(t.Mauve()).Bold(true)
+	rowDefault = lipgloss.NewStyle().Foreground(t.Text())
+	rowDim = lipgloss.NewStyle().Foreground(t.Overlay())
 
-	footerBar  = lipgloss.NewStyle().Foreground(colSubtext).Padding(0, 1)
-	footerWarn = lipgloss.NewStyle().Foreground(colRed).Bold(true)
-	footerOn   = lipgloss.NewStyle().Foreground(colGreen)
-	footerOff  = lipgloss.NewStyle().Foreground(colOverlay)
-)
+	nodeSession = lipgloss.NewStyle().Foreground(t.Mauve()).Bold(true)
+	nodeWindow = lipgloss.NewStyle().Foreground(t.Blue())
+	nodePane = lipgloss.NewStyle().Foreground(t.Text())
+	skipReason = lipgloss.NewStyle().Foreground(t.Subtext()).Italic(true)
+
+	footerBar = lipgloss.NewStyle().Foreground(t.Subtext()).Padding(0, 1)
+	footerWarn = lipgloss.NewStyle().Foreground(t.Red()).Bold(true)
+	footerOn = lipgloss.NewStyle().Foreground(t.Green())
+	footerOff = lipgloss.NewStyle().Foreground(t.Overlay())
+	footerKey = lipgloss.NewStyle().Foreground(t.Lavender())
+	footerSep = lipgloss.NewStyle().Foreground(t.Overlay())
+
+	previewHeader = lipgloss.NewStyle().Foreground(t.Blue()).Bold(true)
+}

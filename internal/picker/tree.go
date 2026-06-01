@@ -4,15 +4,26 @@ package picker
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 )
 
+// tmuxFormatRE matches tmux-format directives like #[fg=#94e2d5] that get
+// embedded in window/session names via automatic-rename-format. tmux evaluates
+// these on render, but the raw string is what gets stored in snapshots.
+var tmuxFormatRE = regexp.MustCompile(`#\[[^\]]*\]`)
+
+func stripTmuxFormat(s string) string {
+	return strings.TrimSpace(tmuxFormatRE.ReplaceAllString(s, ""))
+}
+
 // NodeKind identifies the level of a TreeNode.
 type NodeKind int
 
+// Node-kind constants identify the level of each TreeNode.
 const (
 	NodeSession NodeKind = iota
 	NodeWindow
@@ -24,8 +35,9 @@ const (
 // "Snapshot #N" header which lives in the View, not here.
 type TreeNode struct {
 	Kind       NodeKind
-	Label      string // display label without skip styling
-	Ref        any    // *snapshot.Session | *snapshot.Window | *snapshot.Pane
+	Label      string    // display label without skip styling
+	Ref        any       // *snapshot.Session | *snapshot.Window | *snapshot.Pane
+	Parent     *TreeNode // nil for root; set by BuildTree
 	Children   []*TreeNode
 	Expanded   bool   // initial state set by BuildTree (sessions+windows true, panes false)
 	Skipped    bool   // set by FilterDecorate
@@ -50,6 +62,7 @@ func BuildTree(m snapshot.Manifest) *TreeNode {
 			Kind:     NodeSession,
 			Label:    sessionLabel(s),
 			Ref:      s,
+			Parent:   root,
 			Expanded: true,
 		}
 		for j := range s.Windows {
@@ -58,6 +71,7 @@ func BuildTree(m snapshot.Manifest) *TreeNode {
 				Kind:     NodeWindow,
 				Label:    windowLabel(w),
 				Ref:      w,
+				Parent:   sessionNode,
 				Expanded: true,
 			}
 			for k := range w.Panes {
@@ -66,6 +80,7 @@ func BuildTree(m snapshot.Manifest) *TreeNode {
 					Kind:     NodePane,
 					Label:    paneLabel(p),
 					Ref:      p,
+					Parent:   windowNode,
 					Expanded: false,
 				})
 			}
@@ -77,11 +92,11 @@ func BuildTree(m snapshot.Manifest) *TreeNode {
 }
 
 func sessionLabel(s *snapshot.Session) string {
-	return fmt.Sprintf("%s (%dw)", s.Name, len(s.Windows))
+	return fmt.Sprintf("%s (%dw)", stripTmuxFormat(s.Name), len(s.Windows))
 }
 
 func windowLabel(w *snapshot.Window) string {
-	return fmt.Sprintf("%d: %s (%dp)", w.Index, w.Name, len(w.Panes))
+	return fmt.Sprintf("%d: %s (%dp)", w.Index, stripTmuxFormat(w.Name), len(w.Panes))
 }
 
 func paneLabel(p *snapshot.Pane) string {

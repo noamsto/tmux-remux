@@ -1,0 +1,3 @@
+[default.extend-words]
+# Catppuccin tmux option prefix: @thm_mauve, @thm_red, @thm_lavender, …
+thm = "thm"

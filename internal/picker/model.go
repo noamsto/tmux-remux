@@ -18,9 +18,10 @@ import (
 // Mode is "snapshot" (tree pane visible) or "close" (list-only).
 type Mode int
 
+// Picker modes select which event kind drives the UI.
 const (
-	ModeSnapshot Mode = iota
-	ModeClose
+	ModeSnapshot Mode = iota // restore-from-snapshot picker (prefix+R)
+	ModeClose                // restore-from-close-event picker (prefix+U)
 )
 
 type focusZone int
@@ -33,12 +34,15 @@ const (
 // FocusZone aliases focusZone for tests.
 type FocusZone = focusZone
 
+// Focus-zone constants exported for tests.
 const (
 	FocusList = focusList
 	FocusTree = focusTree
 )
 
 // PickerModel is the Bubble Tea model for the restore picker.
+//
+//revive:disable-next-line:exported other callers reference picker.PickerModel
 type PickerModel struct {
 	mode             Mode
 	events           []store.Event
@@ -61,11 +65,14 @@ type PickerModel struct {
 	scrollbacks      map[string][]byte // sha → bytes
 	scrollbackErrors map[string]error  // sha → load error
 	loadingSHAs      map[string]bool   // sha → in-flight load
+	previewScroll    int               // lines scrolled up from the tail; 0 = bottom
+	previewScrollX   int               // visible cells shifted right; 0 = left edge
 }
 
 // NewPickerModel builds the initial state. The caller is responsible for
 // fetching events and the running session set before constructing it.
 func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb *scrollback.Store) PickerModel {
+	applyTheme(NewTheme())
 	return PickerModel{
 		mode:             mode,
 		events:           events,
@@ -73,6 +80,7 @@ func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb
 		trees:            make(map[int64]*TreeNode, len(events)),
 		manifestErrors:   make(map[int64]error),
 		filter:           filter.Filter{DedupRunningServer: true},
+		dimOlderThan:     24 * time.Hour,
 		runningSet:       running,
 		keys:             defaultKeys(),
 		help:             help.New(),
@@ -117,6 +125,26 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		if m.mode != ModeSnapshot {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			inner := m.height - 3
+			maxScroll := m.previewMaxScroll(inner)
+			m.previewScroll += 3
+			if m.previewScroll > maxScroll {
+				m.previewScroll = maxScroll
+			}
+			return m, nil
+		case tea.MouseWheelDown:
+			m.previewScroll -= 3
+			if m.previewScroll < 0 {
+				m.previewScroll = 0
+			}
+			return m, nil
+		}
 	}
 	return m, nil
 }
@@ -149,33 +177,167 @@ func (m PickerModel) visibleNodes() []*TreeNode {
 // VisibleNodes exports visibleNodes for tests.
 func (m PickerModel) VisibleNodes() []*TreeNode { return m.visibleNodes() }
 
+// firstPaneIdx returns the index of the first visible NodePane, or 0 if none.
+func (m PickerModel) firstPaneIdx() int {
+	for i, n := range m.visibleNodes() {
+		if n.Kind == NodePane {
+			return i
+		}
+	}
+	return 0
+}
+
+// isNavTarget reports whether `n` is a valid Up/Down landing spot in tree
+// focus: panes (where the preview lives) and collapsed non-leaf nodes (so the
+// user can step onto a collapsed window/session and press Right to re-expand).
+func isNavTarget(n *TreeNode) bool {
+	if n.Kind == NodePane {
+		return true
+	}
+	return !n.Expanded && len(n.Children) > 0
+}
+
+// nextPaneIdx walks from `start` in `dir` (+1 or -1) and returns the next
+// navigable index — see isNavTarget. Returns -1 if none in that direction.
+func (m PickerModel) nextPaneIdx(start, dir int) int {
+	nodes := m.visibleNodes()
+	for i := start + dir; i >= 0 && i < len(nodes); i += dir {
+		if isNavTarget(nodes[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// indexOf returns the visible-tree index of `target`, or -1 if `target` isn't
+// currently visible (e.g., an ancestor was collapsed).
+func (m PickerModel) indexOf(target *TreeNode) int {
+	for i, n := range m.visibleNodes() {
+		if n == target {
+			return i
+		}
+	}
+	return -1
+}
+
+// firstPaneIdxIn returns the visible-tree index of the first NodePane that
+// descends from `subtree`. Falls back to `indexOf(subtree)` if no pane is
+// visible underneath (everything below it is collapsed).
+func (m PickerModel) firstPaneIdxIn(subtree *TreeNode) int {
+	nodes := m.visibleNodes()
+	rootIdx := -1
+	seenRoot := false
+	for i, n := range nodes {
+		if n == subtree {
+			rootIdx = i
+			seenRoot = true
+			continue
+		}
+		if !seenRoot {
+			continue
+		}
+		// Once we step outside the subtree, stop.
+		if !descendsFrom(n, subtree) {
+			break
+		}
+		if n.Kind == NodePane {
+			return i
+		}
+	}
+	return rootIdx
+}
+
+func descendsFrom(n, ancestor *TreeNode) bool {
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p == ancestor {
+			return true
+		}
+	}
+	return false
+}
+
 func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Preview scroll: Alt+J/K / PgUp/PgDn. Available whenever the picker is in
+	// snapshot mode — scroll up to read past output without leaving the cursor
+	// pane. We approximate the inner height with m.height-3 (footer+borders).
+	if m.mode == ModeSnapshot {
+		switch {
+		case key.Matches(msg, m.keys.PreviewUp):
+			inner := m.height - 3
+			maxScroll := m.previewMaxScroll(inner)
+			if m.previewScroll < maxScroll {
+				m.previewScroll++
+				if m.previewScroll > maxScroll {
+					m.previewScroll = maxScroll
+				}
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.PreviewDown):
+			if m.previewScroll > 0 {
+				m.previewScroll--
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.PreviewLeft):
+			if m.previewScrollX > 0 {
+				m.previewScrollX -= 8
+				if m.previewScrollX < 0 {
+					m.previewScrollX = 0
+				}
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.PreviewRight):
+			m.previewScrollX += 8
+			return m, nil
+		}
+	}
 	// Focus-tree key handling for ModeSnapshot: intercept Up/Down/Left/Right.
 	if m.mode == ModeSnapshot && m.focus == focusTree {
 		switch {
 		case key.Matches(msg, m.keys.Up):
-			if m.treeCursor > 0 {
-				m.treeCursor--
+			if idx := m.nextPaneIdx(m.treeCursor, -1); idx >= 0 {
+				m.treeCursor = idx
+				m.previewScroll = 0
+				m.previewScrollX = 0
 			}
 			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Down):
-			nodes := m.visibleNodes()
-			if m.treeCursor < len(nodes)-1 {
-				m.treeCursor++
+			if idx := m.nextPaneIdx(m.treeCursor, +1); idx >= 0 {
+				m.treeCursor = idx
+				m.previewScroll = 0
+				m.previewScrollX = 0
 			}
 			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Right):
 			nodes := m.visibleNodes()
-			if m.treeCursor < len(nodes) && len(nodes[m.treeCursor].Children) > 0 {
-				nodes[m.treeCursor].Expanded = true
+			if m.treeCursor >= 0 && m.treeCursor < len(nodes) {
+				n := nodes[m.treeCursor]
+				switch {
+				case !n.Expanded && len(n.Children) > 0:
+					// Cursor on a collapsed parent: expand and re-snap to first
+					// pane within (preserves pane-first invariant).
+					n.Expanded = true
+					m.treeCursor = m.firstPaneIdxIn(n)
+				case n.Kind == NodePane:
+					// On a leaf pane: nothing to expand. No-op.
+				}
 			}
 			return m, (&m).PreviewCmd()
 		case key.Matches(msg, m.keys.Left):
 			nodes := m.visibleNodes()
-			if m.treeCursor < len(nodes) {
-				n := nodes[m.treeCursor]
-				if n.Expanded && len(n.Children) > 0 {
-					n.Expanded = false
+			if m.treeCursor >= 0 && m.treeCursor < len(nodes) {
+				// Walk up from cursor to the nearest expanded ancestor with
+				// children, collapse it, and move the cursor to it. From a pane
+				// this collapses the parent window; pressing Left again on the
+				// window collapses the parent session.
+				for n := nodes[m.treeCursor]; n != nil; n = n.Parent {
+					if n.Parent == nil {
+						break // don't collapse the synthetic root
+					}
+					if n.Expanded && len(n.Children) > 0 {
+						n.Expanded = false
+						m.treeCursor = m.indexOf(n)
+						break
+					}
 				}
 			}
 			return m, (&m).PreviewCmd()
@@ -186,15 +348,17 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.events)-1 {
 			m.cursor++
-			m.treeCursor = 0
 			(&m).ensureManifest()
+			m.treeCursor = m.firstPaneIdx()
+			m.previewScroll = 0
 		}
 		return m, (&m).PreviewCmd()
 	case key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
-			m.treeCursor = 0
 			(&m).ensureManifest()
+			m.treeCursor = m.firstPaneIdx()
+			m.previewScroll = 0
 		}
 		return m, (&m).PreviewCmd()
 	case key.Matches(msg, m.keys.Quit):
@@ -203,6 +367,10 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.mode == ModeSnapshot {
 			if m.focus == focusList {
 				m.focus = focusTree
+				nodes := m.visibleNodes()
+				if m.treeCursor < 0 || m.treeCursor >= len(nodes) || nodes[m.treeCursor].Kind != NodePane {
+					m.treeCursor = m.firstPaneIdx()
+				}
 			} else {
 				m.focus = focusList
 			}
@@ -293,6 +461,10 @@ func (m PickerModel) Focus() FocusZone { return m.focus }
 
 // Cursor returns the current cursor position (exported for tests).
 func (m PickerModel) Cursor() int { return m.cursor }
+
+// TreeCursor returns the index of the focused node in the visible-tree list.
+// Exported for tests.
+func (m PickerModel) TreeCursor() int { return m.treeCursor }
 
 // FooterNote returns the transient warning text (exported for tests + view).
 func (m PickerModel) FooterNote() string { return m.footerNote }

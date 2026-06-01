@@ -248,7 +248,7 @@ func newPickCmd() *cobra.Command {
 				m := picker.NewPickerModel(mode, evs, runningSet, sb)
 				m.Bootstrap()
 
-				prog := tea.NewProgram(m, tea.WithOutput(os.Stderr))
+				prog := tea.NewProgram(m)
 				finalModel, err := prog.Run()
 				if err != nil {
 					return fmt.Errorf("picker: %w", err)

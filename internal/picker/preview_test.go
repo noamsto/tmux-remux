@@ -207,7 +207,7 @@ func TestPaneWidths_NarrowFallsBackToTwoPane(t *testing.T) {
 func TestRenderPreview_NoPaneFocused(t *testing.T) {
 	m := PickerModel{mode: ModeSnapshot, width: 160, height: 30, focus: focusList}
 	got := m.renderPreview(60)
-	if !strings.Contains(stripANSI(got), "focus a pane") {
+	if !strings.Contains(stripANSI(got), "press Tab") {
 		t.Errorf("expected hint, got: %q", got)
 	}
 }
@@ -224,7 +224,7 @@ func TestRenderPreview_PaneWithoutSHA(t *testing.T) {
 	m.treeCursor = paneNodeIndex(t, m)
 
 	got := m.renderPreview(60)
-	if !strings.Contains(stripANSI(got), "no scrollback recorded") {
+	if !strings.Contains(stripANSI(got), "no scrollback captured") {
 		t.Errorf("expected hint, got: %q", got)
 	}
 }
@@ -260,7 +260,7 @@ func TestRenderPreview_Error(t *testing.T) {
 	m.scrollbackErrors["abc"] = errors.New("file gone")
 
 	got := stripANSI(m.renderPreview(60))
-	if !strings.Contains(got, "unavailable") {
+	if !strings.Contains(got, "missing") {
 		t.Errorf("expected error label, got: %q", got)
 	}
 }
