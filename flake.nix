@@ -54,7 +54,7 @@
         packages = {
           default = pkgs.buildGoModule {
             pname = "tmux-state";
-            version = "0.1.0";
+            version = "0.3.0";
             src = ./.;
             vendorHash = "sha256-0wPl368sIN0iv5TTf0lLdtYuYjb+uvQE6GMx3DPQ6yQ=";
             subPackages = ["cmd/tmux-state"];
