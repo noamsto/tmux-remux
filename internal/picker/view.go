@@ -29,8 +29,15 @@ func (m PickerModel) View() tea.View {
 
 	var content string
 	switch {
-	case m.mode == ModeClose || m.width < 80:
+	case m.width < 80:
 		content = lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width))
+	case m.mode == ModeClose:
+		// Close mode: list + tree (showing the diff-derived sub-manifest of
+		// what was lost). No scrollback preview — close events don't carry
+		// pane scrollback.
+		tree := renderTree(m, m.width-listWidth, bodyHeight)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
+		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
 	case previewWidth == 0:
 		tree := renderTree(m, treeWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
@@ -89,8 +96,17 @@ func (m PickerModel) renderFooter(width int) string {
 // Returns (list, tree, preview) where preview==0 means the preview pane is
 // hidden at this width (or in close mode).
 func (m PickerModel) paneWidthsThree() (int, int, int) {
-	if m.width < 80 || m.mode == ModeClose {
+	if m.width < 80 {
 		return m.width, 0, 0
+	}
+	if m.mode == ModeClose {
+		// Close mode: list + tree (no scrollback preview). Give the list
+		// ~40% so labels like "session: reviewtest2401692 (1w)" fit.
+		listW := m.width * 2 / 5
+		if listW < 32 {
+			listW = 32
+		}
+		return listW, m.width - listW, 0
 	}
 	if m.width < 120 {
 		// Two-pane fallback (current behavior).
@@ -125,8 +141,19 @@ func renderList(m PickerModel, width, height int) string {
 	for i := start; i < end; i++ {
 		ev := m.events[i]
 		ts := time.UnixMilli(ev.Ts).Format("01-02 15:04")
-		reason := shortReason(ev.Reason)
-		line := fmt.Sprintf("#%d %s %s", ev.ID, ts, reason)
+		var line string
+		if m.mode == ModeClose {
+			// Show the diff-derived label (e.g., "lazytmux/main 🧠 (1p)")
+			// instead of the generic "hook"; falls back to the Kind when the
+			// context lookup failed (no prior snapshot).
+			label := m.closeContexts[ev.ID].Label
+			if label == "" {
+				label = ev.Kind
+			}
+			line = fmt.Sprintf("%s  %s", ts, label)
+		} else {
+			line = fmt.Sprintf("#%d %s %s", ev.ID, ts, shortReason(ev.Reason))
+		}
 		dim := m.dimOlderThan > 0 && now.Sub(time.UnixMilli(ev.Ts)) > m.dimOlderThan
 		style := rowDefault
 		switch {

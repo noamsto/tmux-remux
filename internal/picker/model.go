@@ -67,6 +67,19 @@ type PickerModel struct {
 	loadingSHAs      map[string]bool   // sha → in-flight load
 	previewScroll    int               // lines scrolled up from the tail; 0 = bottom
 	previewScrollX   int               // visible cells shifted right; 0 = left edge
+	// closeContexts holds per-close-event derived data: a short human label
+	// and the sub-manifest of what was lost. Populated by SetCloseContexts
+	// before Bootstrap. Keys are store.Event IDs. Empty in snapshot mode.
+	closeContexts map[int64]CloseContext
+}
+
+// CloseContext is the picker-facing summary of a single close event, used to
+// render rich row labels and a preview-pane tree. The Label is shown alongside
+// the timestamp; SubManifest is rendered as the close-mode preview tree and
+// is also what restore.BuildPlan operates on when Enter is pressed.
+type CloseContext struct {
+	Label       string
+	SubManifest snapshot.Manifest
 }
 
 // NewPickerModel builds the initial state. The caller is responsible for
@@ -257,6 +270,11 @@ func descendsFrom(n, ancestor *TreeNode) bool {
 }
 
 func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Footer notes are transient by design: clear on any key so a stale
+	// "(invalid manifest)" doesn't follow the user as they navigate to a
+	// recoverable row. Handlers that want to surface a fresh note set it
+	// after this clear.
+	m.footerNote = ""
 	// Preview scroll: Alt+J/K / PgUp/PgDn. Available whenever the picker is in
 	// snapshot mode — scroll up to read past output without leaving the cursor
 	// pane. We approximate the inner height with m.height-3 (footer+borders).
@@ -448,10 +466,16 @@ func (m PickerModel) Filter() filter.Filter { return m.filter }
 // SelectedID returns the event ID of the row the user confirmed, or 0 on cancel.
 func (m PickerModel) SelectedID() int64 { return m.selectedID }
 
-// SelectedManifest returns the parsed manifest of the selected event.
+// SelectedManifest returns the parsed manifest of the selected event. For
+// close-event mode this is the sub-manifest of just-the-closed-entity (as
+// resolved by SetCloseContexts), so callers can hand it directly to
+// restore.BuildPlan to recreate the lost session/window.
 func (m PickerModel) SelectedManifest() snapshot.Manifest {
 	if m.selectedID == 0 {
 		return snapshot.Manifest{}
+	}
+	if m.mode == ModeClose {
+		return m.closeContexts[m.selectedID].SubManifest
 	}
 	return m.manifests[m.selectedID]
 }
@@ -465,6 +489,22 @@ func (m PickerModel) Cursor() int { return m.cursor }
 // TreeCursor returns the index of the focused node in the visible-tree list.
 // Exported for tests.
 func (m PickerModel) TreeCursor() int { return m.treeCursor }
+
+// SetCloseContexts attaches the diff-derived ClosedItem summaries (label + sub-
+// manifest) for each close event. Call between NewPickerModel and Bootstrap.
+// No-op when ctx is nil.
+func (m *PickerModel) SetCloseContexts(ctx map[int64]CloseContext) {
+	if ctx == nil {
+		return
+	}
+	m.closeContexts = ctx
+}
+
+// CloseContextFor returns the cached close context for the given event ID,
+// or the zero-value CloseContext if absent.
+func (m PickerModel) CloseContextFor(id int64) CloseContext {
+	return m.closeContexts[id]
+}
 
 // FooterNote returns the transient warning text (exported for tests + view).
 func (m PickerModel) FooterNote() string { return m.footerNote }
@@ -532,10 +572,23 @@ func (m *PickerModel) ensureManifest() {
 	if _, bad := m.manifestErrors[ev.ID]; bad {
 		return
 	}
-	man, err := parseEventManifest(ev)
-	if err != nil {
-		m.manifestErrors[ev.ID] = err
-		return
+	var man snapshot.Manifest
+	if m.mode == ModeClose {
+		// Close events store their post-close index, not a snapshot manifest.
+		// Use the diff-derived sub-manifest (set via SetCloseContexts) so the
+		// tree pane shows what was lost rather than an empty event.
+		man = m.closeContexts[ev.ID].SubManifest
+		if len(man.Sessions) == 0 {
+			m.manifestErrors[ev.ID] = fmt.Errorf("close event has no recoverable entity")
+			return
+		}
+	} else {
+		var err error
+		man, err = parseEventManifest(ev)
+		if err != nil {
+			m.manifestErrors[ev.ID] = err
+			return
+		}
 	}
 	m.manifests[ev.ID] = man
 	tree := BuildTree(man)

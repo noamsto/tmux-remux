@@ -189,23 +189,35 @@ func newUndoCmd() *cobra.Command {
 				if err != nil || len(evs) == 0 {
 					return err
 				}
-				var wrapped struct {
-					Index json.RawMessage `json:"index"`
+				ev := evs[0]
+				closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
+				if err != nil {
+					return fmt.Errorf("parse close event: %w", err)
 				}
-				if err := json.Unmarshal([]byte(evs[0].ManifestJSON), &wrapped); err != nil {
-					return err
+				snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
+				if err != nil {
+					return fmt.Errorf("find pre-close snapshot: %w", err)
 				}
-				var m snapshot.Manifest
-				if len(wrapped.Index) > 0 {
-					_ = json.Unmarshal(wrapped.Index, &m)
+				if snap == nil {
+					return fmt.Errorf("no pre-close snapshot — nothing to undo against")
 				}
+				var prior snapshot.Manifest
+				if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
+					return fmt.Errorf("parse pre-close snapshot: %w", err)
+				}
+				item := closeevent.FindClosed(prior, closeMan, ev.Kind)
+				if item == nil {
+					return fmt.Errorf("could not identify closed entity in pre-close snapshot")
+				}
+				m := item.SubManifest(prior.Host, prior.SavedAt)
 				t := tmux.NewClient("tmux")
 				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 				plan := restore.BuildPlan(m, filter.Filter{}, nil, opts)
 				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}
-				_, err = db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", evs[0].ID)
+				focusRestored(ctx, t, m)
+				_, err = db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", ev.ID)
 				return err
 			})
 		},
@@ -246,6 +258,9 @@ func newPickCmd() *cobra.Command {
 
 				sb := scrollback.New(cfg.ScrollbackDir)
 				m := picker.NewPickerModel(mode, evs, runningSet, sb)
+				if mode == picker.ModeClose {
+					m.SetCloseContexts(buildCloseContexts(ctx, db, evs))
+				}
 				m.Bootstrap()
 
 				prog := tea.NewProgram(m)
@@ -261,12 +276,72 @@ func newPickCmd() *cobra.Command {
 				manifest := final.SelectedManifest()
 				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 				plan := restore.BuildPlan(manifest, final.Filter(), nil, buildOpts)
-				return restore.Apply(ctx, t, plan)
+				if err := restore.Apply(ctx, t, plan); err != nil {
+					return err
+				}
+				if mode == picker.ModeClose {
+					focusRestored(ctx, t, manifest)
+				}
+				return nil
 			})
 		},
 	}
 	cmd.Flags().StringVar(&kind, "kind", "snapshot", "snapshot|close")
 	return cmd
+}
+
+// buildCloseContexts resolves each close event against its parent snapshot
+// (most recent snapshot < event.Ts) to derive a short label + sub-manifest of
+// the lost entity. Best-effort: events without a recoverable parent get an
+// empty context, which the picker renders as the bare Kind name.
+func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event) map[int64]picker.CloseContext {
+	out := make(map[int64]picker.CloseContext, len(evs))
+	priorCache := map[int64]snapshot.Manifest{}
+	for _, ev := range evs {
+		closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
+		if err != nil {
+			continue
+		}
+		prior, ok := priorCache[ev.Ts]
+		if !ok {
+			snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
+			if err != nil || snap == nil {
+				priorCache[ev.Ts] = snapshot.Manifest{}
+				continue
+			}
+			if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
+				priorCache[ev.Ts] = snapshot.Manifest{}
+				continue
+			}
+			priorCache[ev.Ts] = prior
+		}
+		item := closeevent.FindClosed(prior, closeMan, ev.Kind)
+		if item == nil {
+			continue
+		}
+		out[ev.ID] = picker.CloseContext{
+			Label:       item.Describe(),
+			SubManifest: item.SubManifest(prior.Host, prior.SavedAt),
+		}
+	}
+	return out
+}
+
+// focusRestored selects the first restored session/window so the user
+// immediately lands on what they un-closed, instead of staying on whatever
+// session was attached when they pressed Enter.
+func focusRestored(ctx context.Context, t *tmux.Client, m snapshot.Manifest) {
+	if len(m.Sessions) == 0 {
+		return
+	}
+	s := m.Sessions[0]
+	if len(s.Windows) == 0 {
+		_, _ = t.Run(ctx, []string{"switch-client", "-t", s.Name})
+		return
+	}
+	target := fmt.Sprintf("%s:%d", s.Name, s.Windows[0].Index)
+	_, _ = t.Run(ctx, []string{"switch-client", "-t", target})
+	_, _ = t.Run(ctx, []string{"select-window", "-t", target})
 }
 
 // newCaptureEventCmd returns the capture-event subcommand.

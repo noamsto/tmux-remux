@@ -6,7 +6,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
+	"strings"
 )
+
+// tmuxFormatRE matches tmux-format directives like #[fg=#94e2d5] embedded in
+// session/window names via automatic-rename-format. tmux evaluates them on
+// render in the status bar, but the raw string is what gets stored in
+// snapshots — so any UI rendering the stored name outside tmux must strip
+// them first.
+var tmuxFormatRE = regexp.MustCompile(`#\[[^\]]*\]`)
+
+// StripFormat removes tmux-format directives from `s` and trims surrounding
+// whitespace.
+func StripFormat(s string) string {
+	return strings.TrimSpace(tmuxFormatRE.ReplaceAllString(s, ""))
+}
 
 // Manifest is the top-level snapshot envelope persisted in events.manifest_json.
 type Manifest struct {

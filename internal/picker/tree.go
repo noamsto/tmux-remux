@@ -4,21 +4,11 @@ package picker
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 )
-
-// tmuxFormatRE matches tmux-format directives like #[fg=#94e2d5] that get
-// embedded in window/session names via automatic-rename-format. tmux evaluates
-// these on render, but the raw string is what gets stored in snapshots.
-var tmuxFormatRE = regexp.MustCompile(`#\[[^\]]*\]`)
-
-func stripTmuxFormat(s string) string {
-	return strings.TrimSpace(tmuxFormatRE.ReplaceAllString(s, ""))
-}
 
 // NodeKind identifies the level of a TreeNode.
 type NodeKind int
@@ -92,11 +82,11 @@ func BuildTree(m snapshot.Manifest) *TreeNode {
 }
 
 func sessionLabel(s *snapshot.Session) string {
-	return fmt.Sprintf("%s (%dw)", stripTmuxFormat(s.Name), len(s.Windows))
+	return fmt.Sprintf("%s (%dw)", snapshot.StripFormat(s.Name), len(s.Windows))
 }
 
 func windowLabel(w *snapshot.Window) string {
-	return fmt.Sprintf("%d: %s (%dp)", w.Index, stripTmuxFormat(w.Name), len(w.Panes))
+	return fmt.Sprintf("%d: %s (%dp)", w.Index, snapshot.StripFormat(w.Name), len(w.Panes))
 }
 
 func paneLabel(p *snapshot.Pane) string {

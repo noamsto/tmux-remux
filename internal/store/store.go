@@ -130,6 +130,28 @@ func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
 	return res.LastInsertId()
 }
 
+// LatestSnapshotBefore returns the newest snapshot event whose timestamp is
+// strictly less than `ts`, or (nil, nil) when none exists. Used by the close-
+// event picker to recover the pre-close state for diffing + restoration.
+func (s *Store) LatestSnapshotBefore(ctx context.Context, ts int64) (*Event, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
+		FROM events
+		WHERE kind = 'snapshot' AND ts < ?
+		ORDER BY ts DESC
+		LIMIT 1
+	`, ts)
+	var ev Event
+	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query latest snapshot before %d: %w", ts, err)
+	}
+	return &ev, nil
+}
+
 // LatestSnapshot returns the newest snapshot event by timestamp, or (nil, nil)
 // when no snapshot exists.
 func (s *Store) LatestSnapshot(ctx context.Context) (*Event, error) {
