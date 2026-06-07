@@ -83,9 +83,21 @@ type BuildOptions struct {
 	AllowList []string
 }
 
+// PlanStats summarizes what BuildPlan kept and filtered, for restore logging
+// and the post-restore display-message. "Idle" sessions are ones the smart
+// filter dropped entirely because every window was idle plain shells.
+type PlanStats struct {
+	SessionsKept           int
+	SessionsSkippedRunning int
+	SessionsSkippedStale   int
+	SessionsSkippedIdle    int
+	WindowsSkippedIdle     int
+}
+
 // BuildPlan builds an ordered slice of Actions to restore the manifest,
-// honoring the filter and the allow-list of commands.
-func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]bool, opts BuildOptions) []Action {
+// honoring the filter and the allow-list of commands. The returned PlanStats
+// reports what was kept vs filtered, per reason.
+func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]bool, opts BuildOptions) ([]Action, PlanStats) {
 	allowed := map[string]bool{}
 	for _, c := range opts.AllowList {
 		allowed[c] = true
@@ -106,13 +118,20 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 	}
 
 	var plan []Action
+	var stats PlanStats
 	for _, sess := range m.Sessions {
-		if f.SkipSession(sess, runningSessions) {
+		switch f.SessionSkipReason(sess, runningSessions) {
+		case "running":
+			stats.SessionsSkippedRunning++
+			continue
+		case "stale":
+			stats.SessionsSkippedStale++
 			continue
 		}
 		var sessionStarted bool
 		for _, win := range sess.Windows {
 			if f.SkipWindow(win) {
+				stats.WindowsSkippedIdle++
 				continue
 			}
 			var firstPane *snapshot.Pane
@@ -128,6 +147,7 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				keptPanes = append(keptPanes, p)
 			}
 			if firstPane == nil {
+				stats.WindowsSkippedIdle++
 				continue
 			}
 			if !sessionStarted {
@@ -153,6 +173,11 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				Layout: win.Layout,
 			})
 		}
+		if sessionStarted {
+			stats.SessionsKept++
+		} else if len(sess.Windows) > 0 {
+			stats.SessionsSkippedIdle++
+		}
 	}
-	return plan
+	return plan, stats
 }

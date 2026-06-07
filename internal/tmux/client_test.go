@@ -122,6 +122,28 @@ func TestRunPreservesParentTmuxEnv(t *testing.T) {
 	}
 }
 
+// TestServerStartTimeParsesSecondsToMillis verifies #{start_time} (epoch
+// seconds) is converted to the millisecond scale used by events.ts.
+func TestServerStartTimeParsesSecondsToMillis(t *testing.T) {
+	fake := writeFakeTmux(t, `echo 1780811351`)
+	c := tmux.NewClient(fake)
+	got, err := c.ServerStartTime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 1780811351000 {
+		t.Errorf("ServerStartTime = %d, want 1780811351000", got)
+	}
+}
+
+func TestServerStartTimeRejectsGarbage(t *testing.T) {
+	fake := writeFakeTmux(t, `echo not-a-number`)
+	c := tmux.NewClient(fake)
+	if _, err := c.ServerStartTime(context.Background()); err == nil {
+		t.Error("expected parse error for non-numeric start_time")
+	}
+}
+
 // writeFakeTmux drops a tiny bash script in t.TempDir whose body is `body`
 // and returns its path so tests can use it as the Client binary.
 func writeFakeTmux(t *testing.T, body string) string {

@@ -33,20 +33,25 @@ func (f Filter) SkipSnapshot(savedAtMillis int64) bool {
 	return now.Sub(saved) > f.MaxSnapshotAge
 }
 
+// SessionSkipReason reports why the session would be filtered out:
+// "running", "stale", or "" when it should be kept.
+func (f Filter) SessionSkipReason(s snapshot.Session, running map[string]bool) string {
+	if f.SkipRunningSessions && running[s.Name] {
+		return "running"
+	}
+	if f.MaxSessionAge > 0 {
+		la := time.Unix(s.LastAttached, 0)
+		if f.now().Sub(la) > f.MaxSessionAge {
+			return "stale"
+		}
+	}
+	return ""
+}
+
 // SkipSession returns true if the session should be filtered out (already
 // running or stale).
 func (f Filter) SkipSession(s snapshot.Session, running map[string]bool) bool {
-	if f.SkipRunningSessions && running[s.Name] {
-		return true
-	}
-	if f.MaxSessionAge > 0 {
-		now := f.now()
-		la := time.Unix(s.LastAttached, 0)
-		if now.Sub(la) > f.MaxSessionAge {
-			return true
-		}
-	}
-	return false
+	return f.SessionSkipReason(s, running) != ""
 }
 
 // SkipPane returns true if the pane should be filtered out (idle plain shell).

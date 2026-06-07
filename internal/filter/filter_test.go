@@ -70,3 +70,25 @@ func TestSkipIdleWindow(t *testing.T) {
 		t.Error("mixed window should not be skipped")
 	}
 }
+
+func TestSessionSkipReason(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	f := filter.Filter{
+		Now:                 now,
+		MaxSessionAge:       time.Hour,
+		SkipRunningSessions: true,
+	}
+	fresh := snapshot.Session{Name: "fresh", LastAttached: now.Unix() - 60}
+	stale := snapshot.Session{Name: "stale", LastAttached: now.Unix() - 7200}
+	running := map[string]bool{"fresh": true}
+
+	if got := f.SessionSkipReason(fresh, running); got != "running" {
+		t.Errorf("running session: reason = %q, want \"running\"", got)
+	}
+	if got := f.SessionSkipReason(stale, nil); got != "stale" {
+		t.Errorf("stale session: reason = %q, want \"stale\"", got)
+	}
+	if got := f.SessionSkipReason(fresh, nil); got != "" {
+		t.Errorf("kept session: reason = %q, want \"\"", got)
+	}
+}

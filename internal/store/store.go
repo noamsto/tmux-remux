@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	// Register the modernc.org/sqlite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
@@ -132,7 +133,8 @@ func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
 
 // LatestSnapshotBefore returns the newest snapshot event whose timestamp is
 // strictly less than `ts`, or (nil, nil) when none exists. Used by the close-
-// event picker to recover the pre-close state for diffing + restoration.
+// event picker to recover the pre-close state for diffing + restoration, and by
+// restore to anchor selection to before the current server started.
 func (s *Store) LatestSnapshotBefore(ctx context.Context, ts int64) (*Event, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
@@ -229,8 +231,13 @@ func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) 
 	return out, rows.Err()
 }
 
-// PruneSnapshots deletes snapshot events beyond the keep newest.
-func (s *Store) PruneSnapshots(ctx context.Context, keep int) error {
+// PruneSnapshots deletes snapshot events beyond the keep newest, except that
+// the newest snapshot of each UTC calendar day in the 7 days before nowMs
+// also survives. The per-day floor is the retention safety net: with 60s
+// timer saves, keep-N alone evicts the pre-shutdown snapshot ~N minutes into
+// a new server's life — exactly when a clobbered auto-restore most needs it.
+func (s *Store) PruneSnapshots(ctx context.Context, keep int, nowMs int64) error {
+	weekAgo := nowMs - 7*24*int64(time.Hour/time.Millisecond)
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind = 'snapshot'
@@ -240,7 +247,17 @@ func (s *Store) PruneSnapshots(ctx context.Context, keep int) error {
 		      ORDER BY ts DESC
 		      LIMIT ?
 		  )
-	`, keep)
+		  AND id NOT IN (
+		      SELECT id FROM events
+		      WHERE kind = 'snapshot' AND ts >= ?
+		        AND ts IN (
+		            SELECT max(ts)
+		            FROM events
+		            WHERE kind = 'snapshot' AND ts >= ?
+		            GROUP BY date(ts/1000, 'unixepoch')
+		        )
+		  )
+	`, keep, weekAgo, weekAgo)
 	if err != nil {
 		return fmt.Errorf("prune snapshots: %w", err)
 	}

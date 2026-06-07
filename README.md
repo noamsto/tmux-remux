@@ -98,14 +98,14 @@ That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see w
 | Command | Purpose |
 |---|---|
 | `tmux-state save` | Snapshot the running server now (idempotent — skipped if nothing changed) |
-| `tmux-state restore --auto` | Restore latest snapshot through smart filter |
+| `tmux-state restore --auto` | Restore the newest snapshot from before the current server started (so saves made by the freshly started server never shadow the pre-shutdown state), filtered by smart filter |
 | `tmux-state undo --pop` | Restore the most recent close event (pane / window / session) |
 | `tmux-state pick --kind=close` | Interactive picker over close events |
 | `tmux-state pick --kind=snapshot` | Interactive picker over snapshot history (default) |
 | `tmux-state capture-event KIND` | Record a close event (called from tmux hooks; not for direct use) |
 | `tmux-state list` | List events, human-readable |
 | `tmux-state list --json` | List events as newline-delimited JSON (for external pickers) |
-| `tmux-state prune` | Apply retention limits (default: 20 snapshots, 50 close events) |
+| `tmux-state prune` | Apply retention limits (default: keep the 20 newest snapshots plus the newest snapshot per UTC day for the last 7 days; 50 close events) |
 | `tmux-state gc` | Reap orphan scrollback files (refcount = 0) |
 | `tmux-state version` | Print version |
 
@@ -139,6 +139,7 @@ $XDG_DATA_HOME/tmux-state/
 ├── state.db                                  SQLite event store (events, scrollbacks, meta)
 ├── state.db-wal                              SQLite WAL file
 ├── state.db-shm                              SQLite shared memory
+├── state.log                                 Operational decisions and errors (rotated at 1 MB)
 └── scrollbacks/
     └── <sha256[:2]>/<sha256>.zst             Content-addressed, zstd-compressed pane scrollbacks
 ```

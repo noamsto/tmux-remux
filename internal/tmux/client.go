@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -142,4 +143,21 @@ func (c *Client) CapturePane(ctx context.Context, target string) ([]byte, error)
 		return nil, fmt.Errorf("capture-pane %q: %w", target, err)
 	}
 	return []byte(out), nil
+}
+
+// ServerStartTime returns the running server's start time in Unix
+// milliseconds, via the server-scoped #{start_time} format (epoch seconds).
+// Restore uses it to anchor snapshot selection to "before this server
+// existed", so snapshots written by the current server's own save hooks can
+// never be selected (the save/restore race at server birth).
+func (c *Client) ServerStartTime(ctx context.Context) (int64, error) {
+	out, err := c.Run(ctx, []string{"display-message", "-p", "#{start_time}"})
+	if err != nil {
+		return 0, err
+	}
+	secs, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse start_time %q: %w", strings.TrimSpace(out), err)
+	}
+	return secs * 1000, nil
 }

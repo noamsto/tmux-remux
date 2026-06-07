@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/noamsto/tmux-state/internal/store"
 )
 
@@ -201,7 +203,7 @@ func TestPruneSnapshotsKeepsNewest(t *testing.T) {
 		}
 	}
 
-	if err := db.PruneSnapshots(ctx, 3); err != nil {
+	if err := db.PruneSnapshots(ctx, 3, time.Now().UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,6 +246,65 @@ func TestUpsertScrollbackIncrementsRefcount(t *testing.T) {
 	}
 	if lastUsed != 200 {
 		t.Errorf("last_used_ts = %d, want 200", lastUsed)
+	}
+}
+
+// TestPruneSnapshotsKeepsNewestPerDayWithinWeek verifies the retention
+// safety net: besides the keep-N-newest window, the newest snapshot of each
+// UTC day in the last 7 days survives — so a pre-shutdown snapshot is not
+// evicted by a burst of fresh post-boot saves (the 2026-06-07 data loss).
+// UTC-day grouping keeps the test deterministic in any host timezone.
+func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const day = int64(24 * time.Hour / time.Millisecond)
+	now := int64(1780000000000) // fixed anchor
+	insert := func(ts int64) {
+		t.Helper()
+		if _, err := db.InsertEvent(ctx, store.Event{
+			Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Two snapshots on each of day-3 and day-2 (the later one per day must
+	// survive), one on day-10 (outside the week — must be pruned), and a
+	// burst of 4 fresh snapshots that fills the keep-N window.
+	insert(now - 10*day)
+	insert(now - 3*day)
+	insert(now - 3*day + 3_600_000)
+	insert(now - 2*day)
+	insert(now - 2*day + 3_600_000)
+	for i := int64(0); i < 4; i++ {
+		insert(now - 3000 + i*1000)
+	}
+
+	if err := db.PruneSnapshots(ctx, 3, now); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]int64, 0, len(all))
+	for _, ev := range all { // ListEvents returns ts DESC
+		got = append(got, ev.Ts)
+	}
+	want := []int64{
+		now, now - 1000, now - 2000, // 3 newest
+		now - 2*day + 3_600_000, // newest of day-2
+		now - 3*day + 3_600_000, // newest of day-3
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("survivors mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -319,5 +380,42 @@ func TestSetGetMeta(t *testing.T) {
 	missing, err := db.GetMeta(ctx, "nope")
 	if err != nil || missing != "" {
 		t.Errorf("missing key: got %q, %v; want \"\", nil", missing, err)
+	}
+}
+
+// TestLatestSnapshotBeforeIgnoresNewerSnapshots pins the semantics restore
+// relies on: a snapshot written at/after the anchor (server start) is never
+// selected, only the newest strictly-older one.
+func TestLatestSnapshotBeforeIgnoresNewerSnapshots(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	db, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, ts := range []int64{100, 200} { // 100 = pre-boot, 200 = post-start save
+		if _, err := db.InsertEvent(ctx, store.Event{
+			Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ev, err := db.LatestSnapshotBefore(ctx, 150)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev == nil || ev.Ts != 100 {
+		t.Fatalf("LatestSnapshotBefore(150) = %+v, want Ts=100", ev)
+	}
+
+	ev, err = db.LatestSnapshotBefore(ctx, 100) // strict <: equal ts excluded
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev != nil {
+		t.Errorf("LatestSnapshotBefore(100) = %+v, want nil", ev)
 	}
 }

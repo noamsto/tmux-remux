@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/noamsto/tmux-state/internal/applog"
 	"github.com/noamsto/tmux-state/internal/closeevent"
 	"github.com/noamsto/tmux-state/internal/config"
 	"github.com/noamsto/tmux-state/internal/filter"
@@ -36,6 +37,10 @@ var hostname = sync.OnceValue(func() string {
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "tmux-state: error:", err)
+		if log, lerr := applog.Open(loadConfig().LogPath); lerr == nil {
+			log.Logf("error: %v (args: %v)", err, os.Args[1:])
+			_ = log.Close()
+		}
 		os.Exit(1)
 	}
 }
@@ -113,7 +118,7 @@ func newSaveCmd() *cobra.Command {
 				if err := saver.Save(ctx, reason); err != nil {
 					return err
 				}
-				return db.PruneSnapshots(ctx, cfg.SnapshotHistoryLimit)
+				return db.PruneSnapshots(ctx, cfg.SnapshotHistoryLimit, time.Now().UnixMilli())
 			})
 		},
 	}
@@ -132,16 +137,35 @@ func newRestoreCmd() *cobra.Command {
 				if cfg.RestoreMode == config.RestoreOff && auto {
 					return nil
 				}
-				ev, err := db.LatestSnapshot(ctx)
+				log, err := applog.Open(cfg.LogPath)
 				if err != nil {
 					return err
 				}
+				defer func() { _ = log.Close() }()
+
+				t := tmux.NewClient("tmux")
+				startMs, err := t.ServerStartTime(ctx)
+				if err != nil {
+					log.Logf("restore: server start time: %v", err)
+					return err
+				}
+				// Anchor selection to before this server existed: snapshots
+				// written by the current server's own save hooks (the
+				// session-created hook and the systemd timer both race this
+				// command at server birth) can never be selected.
+				ev, err := db.LatestSnapshotBefore(ctx, startMs)
+				if err != nil {
+					log.Logf("restore: %v", err)
+					return err
+				}
 				if ev == nil {
+					log.Logf("restore: no snapshot before server start — nothing to do")
 					return nil
 				}
 
 				var m snapshot.Manifest
 				if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
+					log.Logf("restore: parse snapshot %d: %v", ev.ID, err)
 					return err
 				}
 
@@ -152,20 +176,40 @@ func newRestoreCmd() *cobra.Command {
 					SkipIdleWindows:     cfg.RestoreSkipIdleWindows,
 					SkipRunningSessions: cfg.SkipRunningSessions,
 				}
+				age := time.Since(time.UnixMilli(ev.Ts)).Round(time.Second)
 				if f.SkipSnapshot(ev.Ts) {
+					log.Logf("restore: snapshot %d (age %s) older than max-snapshot-age — skipped", ev.ID, age)
 					return nil
 				}
 
-				t := tmux.NewClient("tmux")
 				running := map[string]bool{}
-				rows, _ := t.ListSessions(ctx)
+				rows, err := t.ListSessions(ctx)
+				if err != nil {
+					log.Logf("restore: list sessions: %v (skip-running disabled this pass)", err)
+				}
 				for _, s := range rows {
 					running[s.Name] = true
 				}
 
 				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan := restore.BuildPlan(m, f, running, opts)
-				return restore.Apply(ctx, t, plan)
+				plan, stats := restore.BuildPlan(m, f, running, opts)
+				if err := restore.Apply(ctx, t, plan); err != nil {
+					log.Logf("restore: snapshot %d (age %s): apply failed: %v", ev.ID, age, err)
+					return err
+				}
+				log.Logf("restore: snapshot %d (age %s): %d sessions restored, skipped %d running / %d stale / %d idle (%d idle windows), %d actions",
+					ev.ID, age, stats.SessionsKept, stats.SessionsSkippedRunning,
+					stats.SessionsSkippedStale, stats.SessionsSkippedIdle,
+					stats.WindowsSkippedIdle, len(plan))
+				// Launch feedback: make a filtered-to-nothing restore visible
+				// at the moment it happens. Best-effort — at server birth
+				// there may be no attached client to display to.
+				if auto && (stats.SessionsKept > 0 || stats.SessionsSkippedIdle > 0) {
+					_, _ = t.Run(ctx, []string{"display-message",
+						fmt.Sprintf("tmux-state: restored %d sessions (%d filtered)",
+							stats.SessionsKept, stats.SessionsSkippedIdle)})
+				}
+				return nil
 			})
 		},
 	}
@@ -211,7 +255,7 @@ func newUndoCmd() *cobra.Command {
 				m := item.SubManifest(prior.Host, prior.SavedAt)
 				t := tmux.NewClient("tmux")
 				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+				plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
 				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}
@@ -274,7 +318,7 @@ func newPickCmd() *cobra.Command {
 
 				manifest := final.SelectedManifest()
 				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
+				plan, _ := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
 				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}
@@ -418,7 +462,7 @@ func newPruneCmd() *cobra.Command {
 		Short: "Apply retention limits to events",
 		RunE: func(*cobra.Command, []string) error {
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
-				if err := db.PruneSnapshots(ctx, cfg.SnapshotHistoryLimit); err != nil {
+				if err := db.PruneSnapshots(ctx, cfg.SnapshotHistoryLimit, time.Now().UnixMilli()); err != nil {
 					return err
 				}
 				return db.PruneCloseEvents(ctx, cfg.CloseEventLimit)

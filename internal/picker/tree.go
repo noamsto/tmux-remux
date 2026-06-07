@@ -118,14 +118,14 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 		wasRunning := sess.SkipReason == "running"
 		sess.Skipped = false
 		sess.SkipReason = ""
-		sessionSkipped := f.SkipSession(*s, runningSessions)
-		if sessionSkipped {
+		if reason := f.SessionSkipReason(*s, runningSessions); reason != "" {
 			sess.Skipped = true
-			sess.SkipReason = sessionSkipReason(f, *s, runningSessions)
+			sess.SkipReason = reason
 			c.SkippedSessions++
 		} else {
 			c.KeptSessions++
 		}
+		sessionSkipped := sess.Skipped
 		// Collapse already-running sessions so they read as a single
 		// "name (running)" line; only on the transition, so a manual
 		// re-expand survives later decorate passes.
@@ -183,11 +183,4 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 		}
 	}
 	return c
-}
-
-func sessionSkipReason(f filter.Filter, s snapshot.Session, running map[string]bool) string {
-	if f.SkipRunningSessions && running[s.Name] {
-		return "running"
-	}
-	return "stale"
 }

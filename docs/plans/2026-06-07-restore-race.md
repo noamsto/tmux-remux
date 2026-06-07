@@ -420,9 +420,9 @@ Append to `internal/store/store_test.go` (add `"time"` to imports if absent):
 ```go
 // TestPruneSnapshotsKeepsNewestPerDayWithinWeek verifies the retention
 // safety net: besides the keep-N-newest window, the newest snapshot of each
-// local day in the last 7 days survives — so a pre-shutdown snapshot is not
+// UTC day in the last 7 days survives — so a pre-shutdown snapshot is not
 // evicted by a burst of fresh post-boot saves (the 2026-06-07 data loss).
-// Timestamps sit at ~noon UTC so local-day grouping is stable in any TZ.
+// UTC-day grouping keeps the test deterministic in any host timezone.
 func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
@@ -433,7 +433,7 @@ func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
 	defer db.Close()
 
 	const day = int64(24 * time.Hour / time.Millisecond)
-	now := int64(1780000000000) // fixed anchor, ~noon UTC
+	now := int64(1780000000000) // fixed anchor
 	insert := func(ts int64) {
 		t.Helper()
 		if _, err := db.InsertEvent(ctx, store.Event{
@@ -497,7 +497,7 @@ Replace `PruneSnapshots` in `internal/store/store.go`:
 
 ```go
 // PruneSnapshots deletes snapshot events beyond the keep newest, except that
-// the newest snapshot of each local calendar day in the 7 days before nowMs
+// the newest snapshot of each UTC calendar day in the 7 days before nowMs
 // also survives. The per-day floor is the retention safety net: with 60s
 // timer saves, keep-N alone evicts the pre-shutdown snapshot ~N minutes into
 // a new server's life — exactly when a clobbered auto-restore most needs it.
@@ -513,14 +513,16 @@ func (s *Store) PruneSnapshots(ctx context.Context, keep int, nowMs int64) error
 		      LIMIT ?
 		  )
 		  AND id NOT IN (
-		      SELECT id FROM (
-		          SELECT id, max(ts)
-		          FROM events
-		          WHERE kind = 'snapshot' AND ts >= ?
-		          GROUP BY date(ts/1000, 'unixepoch', 'localtime')
-		      )
+		      SELECT id FROM events
+		      WHERE kind = 'snapshot' AND ts >= ?
+		        AND ts IN (
+		            SELECT max(ts)
+		            FROM events
+		            WHERE kind = 'snapshot' AND ts >= ?
+		            GROUP BY date(ts/1000, 'unixepoch')
+		        )
 		  )
-	`, keep, weekAgo)
+	`, keep, weekAgo, weekAgo)
 	if err != nil {
 		return fmt.Errorf("prune snapshots: %w", err)
 	}
@@ -528,7 +530,7 @@ func (s *Store) PruneSnapshots(ctx context.Context, keep int, nowMs int64) error
 }
 ```
 
-(`SELECT id, max(ts) ... GROUP BY day` uses SQLite's documented bare-column-with-max behavior: the `id` comes from the row holding the per-group max.) Add `"time"` to store.go imports if absent.
+(The `ts IN (SELECT max(ts) ... GROUP BY day)` shape avoids SQLite's bare-column-with-max ambiguity; on a same-ts tie both rows survive, which is fine for a safety net.) Add `"time"` to store.go imports if absent.
 
 - [ ] **Step 4: Update callers in `cmd/tmux-state/main.go`**
 

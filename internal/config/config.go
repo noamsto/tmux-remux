@@ -25,6 +25,7 @@ type Config struct {
 	DBPath        string
 	ScrollbackDir string
 	LockPath      string
+	LogPath       string
 
 	// Save behavior
 	MinSaveInterval      time.Duration
@@ -61,6 +62,7 @@ func Default() Config {
 		DBPath:        filepath.Join(root, "state.db"),
 		ScrollbackDir: filepath.Join(root, "scrollbacks"),
 		LockPath:      filepath.Join(rt, "write.lock"),
+		LogPath:       filepath.Join(root, "state.log"),
 
 		MinSaveInterval:      30 * time.Second,
 		SnapshotHistoryLimit: 20,
@@ -91,6 +93,7 @@ func (c Config) EnsureDirs() error {
 		filepath.Dir(c.DBPath),
 		c.ScrollbackDir,
 		filepath.Dir(c.LockPath),
+		filepath.Dir(c.LogPath),
 	} {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return fmt.Errorf("mkdir %q: %w", d, err)

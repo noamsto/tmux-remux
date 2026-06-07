@@ -2,6 +2,7 @@ package restore_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -29,7 +30,7 @@ func TestBuildPlanForFreshServer(t *testing.T) {
 			}},
 		}},
 	}
-	plan := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
 	want := []restore.Action{
 		restore.CreateSession{Name: "s1", Cwd: "/a"},
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim"},
@@ -53,7 +54,7 @@ func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 			}},
 		}},
 	}
-	plan := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
 	wantStartup := `'/usr/bin/tmux-state' cat-scrollback deadbeef; exec nvim`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
@@ -78,7 +79,7 @@ func TestBuildPlanScrollbackWithoutAllowedCommandUsesShell(t *testing.T) {
 			}},
 		}},
 	}
-	plan := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
 	wantStartup := `'/usr/bin/tmux-state' cat-scrollback abc; exec /bin/zsh`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
@@ -105,7 +106,7 @@ func TestBuildPlanFiltersIdleShellPanes(t *testing.T) {
 		}},
 	}
 	f := filter.Filter{SkipIdleShells: true}
-	plan := restore.BuildPlan(m, f, nil, restore.BuildOptions{})
+	plan, _ := restore.BuildPlan(m, f, nil, restore.BuildOptions{})
 	for _, a := range plan {
 		if sp, ok := a.(restore.SplitPane); ok && sp.Cwd == "/b" {
 			t.Error("idle-shell pane should be filtered out")
@@ -121,10 +122,54 @@ func TestBuildPlanSkipsRunningSessions(t *testing.T) {
 		},
 	}
 	f := filter.Filter{SkipRunningSessions: true}
-	plan := restore.BuildPlan(m, f, map[string]bool{"s1": true}, restore.BuildOptions{})
+	plan, _ := restore.BuildPlan(m, f, map[string]bool{"s1": true}, restore.BuildOptions{})
 	for _, a := range plan {
 		if cs, ok := a.(restore.CreateSession); ok && cs.Name == "s1" {
 			t.Error("running session should be skipped")
 		}
+	}
+}
+
+func TestBuildPlanStatsCountsKeptAndSkipped(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{
+			{Name: "kept", LastAttached: now.Unix() - 60, Windows: []snapshot.Window{{
+				Index: 1, Layout: "L",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "nvim", ChildCount: 1}},
+			}}},
+			{Name: "running", LastAttached: now.Unix() - 60, Windows: []snapshot.Window{{
+				Index: 1, Layout: "L",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/b", Command: "nvim", ChildCount: 1}},
+			}}},
+			{Name: "idle", LastAttached: now.Unix() - 60, Windows: []snapshot.Window{{
+				Index: 1, Layout: "L",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/c", Command: "fish", ChildCount: 0}},
+			}}},
+			{Name: "stale", LastAttached: now.Unix() - 7200, Windows: []snapshot.Window{{
+				Index: 1, Layout: "L",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/d", Command: "nvim", ChildCount: 1}},
+			}}},
+		},
+	}
+	f := filter.Filter{
+		Now:                 now,
+		MaxSessionAge:       time.Hour,
+		SkipIdleShells:      true,
+		SkipIdleWindows:     true,
+		SkipRunningSessions: true,
+	}
+	running := map[string]bool{"running": true}
+
+	_, stats := restore.BuildPlan(m, f, running, defaultOpts)
+	want := restore.PlanStats{
+		SessionsKept:           1,
+		SessionsSkippedRunning: 1,
+		SessionsSkippedStale:   1,
+		SessionsSkippedIdle:    1,
+		WindowsSkippedIdle:     1,
+	}
+	if diff := cmp.Diff(want, stats); diff != "" {
+		t.Errorf("stats mismatch (-want +got):\n%s", diff)
 	}
 }

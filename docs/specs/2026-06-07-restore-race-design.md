@@ -61,8 +61,8 @@ day-thinned retention (Fix 2) plus `prefix + R` cover recovery.
 `PruneSnapshots` keeps the union of:
 
 - the `SnapshotHistoryLimit` (default 20) newest snapshots, **and**
-- the newest snapshot per local calendar day for the last 7 days
-  (`date(ts/1000,'unixepoch','localtime')` grouping).
+- the newest snapshot per UTC calendar day for the last 7 days
+  (`date(ts/1000,'unixepoch')` grouping). UTC days keep retention deterministic across timezone changes; the safety-net guarantee is unchanged.
 
 Bounded at ~27 rows, no schema change. A pre-shutdown snapshot now survives a
 week of uptime instead of ~20 minutes, leaving ample time to notice a bad
