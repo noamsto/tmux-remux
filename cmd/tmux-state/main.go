@@ -54,7 +54,6 @@ func newRootCmd() *cobra.Command {
 		newUndoCmd(),
 		newPickCmd(),
 		newCaptureEventCmd(),
-		newIndexUpdateCmd(),
 		newListCmd(),
 		newPruneCmd(),
 		newGCCmd(),
@@ -353,12 +352,21 @@ func newCaptureEventCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return withStore(func(ctx context.Context, _ config.Config, db *store.Store) error {
+				// The closed entity is already gone when the hook fires, so a
+				// live query yields the true post-close survivor set. Errors
+				// (last session closed, server gone) leave the index empty —
+				// which is also the truth: nothing survived.
+				t := tmux.NewClient("tmux")
+				var post closeevent.IndexPost
+				post.Windows, _ = t.ListWindows(ctx)
+				post.Panes, _ = t.ListPanes(ctx)
 				_, err := closeevent.Capture(ctx, db, closeevent.Args{
 					Kind:      args[0],
 					SessionID: session,
 					WindowID:  window,
 					PaneID:    pane,
 					Host:      hostname(),
+					Index:     post,
 				})
 				return err
 			})
@@ -367,30 +375,6 @@ func newCaptureEventCmd() *cobra.Command {
 	cmd.Flags().StringVar(&session, "session", "", "tmux session id ($N)")
 	cmd.Flags().StringVar(&window, "window", "", "tmux window id (@N)")
 	cmd.Flags().StringVar(&pane, "pane", "", "tmux pane id (%N)")
-	return cmd
-}
-
-// newIndexUpdateCmd returns the index-update subcommand.
-func newIndexUpdateCmd() *cobra.Command {
-	var sessionID string
-	cmd := &cobra.Command{
-		Use:   "index-update",
-		Short: "Update the live index for a session (called from structure-change hooks)",
-		RunE: func(*cobra.Command, []string) error {
-			return withStore(func(ctx context.Context, _ config.Config, db *store.Store) error {
-				t := tmux.NewClient("tmux")
-				ws, _ := t.ListWindows(ctx)
-				ps, _ := t.ListPanes(ctx)
-				payload := struct {
-					Windows []tmux.WindowRow `json:"windows"`
-					Panes   []tmux.PaneRow   `json:"panes"`
-				}{ws, ps}
-				data, _ := json.Marshal(payload)
-				return closeevent.UpsertIndex(ctx, db.DB(), sessionID, string(data))
-			})
-		},
-	}
-	cmd.Flags().StringVar(&sessionID, "session", "", "tmux session id ($N)")
 	return cmd
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/noamsto/tmux-state/internal/closeevent"
 	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-state/internal/tmux"
 )
 
 func TestCaptureSessionInsertsRow(t *testing.T) {
@@ -17,9 +18,6 @@ func TestCaptureSessionInsertsRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-
-	payload := `{"name":"s1","windows":[]}`
-	_ = closeevent.UpsertIndex(ctx, db.DB(), "$1", payload)
 
 	id, err := closeevent.Capture(ctx, db, closeevent.Args{
 		Kind: "session-closed", SessionID: "$1", Host: "h",
@@ -42,7 +40,7 @@ func TestCaptureSessionInsertsRow(t *testing.T) {
 	}
 }
 
-func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
+func TestCaptureStoresProvidedPostCloseIndex(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -50,7 +48,39 @@ func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
 	}
 	defer db.Close()
 
-	_ = closeevent.UpsertIndex(ctx, db.DB(), "$1", `{"name":"s1"}`)
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", WindowID: "@5", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("expected event id > 0")
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	cm, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.WindowID != "@5" {
+		t.Errorf("WindowID = %q, want @5", cm.WindowID)
+	}
+	if len(cm.Index.Windows) != 1 || cm.Index.Windows[0].ID != "@1" {
+		t.Errorf("stored index = %+v, want the provided post-close window @1", cm.Index)
+	}
+}
+
+func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 
 	if _, err := closeevent.Capture(ctx, db, closeevent.Args{
 		Kind: "session-closed", SessionID: "$1", Host: "h",

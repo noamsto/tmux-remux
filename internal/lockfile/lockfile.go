@@ -1,5 +1,5 @@
 // Package lockfile provides a simple advisory file lock for serializing
-// tmux-state writers (save, capture-event, index-update).
+// tmux-state writers (save, capture-event).
 package lockfile
 
 import (

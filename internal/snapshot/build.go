@@ -60,13 +60,14 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 	for _, s := range sessions {
 		sess := Session{Name: s.Name, LastAttached: s.LastAttached}
 		for _, w := range winsBySess[s.Name] {
-			win := Window{Index: w.Index, Name: w.Name, Layout: w.Layout}
+			win := Window{Index: w.Index, Name: w.Name, Layout: w.Layout, ID: w.ID}
 			for _, p := range pansByWin[s.Name][w.Index] {
 				cc, _ := ChildCount(p.PID)
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
 					LastUsed:   p.LastUsed,
 					ChildCount: cc,
+					ID:         p.ID,
 				})
 			}
 			sess.Windows = append(sess.Windows, win)

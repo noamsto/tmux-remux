@@ -22,8 +22,8 @@ type CloseManifest struct {
 	Index     IndexPost `json:"index"`
 }
 
-// IndexPost mirrors the payload index-update writes — tmux's list-windows and
-// list-panes at the moment the close hook fired.
+// IndexPost holds tmux's list-windows and list-panes output queried right
+// after the close hook fired — the surviving structure.
 type IndexPost struct {
 	Windows []tmux.WindowRow `json:"windows"`
 	Panes   []tmux.PaneRow   `json:"panes"`
@@ -134,6 +134,28 @@ func findClosedSession(prior snapshot.Manifest, post CloseManifest) *ClosedItem 
 }
 
 func findClosedWindow(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
+	// ID match first: the event records the dying window's id, which pins the
+	// exact entity when several windows closed since the prior snapshot (a
+	// session:index diff would return whichever is missing first). A window
+	// whose id still appears in the post-close index wasn't closed at all —
+	// window-unlinked also fires on move-window.
+	if post.WindowID != "" {
+		for _, w := range post.Index.Windows {
+			if w.ID == post.WindowID {
+				return nil
+			}
+		}
+		for i := range prior.Sessions {
+			s := &prior.Sessions[i]
+			for j := range s.Windows {
+				w := &s.Windows[j]
+				if w.ID == post.WindowID {
+					return &ClosedItem{Window: w, SessionName: s.Name, WindowIndex: w.Index}
+				}
+			}
+		}
+	}
+	// Fallback for snapshots from before ids were recorded: first missing wins.
 	live := map[string]bool{}
 	for _, w := range post.Index.Windows {
 		live[fmt.Sprintf("%s:%d", w.Session, w.Index)] = true
@@ -151,6 +173,26 @@ func findClosedWindow(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 }
 
 func findClosedPane(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
+	// Same id-first strategy as findClosedWindow.
+	if post.PaneID != "" {
+		for _, p := range post.Index.Panes {
+			if p.ID == post.PaneID {
+				return nil
+			}
+		}
+		for i := range prior.Sessions {
+			s := &prior.Sessions[i]
+			for j := range s.Windows {
+				w := &s.Windows[j]
+				for k := range w.Panes {
+					p := &w.Panes[k]
+					if p.ID == post.PaneID {
+						return &ClosedItem{Pane: p, SessionName: s.Name, WindowIndex: w.Index}
+					}
+				}
+			}
+		}
+	}
 	live := map[string]bool{}
 	for _, p := range post.Index.Panes {
 		live[fmt.Sprintf("%s:%d:%d", p.Session, p.WindowIndex, p.PaneIndex)] = true

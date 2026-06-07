@@ -1,9 +1,10 @@
+// Package closeevent records tmux close hooks (pane/window/session) as events
+// and resolves them against pre-close snapshots for undo/restore.
 package closeevent
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/noamsto/tmux-state/internal/store"
@@ -18,6 +19,10 @@ type Args struct {
 	WindowID  string
 	PaneID    string
 	Host      string
+	// Index is the live tmux structure queried AFTER the close (the closed
+	// entity is already gone when the hook fires). Empty when the server is
+	// unreachable — i.e. the last session closed and nothing survived.
+	Index IndexPost
 }
 
 // Capture inserts a close event into the store unless a fresh outer-scope
@@ -56,32 +61,24 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 		}
 	}
 
-	manifest, err := GetIndex(ctx, db.DB(), a.SessionID)
-	if err != nil {
-		return 0, err
-	}
-	if manifest == "" {
-		manifest = "{}"
-	}
-	wrapped := fmt.Sprintf(`{"session_id":%q,"window_id":%q,"pane_id":%q,"index":%s}`,
-		a.SessionID, a.WindowID, a.PaneID, manifest)
-
-	id, err := db.InsertEvent(ctx, store.Event{
-		Ts:           now,
-		Kind:         a.Kind,
-		Scope:        scopeFor(a.Kind),
-		Reason:       "hook",
-		Host:         a.Host,
-		ManifestJSON: wrapped,
+	wrapped, err := json.Marshal(CloseManifest{
+		SessionID: a.SessionID,
+		WindowID:  a.WindowID,
+		PaneID:    a.PaneID,
+		Index:     a.Index,
 	})
 	if err != nil {
 		return 0, err
 	}
 
-	if a.Kind == "session-closed" {
-		_ = DeleteIndex(ctx, db.DB(), a.SessionID)
-	}
-	return id, nil
+	return db.InsertEvent(ctx, store.Event{
+		Ts:           now,
+		Kind:         a.Kind,
+		Scope:        scopeFor(a.Kind),
+		Reason:       "hook",
+		Host:         a.Host,
+		ManifestJSON: string(wrapped),
+	})
 }
 
 func scopeFor(kind string) string {

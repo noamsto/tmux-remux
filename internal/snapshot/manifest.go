@@ -44,6 +44,7 @@ type Window struct {
 	Index  int    `json:"index"`
 	Name   string `json:"name"`
 	Layout string `json:"layout"`
+	ID     string `json:"id,omitempty"` // tmux window id ("@4"); stable within a server lifetime
 	Panes  []Pane `json:"panes"`
 }
 
@@ -56,6 +57,7 @@ type Pane struct {
 	LastUsed      int64    `json:"last_used"`
 	ChildCount    int      `json:"child_count"`
 	ScrollbackSHA string   `json:"scrollback_sha,omitempty"`
+	ID            string   `json:"id,omitempty"` // tmux pane id ("%7"); stable within a server lifetime
 }
 
 // Fingerprint returns a sha256 hex of the manifest with timestamps zeroed,

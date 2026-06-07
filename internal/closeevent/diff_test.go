@@ -84,6 +84,78 @@ func TestFindClosed_NoDiff(t *testing.T) {
 	}
 }
 
+func TestFindClosed_WindowIDDisambiguatesBurstCloses(t *testing.T) {
+	// Two windows closed since the prior snapshot; the event names @3. The
+	// first-missing heuristic would wrongly pick @2.
+	prior := snapshot.Manifest{
+		Sessions: []snapshot.Session{
+			{Name: "s", Windows: []snapshot.Window{
+				{Index: 1, Name: "keep", ID: "@1"},
+				{Index: 2, Name: "first-closed", ID: "@2"},
+				{Index: 3, Name: "second-closed", ID: "@3"},
+			}},
+		},
+	}
+	post := closeevent.CloseManifest{
+		WindowID: "@3",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s", Index: 1, Name: "keep", ID: "@1"}},
+		},
+	}
+	got := closeevent.FindClosed(prior, post, "window-unlinked")
+	if got == nil || got.Window == nil {
+		t.Fatal("expected ClosedItem, got nil")
+	}
+	if got.Window.ID != "@3" {
+		t.Errorf("got window %+v, want ID @3", got.Window)
+	}
+}
+
+func TestFindClosed_MovedWindowIsNotClosed(t *testing.T) {
+	// window-unlinked also fires on move-window: the window survives under
+	// another session, so the event must resolve to nothing.
+	prior := snapshot.Manifest{
+		Sessions: []snapshot.Session{
+			{Name: "a", Windows: []snapshot.Window{{Index: 1, Name: "w", ID: "@5"}}},
+		},
+	}
+	post := closeevent.CloseManifest{
+		WindowID: "@5",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "b", Index: 3, Name: "w", ID: "@5"}},
+		},
+	}
+	if got := closeevent.FindClosed(prior, post, "window-unlinked"); got != nil {
+		t.Errorf("expected nil for a moved window, got %+v", got)
+	}
+}
+
+func TestFindClosed_PaneIDDisambiguatesBurstCloses(t *testing.T) {
+	prior := snapshot.Manifest{
+		Sessions: []snapshot.Session{
+			{Name: "s", Windows: []snapshot.Window{
+				{Index: 1, ID: "@1", Panes: []snapshot.Pane{
+					{Index: 1, Command: "fish", ID: "%1"},
+					{Index: 2, Command: "nvim", ID: "%2"},
+				}},
+			}},
+		},
+	}
+	post := closeevent.CloseManifest{
+		PaneID: "%2",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s", Index: 1, ID: "@1"}},
+		},
+	}
+	got := closeevent.FindClosed(prior, post, "pane-died")
+	if got == nil || got.Pane == nil {
+		t.Fatal("expected ClosedItem, got nil")
+	}
+	if got.Pane.ID != "%2" {
+		t.Errorf("got pane %+v, want ID %%2", got.Pane)
+	}
+}
+
 func TestSubManifest_RoundTripsForRestore(t *testing.T) {
 	item := &closeevent.ClosedItem{
 		SessionName: "lazytmux",

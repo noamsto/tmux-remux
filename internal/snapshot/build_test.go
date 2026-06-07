@@ -52,6 +52,25 @@ func TestBuildAssemblesTree(t *testing.T) {
 	}
 }
 
+func TestBuildCarriesWindowAndPaneIDs(t *testing.T) {
+	fc := &fakeClient{
+		sessions: []tmux.SessionRow{{Name: "s1"}},
+		windows:  []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@4"}},
+		panes:    []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 1, ID: "%7"}},
+	}
+	m, err := snapshot.Build(context.Background(), fc, "h", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := m.Sessions[0].Windows[0]
+	if w.ID != "@4" {
+		t.Errorf("window ID = %q, want @4", w.ID)
+	}
+	if w.Panes[0].ID != "%7" {
+		t.Errorf("pane ID = %q, want %%7", w.Panes[0].ID)
+	}
+}
+
 func TestBuildPopulatesChildCountFromPID(t *testing.T) {
 	// Use the current process PID as a sentinel — it has at least 0 children
 	// and we can verify the field is set (not whatever the zero value is from

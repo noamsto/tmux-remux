@@ -103,7 +103,6 @@ That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see w
 | `tmux-state pick --kind=close` | Interactive picker over close events |
 | `tmux-state pick --kind=snapshot` | Interactive picker over snapshot history (default) |
 | `tmux-state capture-event KIND` | Record a close event (called from tmux hooks; not for direct use) |
-| `tmux-state index-update --session=$N` | Update live shadow index (called from layout hooks; not for direct use) |
 | `tmux-state list` | List events, human-readable |
 | `tmux-state list --json` | List events as newline-delimited JSON (for external pickers) |
 | `tmux-state prune` | Apply retention limits (default: 20 snapshots, 50 close events) |
@@ -137,7 +136,7 @@ Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `
 
 ```
 $XDG_DATA_HOME/tmux-state/
-├── state.db                                  SQLite event store (events, scrollbacks, live_index, meta)
+├── state.db                                  SQLite event store (events, scrollbacks, meta)
 ├── state.db-wal                              SQLite WAL file
 ├── state.db-shm                              SQLite shared memory
 └── scrollbacks/
