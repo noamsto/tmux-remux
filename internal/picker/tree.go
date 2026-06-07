@@ -104,7 +104,7 @@ func paneLabel(p *snapshot.Pane) string {
 // FilterDecorate walks the tree and marks each node Skipped/SkipReason based on
 // the filter predicates. It mutates the tree in place. Returns counts for the
 // footer counter. The runningSessions argument is consulted only when
-// f.DedupRunningServer is true.
+// f.SkipRunningSessions is true.
 func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]bool) Counts {
 	var c Counts
 	if root == nil {
@@ -115,6 +115,7 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 		if s == nil {
 			continue
 		}
+		wasRunning := sess.SkipReason == "running"
 		sess.Skipped = false
 		sess.SkipReason = ""
 		sessionSkipped := f.SkipSession(*s, runningSessions)
@@ -124,6 +125,13 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 			c.SkippedSessions++
 		} else {
 			c.KeptSessions++
+		}
+		// Collapse already-running sessions so they read as a single
+		// "name (running)" line; only on the transition, so a manual
+		// re-expand survives later decorate passes.
+		isRunning := sess.SkipReason == "running"
+		if isRunning != wasRunning {
+			sess.Expanded = !isRunning
 		}
 
 		for _, win := range sess.Children {
@@ -178,7 +186,7 @@ func FilterDecorate(root *TreeNode, f filter.Filter, runningSessions map[string]
 }
 
 func sessionSkipReason(f filter.Filter, s snapshot.Session, running map[string]bool) string {
-	if f.DedupRunningServer && running[s.Name] {
+	if f.SkipRunningSessions && running[s.Name] {
 		return "running"
 	}
 	return "stale"

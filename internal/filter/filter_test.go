@@ -42,14 +42,14 @@ func TestSkipStaleSession(t *testing.T) {
 	}
 }
 
-func TestDedupRunningServer(t *testing.T) {
-	f := filter.Filter{DedupRunningServer: true}
+func TestSkipRunningSessions(t *testing.T) {
+	f := filter.Filter{SkipRunningSessions: true}
 	running := map[string]bool{"foo": true}
 	if !f.SkipSession(snapshot.Session{Name: "foo"}, running) {
-		t.Error("name match should dedup")
+		t.Error("name match should be skipped")
 	}
 	if f.SkipSession(snapshot.Session{Name: "bar"}, running) {
-		t.Error("name miss should not dedup")
+		t.Error("name miss should not be skipped")
 	}
 }
 

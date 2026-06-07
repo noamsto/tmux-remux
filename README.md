@@ -18,7 +18,7 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 |---|---|---|
 | Maintenance | Stalled (last meaningful commit ~2020) | Active |
 | Save speed (40 panes) | ~3-5s, sequential `tmux display-message` per pane | ~70ms, three batched `tmux -F` queries + parallel `capture-pane` |
-| Auto-restore filter | None — restores everything | Smart filter (dedup, idle-shell, stale age) |
+| Auto-restore filter | None — restores everything | Smart filter (skip-running, idle-shell, stale age) |
 | History | Single overwriting save file | SQLite with N rolling snapshots + close events |
 | Undo for accidental `Ctrl+D` | No | `prefix + u` |
 | Storage | Plain text + bash glue | SQLite + content-addressed compressed scrollback (refcount-deduped) |
@@ -114,7 +114,7 @@ That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see w
 
 Open an interactive picker over snapshot or close events. The picker is a Bubble Tea TUI that shows each snapshot's full session → window → pane tree before you restore it, and exposes the smart-restore filter as live footer toggles.
 
-- `--kind=snapshot` (default) — two-pane view (snapshots on the left, tree on the right). Toggle `s` to skip idle shells, `d` to dedup sessions already running, `a` to dim snapshots older than 24h.
+- `--kind=snapshot` (default) — two-pane view (snapshots on the left, tree on the right). Toggle `s` to skip idle shells, `d` to skip sessions already running (shown collapsed with a `(running)` tag), `a` to dim snapshots older than 24h.
 - `--kind=close` — list-only view of close events, used by `prefix + U` in lazytmux.
 
 Tab switches focus between panes. `?` shows the full keymap. `enter` restores; `esc` cancels.
@@ -129,7 +129,7 @@ Configurable via env vars (TODO: also via flags). Defaults:
 | `restoreMaxSessionAge` | 14 days | Skip session if `last_attached` older than threshold |
 | `restoreSkipIdleShells` | on | Skip pane if command ∈ {bash, fish, zsh, sh} AND no children |
 | `restoreSkipIdleWindows` | on | Skip window if every pane filtered out |
-| `dedupRunningServer` | on | Skip session if a session with that name is already running |
+| `skipRunningSessions` | on | Skip session if a session with that name is already running |
 
 Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `lazygit`, `lazydocker`, `k9s`, `kubectl`, `ssh`, `mosh`, `less`, `tail`, `watch`, etc. Anything not on the list restores as a fresh shell in the saved cwd.
 

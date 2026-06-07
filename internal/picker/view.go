@@ -76,7 +76,7 @@ func (m PickerModel) renderFooter(width int) string {
 
 	parts := []string{
 		toggle(m.filter.SkipIdleShells, "i", "idle"),
-		toggle(m.filter.DedupRunningServer, "d", "dedup"),
+		toggle(m.filter.SkipRunningSessions, "d", "skip running"),
 		toggle(m.dimOlderThan > 0, "a", "age≤24h"),
 		counter,
 		hint("↵", "restore"),
@@ -274,8 +274,8 @@ func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightI
 			style = nodePane
 		}
 		if n.Skipped {
-			// Keep the role color so the tree shape stays legible when dedup
-			// running marks everything skipped; just dim it.
+			// Keep the role color so the tree shape stays legible when
+			// skip-running marks everything skipped; just dim it.
 			style = style.Faint(true).Italic(true)
 		}
 		styled := style.Render(n.Label)

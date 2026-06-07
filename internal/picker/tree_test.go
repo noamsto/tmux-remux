@@ -176,15 +176,15 @@ func TestFilterDecorate_Table(t *testing.T) {
 			wantSkippedPanes: 0,
 		},
 		{
-			name:             "dedup running drops the whole session",
+			name:             "skip running drops the whole session",
 			manifest:         mk(nvim),
-			filter:           filter.Filter{DedupRunningServer: true},
+			filter:           filter.Filter{SkipRunningSessions: true},
 			running:          map[string]bool{"s": true},
 			wantKeptPanes:    0,
 			wantSkippedPanes: 1,
 		},
 		{
-			name:             "dedup running with bool off but matching name → kept (toggle is the gate)",
+			name:             "skip running with bool off but matching name → kept (toggle is the gate)",
 			manifest:         mk(nvim),
 			filter:           filter.Filter{},
 			running:          map[string]bool{"s": true},
@@ -240,5 +240,41 @@ func TestFilterDecorate_IsIdempotent_AndClearsStale(t *testing.T) {
 	}
 	if fishNode.SkipReason != "" {
 		t.Errorf("after toggle off: fish pane.SkipReason=%q, want empty", fishNode.SkipReason)
+	}
+}
+
+func TestFilterDecorate_CollapsesRunningSessions(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name:    "s",
+			Windows: []snapshot.Window{{Name: "w", Panes: []snapshot.Pane{{Index: 0, Command: "nvim"}}}},
+		}},
+	}
+	root := picker.BuildTree(m)
+	sess := root.Children[0]
+	f := filter.Filter{SkipRunningSessions: true}
+	running := map[string]bool{"s": true}
+
+	// Transition into running-skipped → collapse.
+	picker.FilterDecorate(root, f, running)
+	if sess.Expanded {
+		t.Fatal("running session should collapse on first decorate")
+	}
+
+	// Manual re-expand survives a redecorate with unchanged state.
+	sess.Expanded = true
+	picker.FilterDecorate(root, f, running)
+	if !sess.Expanded {
+		t.Error("manual expand should survive a no-transition redecorate")
+	}
+
+	// Toggle off → re-expand; toggle back on → collapse again.
+	picker.FilterDecorate(root, filter.Filter{}, running)
+	if !sess.Expanded {
+		t.Error("session should re-expand when skip-running is toggled off")
+	}
+	picker.FilterDecorate(root, f, running)
+	if sess.Expanded {
+		t.Error("session should collapse again when skip-running is toggled on")
 	}
 }

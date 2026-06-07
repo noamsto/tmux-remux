@@ -14,13 +14,13 @@ var defaultIdleShells = map[string]bool{
 // Filter holds the configurable thresholds and feature flags for the
 // smart-restore filter.
 type Filter struct {
-	Now                time.Time     // injectable for tests
-	MaxSessionAge      time.Duration // 0 = no limit
-	MaxSnapshotAge     time.Duration // 0 = no limit
-	SkipIdleShells     bool
-	SkipIdleWindows    bool
-	DedupRunningServer bool
-	IdleShellNames     map[string]bool // override default set
+	Now                 time.Time     // injectable for tests
+	MaxSessionAge       time.Duration // 0 = no limit
+	MaxSnapshotAge      time.Duration // 0 = no limit
+	SkipIdleShells      bool
+	SkipIdleWindows     bool
+	SkipRunningSessions bool
+	IdleShellNames      map[string]bool // override default set
 }
 
 // SkipSnapshot returns true if the whole snapshot should be skipped due to age.
@@ -33,9 +33,10 @@ func (f Filter) SkipSnapshot(savedAtMillis int64) bool {
 	return now.Sub(saved) > f.MaxSnapshotAge
 }
 
-// SkipSession returns true if the session should be filtered out (dedup or stale).
+// SkipSession returns true if the session should be filtered out (already
+// running or stale).
 func (f Filter) SkipSession(s snapshot.Session, running map[string]bool) bool {
-	if f.DedupRunningServer && running[s.Name] {
+	if f.SkipRunningSessions && running[s.Name] {
 		return true
 	}
 	if f.MaxSessionAge > 0 {

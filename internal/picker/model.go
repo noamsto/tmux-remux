@@ -92,7 +92,7 @@ func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb
 		manifests:        make(map[int64]snapshot.Manifest, len(events)),
 		trees:            make(map[int64]*TreeNode, len(events)),
 		manifestErrors:   make(map[int64]error),
-		filter:           filter.Filter{DedupRunningServer: true},
+		filter:           filter.Filter{SkipRunningSessions: true},
 		dimOlderThan:     24 * time.Hour,
 		runningSet:       running,
 		keys:             defaultKeys(),
@@ -398,8 +398,8 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.filter.SkipIdleShells = !m.filter.SkipIdleShells
 		(&m).redecorate()
 		return m, nil
-	case key.Matches(msg, m.keys.ToggleDedup):
-		m.filter.DedupRunningServer = !m.filter.DedupRunningServer
+	case key.Matches(msg, m.keys.ToggleSkipRunning):
+		m.filter.SkipRunningSessions = !m.filter.SkipRunningSessions
 		(&m).redecorate()
 		return m, nil
 	case key.Matches(msg, m.keys.ToggleAge):

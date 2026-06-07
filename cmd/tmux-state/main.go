@@ -147,11 +147,11 @@ func newRestoreCmd() *cobra.Command {
 				}
 
 				f := filter.Filter{
-					MaxSessionAge:      cfg.RestoreMaxSessionAge,
-					MaxSnapshotAge:     cfg.RestoreMaxSnapshotAge,
-					SkipIdleShells:     cfg.RestoreSkipIdleShells,
-					SkipIdleWindows:    cfg.RestoreSkipIdleWindows,
-					DedupRunningServer: cfg.DedupRunningServer,
+					MaxSessionAge:       cfg.RestoreMaxSessionAge,
+					MaxSnapshotAge:      cfg.RestoreMaxSnapshotAge,
+					SkipIdleShells:      cfg.RestoreSkipIdleShells,
+					SkipIdleWindows:     cfg.RestoreSkipIdleWindows,
+					SkipRunningSessions: cfg.SkipRunningSessions,
 				}
 				if f.SkipSnapshot(ev.Ts) {
 					return nil
@@ -275,7 +275,7 @@ func newPickCmd() *cobra.Command {
 
 				manifest := final.SelectedManifest()
 				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan := restore.BuildPlan(manifest, final.Filter(), nil, buildOpts)
+				plan := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
 				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}

@@ -38,7 +38,7 @@ type Config struct {
 	RestoreMaxSnapshotAge  time.Duration
 	RestoreSkipIdleShells  bool
 	RestoreSkipIdleWindows bool
-	DedupRunningServer     bool
+	SkipRunningSessions    bool
 
 	// Allow-list of commands to relaunch on restore
 	CommandAllowList []string
@@ -72,7 +72,7 @@ func Default() Config {
 		RestoreMaxSnapshotAge:  30 * 24 * time.Hour,
 		RestoreSkipIdleShells:  true,
 		RestoreSkipIdleWindows: true,
-		DedupRunningServer:     true,
+		SkipRunningSessions:    true,
 
 		CommandAllowList: []string{
 			"nvim", "vim", "vi",

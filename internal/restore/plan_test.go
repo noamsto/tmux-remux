@@ -113,18 +113,18 @@ func TestBuildPlanFiltersIdleShellPanes(t *testing.T) {
 	}
 }
 
-func TestBuildPlanFiltersDeduplicatedSessions(t *testing.T) {
+func TestBuildPlanSkipsRunningSessions(t *testing.T) {
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{
 			{Name: "s1", Windows: []snapshot.Window{{Index: 1, Panes: []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "nvim"}}}}},
 			{Name: "s2", Windows: []snapshot.Window{{Index: 1, Panes: []snapshot.Pane{{Index: 1, Cwd: "/c", Command: "nvim"}}}}},
 		},
 	}
-	f := filter.Filter{DedupRunningServer: true}
+	f := filter.Filter{SkipRunningSessions: true}
 	plan := restore.BuildPlan(m, f, map[string]bool{"s1": true}, restore.BuildOptions{})
 	for _, a := range plan {
 		if cs, ok := a.(restore.CreateSession); ok && cs.Name == "s1" {
-			t.Error("running session should be deduped")
+			t.Error("running session should be skipped")
 		}
 	}
 }
