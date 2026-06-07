@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/config"
@@ -51,6 +52,14 @@ func TestEnsureDirsCreatesPaths(t *testing.T) {
 		if _, err := os.Stat(d); err != nil {
 			t.Errorf("expected dir %q to exist: %v", d, err)
 		}
+	}
+}
+
+func TestDefaultWindowOptionPrefixes(t *testing.T) {
+	c := config.Default()
+	want := []string{"@branch", "@worktree", "@issue_", "@pr_"}
+	if !slices.Equal(c.WindowOptionPrefixes, want) {
+		t.Errorf("WindowOptionPrefixes = %v, want %v", c.WindowOptionPrefixes, want)
 	}
 }
 

@@ -55,3 +55,26 @@ func TestFingerprintDifferentForDifferentStructure(t *testing.T) {
 		t.Errorf("expected different fingerprints")
 	}
 }
+
+func withOptions(opts map[string]string) snapshot.Manifest {
+	return snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Name:    "s",
+		Windows: []snapshot.Window{{Index: 1, Options: opts}},
+	}}}
+}
+
+func TestFingerprintChangesWhenWindowOptionChanges(t *testing.T) {
+	a := withOptions(map[string]string{"@branch": "feat/x"})
+	b := withOptions(map[string]string{"@branch": "feat/y"})
+	if a.Fingerprint() == b.Fingerprint() {
+		t.Error("fingerprint should change when an allow-listed option value changes")
+	}
+}
+
+func TestFingerprintStableAcrossMapInsertionOrder(t *testing.T) {
+	a := withOptions(map[string]string{"@branch": "x", "@issue_id": "1"})
+	b := withOptions(map[string]string{"@issue_id": "1", "@branch": "x"})
+	if a.Fingerprint() != b.Fingerprint() {
+		t.Error("fingerprint must be insertion-order independent (json sorts map keys)")
+	}
+}

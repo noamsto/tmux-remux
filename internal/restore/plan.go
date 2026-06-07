@@ -65,6 +65,16 @@ type SetLayout struct {
 
 func (SetLayout) isAction() {}
 
+// SetWindowOptions restores allow-listed window user-options for a window.
+// Window is the <session>:<window_index> target; Options is the name→value
+// map captured at save time. Apply issues one set-option -w per entry.
+type SetWindowOptions struct {
+	Window  string
+	Options map[string]string
+}
+
+func (SetWindowOptions) isAction() {}
+
 // BuildOptions carries the values needed to compose StartupCommands. Resolved
 // once per restore by the caller.
 type BuildOptions struct {
@@ -172,6 +182,12 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				Window: fmt.Sprintf("%s:%d", sess.Name, win.Index),
 				Layout: win.Layout,
 			})
+			if len(win.Options) > 0 {
+				plan = append(plan, SetWindowOptions{
+					Window:  fmt.Sprintf("%s:%d", sess.Name, win.Index),
+					Options: win.Options,
+				})
+			}
 		}
 		if sessionStarted {
 			stats.SessionsKept++

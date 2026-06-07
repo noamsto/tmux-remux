@@ -122,6 +122,62 @@ func ParsePanes(s string) ([]PaneRow, error) {
 	return out, nil
 }
 
+// ParseWindowOptions parses the output of `tmux show-options -w`, returning a
+// name→value map. Each line is "<name> <value>". tmux quotes the value when it
+// needs to: a value containing spaces or a double quote is double-quoted with
+// embedded `"`/`\` backslash-escaped (e.g. `@issue_title "fix \"it\""`), and
+// the empty value renders as two single-quote characters. Bare values are
+// unquoted.
+// (A single-quote inside an otherwise-quote-free value still yields double
+// quotes — tmux never single-quotes a non-empty value here.) Lines that don't
+// match a known prefix are dropped by the caller, not here.
+func ParseWindowOptions(s string) map[string]string {
+	out := map[string]string{}
+	for _, line := range splitLines(s) {
+		name, rawVal, hasVal := strings.Cut(line, " ")
+		if name == "" {
+			continue
+		}
+		if !hasVal {
+			out[name] = ""
+			continue
+		}
+		out[name] = unquoteOptionValue(rawVal)
+	}
+	return out
+}
+
+// unquoteOptionValue reverses tmux's value quoting. A single-quoted value is
+// taken literally (tmux uses single quotes only to render the empty value, and
+// does not escape inside them). A double-quoted value has its `\`-escapes
+// removed. Bare values are returned as-is.
+func unquoteOptionValue(v string) string {
+	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+		return v[1 : len(v)-1]
+	}
+	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+		return v
+	}
+	inner := v[1 : len(v)-1]
+	var b strings.Builder
+	b.Grow(len(inner))
+	escaped := false
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // parseIntOrZero parses s as an int64 in base 10. Empty strings return 0
 // (handles tmux's empty session_last_attached / pane_last_used for never-
 // attached sessions and freshly-created panes).

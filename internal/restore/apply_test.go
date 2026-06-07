@@ -59,6 +59,28 @@ func TestApplyAppendsStartupCommandWhenPresent(t *testing.T) {
 	}
 }
 
+func TestApplyEmitsSetOptionPerWindowOptionSorted(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.SetWindowOptions{Window: "s1:1", Options: map[string]string{
+			"@pr_number": "42",
+			"@branch":    "feat/x",
+			"@issue_id":  "ENG-1",
+		}},
+	}
+	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"set-option", "-t", "s1:1", "-w", "@branch", "feat/x"},
+		{"set-option", "-t", "s1:1", "-w", "@issue_id", "ENG-1"},
+		{"set-option", "-t", "s1:1", "-w", "@pr_number", "42"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	calls := 0
 	failOn := 1

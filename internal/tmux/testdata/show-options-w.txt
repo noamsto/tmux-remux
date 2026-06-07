@@ -1,0 +1,5 @@
+@bare barevalue
+@double "a \"quoted\" word"
+@empty ''
+@single "a 'quoted' word"
+@spaces "fix the thing"

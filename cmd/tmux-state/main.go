@@ -111,9 +111,10 @@ func newSaveCmd() *cobra.Command {
 				sb := scrollback.New(cfg.ScrollbackDir)
 				t := tmux.NewClient("tmux")
 				saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
-					Host:              hostname(),
-					CaptureScrollback: cfg.CaptureScrollback,
-					MinSaveInterval:   cfg.MinSaveInterval,
+					Host:                 hostname(),
+					CaptureScrollback:    cfg.CaptureScrollback,
+					MinSaveInterval:      cfg.MinSaveInterval,
+					WindowOptionPrefixes: cfg.WindowOptionPrefixes,
 				})
 				if err := saver.Save(ctx, reason); err != nil {
 					return err

@@ -135,6 +135,17 @@ func (c *Client) ListPanes(ctx context.Context) ([]PaneRow, error) {
 	return ParsePanes(out)
 }
 
+// ShowWindowOptions runs `tmux show-options -w -t <target>` and parses the
+// result into a name→value map. target format: <session>:<window_index>.
+// Returns an empty map when the window has no user options set.
+func (c *Client) ShowWindowOptions(ctx context.Context, target string) (map[string]string, error) {
+	out, err := c.Run(ctx, []string{"show-options", "-w", "-t", target})
+	if err != nil {
+		return nil, fmt.Errorf("show-options %q: %w", target, err)
+	}
+	return ParseWindowOptions(out), nil
+}
+
 // CapturePane returns the scrollback contents of a pane as raw bytes.
 // target format: <session>:<window_index>.<pane_index>
 func (c *Client) CapturePane(ctx context.Context, target string) ([]byte, error) {

@@ -43,6 +43,10 @@ type Config struct {
 
 	// Allow-list of commands to relaunch on restore
 	CommandAllowList []string
+
+	// Allow-list of window user-option name prefixes to capture and restore.
+	// A window option is persisted if its name starts with any listed prefix.
+	WindowOptionPrefixes []string
 }
 
 // Default returns a Config with XDG-resolved paths and sensible thresholds.
@@ -84,6 +88,8 @@ func Default() Config {
 			"k9s", "kubectl",
 			"ssh", "mosh",
 		},
+
+		WindowOptionPrefixes: []string{"@branch", "@worktree", "@issue_", "@pr_"},
 	}
 }
 

@@ -3,6 +3,7 @@ package restore
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 // Runner is the subset of tmux.Client used by Apply (lets tests inject a fake).
@@ -39,6 +40,17 @@ func Apply(ctx context.Context, t Runner, plan []Action) error {
 			}
 		case SetLayout:
 			args = []string{"select-layout", "-t", v.Window, v.Layout}
+		case SetWindowOptions:
+			// One set-option per entry, in sorted key order for determinism.
+			names := make([]string, 0, len(v.Options))
+			for name := range v.Options {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				_, _ = t.Run(ctx, []string{"set-option", "-t", v.Window, "-w", name, v.Options[name]})
+			}
+			continue
 		default:
 			// Unknown action type is a programming error (not a runtime
 			// failure), so we abort rather than silently skip — callers

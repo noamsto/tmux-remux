@@ -24,6 +24,9 @@ type SaverOptions struct {
 	CaptureScrollback bool
 	MinSaveInterval   time.Duration
 	ScrollbackWorkers int
+	// WindowOptionPrefixes is the allow-list of window user-option name
+	// prefixes to capture; empty disables window-option capture.
+	WindowOptionPrefixes []string
 }
 
 // Saver wires together store, scrollback, and tmux to perform snapshots.
@@ -46,7 +49,7 @@ func NewSaver(db *store.Store, sb *scrollback.Store, t CaptureLister, opts Saver
 // skipped (no tmux server running, throttled, or fingerprint unchanged).
 func (s *Saver) Save(ctx context.Context, reason string) error {
 	now := time.Now()
-	manifest, err := Build(ctx, s.tmux, s.opts.Host, now.UnixMilli())
+	manifest, err := Build(ctx, s.tmux, s.opts.Host, now.UnixMilli(), s.opts.WindowOptionPrefixes)
 	if err != nil {
 		return fmt.Errorf("build manifest: %w", err)
 	}

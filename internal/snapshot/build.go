@@ -2,6 +2,8 @@ package snapshot
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 
@@ -13,12 +15,15 @@ type Lister interface {
 	ListSessions(context.Context) ([]tmux.SessionRow, error)
 	ListWindows(context.Context) ([]tmux.WindowRow, error)
 	ListPanes(context.Context) ([]tmux.PaneRow, error)
+	ShowWindowOptions(ctx context.Context, target string) (map[string]string, error)
 }
 
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
 // is populated best-effort from /proc; errors are ignored (missing PID just
-// leaves it zero).
-func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
+// leaves it zero). Window user-options whose names start with one of
+// optionPrefixes are captured into each Window's Options map; a nil/empty
+// optionPrefixes disables window-option capture entirely.
+func Build(ctx context.Context, l Lister, host string, savedAt int64, optionPrefixes []string) (Manifest, error) {
 	var sessions []tmux.SessionRow
 	var windows []tmux.WindowRow
 	var panes []tmux.PaneRow
@@ -61,6 +66,18 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		sess := Session{Name: s.Name, LastAttached: s.LastAttached}
 		for _, w := range winsBySess[s.Name] {
 			win := Window{Index: w.Index, Name: w.Name, Layout: w.Layout, ID: w.ID}
+			if len(optionPrefixes) > 0 {
+				// session:index is unambiguous: tmux's session_check_name
+				// rejects ':' and '.' in session names, so they can't collide
+				// with the target separators (same assumption as SetLayout).
+				target := fmt.Sprintf("%s:%d", s.Name, w.Index)
+				// Best-effort like ChildCount: a failed show-options just
+				// leaves Options empty. The snapshot package has no logger
+				// plumbed through Build, so there's nowhere to surface it.
+				if opts, err := l.ShowWindowOptions(ctx, target); err == nil {
+					win.Options = filterByPrefix(opts, optionPrefixes)
+				}
+			}
 			for _, p := range pansByWin[s.Name][w.Index] {
 				cc, _ := ChildCount(p.PID)
 				win.Panes = append(win.Panes, Pane{
@@ -75,4 +92,23 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		m.Sessions = append(m.Sessions, sess)
 	}
 	return m, nil
+}
+
+// filterByPrefix returns the subset of opts whose names start with any of the
+// prefixes. Returns nil when nothing matches, so empty windows marshal without
+// an "options" key (json omitempty) and don't perturb the fingerprint.
+func filterByPrefix(opts map[string]string, prefixes []string) map[string]string {
+	var out map[string]string
+	for name, val := range opts {
+		for _, p := range prefixes {
+			if strings.HasPrefix(name, p) {
+				if out == nil {
+					out = map[string]string{}
+				}
+				out[name] = val
+				break
+			}
+		}
+	}
+	return out
 }

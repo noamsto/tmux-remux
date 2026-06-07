@@ -45,7 +45,12 @@ type Window struct {
 	Name   string `json:"name"`
 	Layout string `json:"layout"`
 	ID     string `json:"id,omitempty"` // tmux window id ("@4"); stable within a server lifetime
-	Panes  []Pane `json:"panes"`
+	// Options holds allow-listed window user-options (@-prefixed), e.g.
+	// lazytmux's issue/PR enrichment state. Restored verbatim so the
+	// enrichment pipeline doesn't skip restored windows. Included in
+	// Fingerprint because the allow-list is deliberately a stable set.
+	Options map[string]string `json:"options,omitempty"`
+	Panes   []Pane            `json:"panes"`
 }
 
 // Pane captures one tmux pane's state, including optional scrollback hash.
@@ -62,6 +67,11 @@ type Pane struct {
 
 // Fingerprint returns a sha256 hex of the manifest with timestamps zeroed,
 // suitable for "did anything change since last save?" checks.
+//
+// Determinism for Window.Options (a map) relies on encoding/json marshaling
+// map keys in sorted order. That's documented stdlib behavior, not a Go
+// language guarantee — if the marshaler changed, this would need an explicit
+// sort before hashing.
 func (m Manifest) Fingerprint() string {
 	cp := m
 	cp.SavedAt = 0

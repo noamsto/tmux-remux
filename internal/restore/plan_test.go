@@ -130,6 +130,57 @@ func TestBuildPlanSkipsRunningSessions(t *testing.T) {
 	}
 }
 
+func TestBuildPlanEmitsWindowOptionsForFirstAndLaterWindows(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{
+				{
+					Index: 1, Name: "main", Layout: "L",
+					Options: map[string]string{"@branch": "feat/x"},
+					Panes:   []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "nvim", ChildCount: 1}},
+				},
+				{
+					Index: 2, Name: "build", Layout: "L",
+					Options: map[string]string{"@branch": "feat/y", "@pr_number": "42"},
+					Panes:   []snapshot.Pane{{Index: 1, Cwd: "/b", Command: "nvim", ChildCount: 1}},
+				},
+			},
+		}},
+	}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	want := []restore.Action{
+		restore.CreateSession{Name: "s1", Cwd: "/a"},
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+		restore.SetWindowOptions{Window: "s1:1", Options: map[string]string{"@branch": "feat/x"}},
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "build", Cwd: "/b", StartupCommand: "nvim"},
+		restore.SetLayout{Window: "s1:2", Layout: "L"},
+		restore.SetWindowOptions{Window: "s1:2", Options: map[string]string{"@branch": "feat/y", "@pr_number": "42"}},
+	}
+	if diff := cmp.Diff(want, plan); diff != "" {
+		t.Errorf("plan mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestBuildPlanOmitsWindowOptionsWhenEmpty(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{{
+				Index: 1, Layout: "L",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "nvim", ChildCount: 1}},
+			}},
+		}},
+	}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	for _, a := range plan {
+		if _, ok := a.(restore.SetWindowOptions); ok {
+			t.Error("no SetWindowOptions action should be emitted for a window with no options")
+		}
+	}
+}
+
 func TestBuildPlanStatsCountsKeptAndSkipped(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	m := snapshot.Manifest{
