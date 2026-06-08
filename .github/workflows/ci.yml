@@ -10,11 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      # Run against the flake's tmux (3.6a) — the version lazytmux ships and
+      # the project targets. apt's tmux 3.4 rewrites control bytes (the \x1f
+      # field separator) to "_" in -F output when run outside a client.
+      - uses: cachix/install-nix-action@v27
         with:
-          go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y tmux
-      - run: go test -tags=integration -race ./...
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - run: nix develop --command go test -tags=integration -race ./...
 
   lint:
     runs-on: ubuntu-latest
