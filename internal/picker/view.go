@@ -75,7 +75,7 @@ func (m PickerModel) renderFooter(width int) string {
 	counter := fmt.Sprintf("%d panes / %d skipped", c.KeptPanes, c.SkippedPanes)
 
 	parts := []string{
-		toggle(m.filter.SkipIdleShells, "i", "idle"),
+		toggle(m.filter.SkipIdleShells, "s", "skip idle"),
 		toggle(m.filter.SkipRunningSessions, "d", "skip running"),
 		toggle(m.dimOlderThan > 0, "a", "age≤24h"),
 		counter,
