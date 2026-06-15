@@ -59,6 +59,25 @@ func TestApplyAppendsStartupCommandWhenPresent(t *testing.T) {
 	}
 }
 
+func TestApplyReenablesAutomaticRename(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", AutomaticRename: true},
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "named", Cwd: "/a"},
+	}
+	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a"},
+		{"set-window-option", "-t", "s1:1", "automatic-rename", "on"},
+		{"new-window", "-t", "s1:2", "-n", "named", "-c", "/a"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	calls := 0
 	failOn := 1

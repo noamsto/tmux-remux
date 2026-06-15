@@ -34,14 +34,14 @@ func TestParseSessionsEmpty(t *testing.T) {
 }
 
 func TestParseWindows(t *testing.T) {
-	input := "lazytmux\x1f1\x1fmain\x1fabcd,200x50,0,0,1\x1f@4\nwork\x1f2\x1fbuild\x1fefgh,80x24,0,0,2\x1f@7\n"
+	input := "lazytmux\x1f1\x1fmain\x1fabcd,200x50,0,0,1\x1f@4\x1f1\nwork\x1f2\x1fbuild\x1fefgh,80x24,0,0,2\x1f@7\x1f0\n"
 	got, err := tmux.ParseWindows(input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []tmux.WindowRow{
-		{Session: "lazytmux", Index: 1, Name: "main", Layout: "abcd,200x50,0,0,1", ID: "@4"},
-		{Session: "work", Index: 2, Name: "build", Layout: "efgh,80x24,0,0,2", ID: "@7"},
+		{Session: "lazytmux", Index: 1, Name: "main", Layout: "abcd,200x50,0,0,1", ID: "@4", AutomaticRename: true},
+		{Session: "work", Index: 2, Name: "build", Layout: "efgh,80x24,0,0,2", ID: "@7", AutomaticRename: false},
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("ParseWindows mismatch (-want +got):\n%s", diff)

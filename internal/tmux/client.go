@@ -92,7 +92,7 @@ func withSynthesizedTmuxEnv(env []string) []string {
 
 const (
 	sessionFormat = "#{session_name}" + FieldSep + "#{session_last_attached}"
-	windowFormat  = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}"
+	windowFormat  = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
 	paneFormat    = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}"
 )
 
