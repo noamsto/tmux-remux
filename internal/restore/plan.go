@@ -42,6 +42,9 @@ type CreateWindow struct {
 	Name           string
 	Cwd            string
 	StartupCommand string
+	// AutomaticRename re-enables automatic-rename on the window after creation,
+	// so the live name format takes over instead of the pinned stored name.
+	AutomaticRename bool
 }
 
 func (CreateWindow) isAction() {}
@@ -155,11 +158,12 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				sessionStarted = true
 			}
 			plan = append(plan, CreateWindow{
-				Session:        sess.Name,
-				Index:          win.Index,
-				Name:           win.Name,
-				Cwd:            firstPane.Cwd,
-				StartupCommand: startupFor(*firstPane),
+				Session:         sess.Name,
+				Index:           win.Index,
+				Name:            win.Name,
+				Cwd:             firstPane.Cwd,
+				StartupCommand:  startupFor(*firstPane),
+				AutomaticRename: win.AutomaticRename,
 			})
 			for _, p := range keptPanes[1:] {
 				plan = append(plan, SplitPane{

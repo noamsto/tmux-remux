@@ -46,11 +46,12 @@ func splitLines(s string) []string {
 
 // WindowRow is a parsed tmux list-windows row.
 type WindowRow struct {
-	Session string
-	Index   int
-	Name    string
-	Layout  string
-	ID      string // tmux window id, e.g. "@4"
+	Session         string
+	Index           int
+	Name            string
+	Layout          string
+	ID              string // tmux window id, e.g. "@4"
+	AutomaticRename bool   // #{E:automatic-rename} == "1"
 }
 
 // ParseWindows parses tmux list-windows -F output.
@@ -61,8 +62,8 @@ func ParseWindows(s string) ([]WindowRow, error) {
 	var out []WindowRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
-		if len(fields) != 5 {
-			return nil, fmt.Errorf("window line %d: expected 5 fields, got %d", i+1, len(fields))
+		if len(fields) != 6 {
+			return nil, fmt.Errorf("window line %d: expected 6 fields, got %d", i+1, len(fields))
 		}
 		idx, err := strconv.Atoi(fields[1])
 		if err != nil {
@@ -70,6 +71,7 @@ func ParseWindows(s string) ([]WindowRow, error) {
 		}
 		out = append(out, WindowRow{
 			Session: fields[0], Index: idx, Name: fields[2], Layout: fields[3], ID: fields[4],
+			AutomaticRename: fields[5] == "1",
 		})
 	}
 	return out, nil

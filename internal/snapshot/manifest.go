@@ -45,7 +45,12 @@ type Window struct {
 	Name   string `json:"name"`
 	Layout string `json:"layout"`
 	ID     string `json:"id,omitempty"` // tmux window id ("@4"); stable within a server lifetime
-	Panes  []Pane `json:"panes"`
+	// AutomaticRename records whether the window derived its name from
+	// automatic-rename-format at save time. When true, restore re-enables
+	// automatic-rename so the live format takes over again — otherwise
+	// `new-window -n` would pin the stale stored name and disable the renamer.
+	AutomaticRename bool   `json:"automatic_rename,omitempty"`
+	Panes           []Pane `json:"panes"`
 }
 
 // Pane captures one tmux pane's state, including optional scrollback hash.
