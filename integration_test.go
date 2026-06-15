@@ -39,7 +39,7 @@ func (s scopedTmux) ListSessions(ctx context.Context) ([]tmux.SessionRow, error)
 	return tmux.ParseSessions(out)
 }
 func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
-	out, err := s.Run(ctx, []string{"list-windows", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{window_name}\x1f#{window_layout}\x1f#{window_id}"})
+	out, err := s.Run(ctx, []string{"list-windows", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{window_name}\x1f#{window_layout}\x1f#{window_id}\x1f#{E:automatic-rename}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
