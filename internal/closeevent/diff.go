@@ -43,8 +43,10 @@ func ParseManifest(s string) (CloseManifest, error) {
 
 // ClosedItem identifies the entity lost in a close event, recovered by diffing
 // the most recent snapshot from before the event against the event's
-// post-close index. Exactly one of Session/Window/Pane is non-nil; SessionName
-// is always populated (root of the lost entity).
+// post-close index. SessionName is always populated (root of the lost entity).
+// A session-closed sets Session; a window-unlinked sets Window; a pane-died
+// sets Pane (the lost pane) AND Window (its parent, needed to split it back in
+// or recreate the window).
 type ClosedItem struct {
 	Session     *snapshot.Session
 	Window      *snapshot.Window
@@ -65,17 +67,19 @@ func (c *ClosedItem) Describe() string {
 	if c == nil {
 		return "(unrecoverable)"
 	}
+	// Pane is checked before Window: a pane-died carries both, and the pane
+	// label is the specific one.
 	switch {
 	case c.Session != nil:
 		return fmt.Sprintf("session: %s (%dw)", c.SessionName, len(c.Session.Windows))
-	case c.Window != nil:
-		return fmt.Sprintf("%s/%s (%dp)", c.SessionName, snapshot.StripFormat(c.Window.Name), len(c.Window.Panes))
 	case c.Pane != nil:
 		cmd := c.Pane.Command
 		if cmd == "" {
 			cmd = "(none)"
 		}
 		return fmt.Sprintf("pane: %s in %s/%d", cmd, c.SessionName, c.WindowIndex)
+	case c.Window != nil:
+		return fmt.Sprintf("%s/%s (%dp)", c.SessionName, snapshot.StripFormat(c.Window.Name), len(c.Window.Panes))
 	}
 	return "(unrecoverable)"
 }
@@ -87,6 +91,9 @@ func (c *ClosedItem) SubManifest(host string, savedAt int64) snapshot.Manifest {
 	if c == nil {
 		return m
 	}
+	// A pane-died carries its parent Window, so the Window branch covers it:
+	// the sub-manifest is the whole enclosing window (used to recreate it when
+	// it's fully gone, and by the picker).
 	switch {
 	case c.Session != nil:
 		m.Sessions = []snapshot.Session{*c.Session}
@@ -95,10 +102,6 @@ func (c *ClosedItem) SubManifest(host string, savedAt int64) snapshot.Manifest {
 			Name:    c.SessionName,
 			Windows: []snapshot.Window{*c.Window},
 		}}
-	case c.Pane != nil:
-		// A pane on its own can't be restored without its enclosing window
-		// layout; callers should expand pane events to the parent window.
-		m.Sessions = nil
 	}
 	return m
 }
@@ -135,7 +138,8 @@ func findClosedSession(prior snapshot.Manifest, post CloseManifest) *ClosedItem 
 
 // priorHasWindowIDs reports whether the snapshot records window ids at all.
 // Old snapshots (pre-id) leave them empty, in which case id-based matching is
-// meaningless and the positional fallback is the only option.
+// meaningless and the positional fallback is the only option. A single save
+// writes ids all-or-none, so "any id present" reliably means "id-aware".
 func priorHasWindowIDs(prior snapshot.Manifest) bool {
 	for i := range prior.Sessions {
 		for j := range prior.Sessions[i].Windows {
@@ -223,7 +227,7 @@ func findClosedPane(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 				for k := range w.Panes {
 					p := &w.Panes[k]
 					if p.ID == post.PaneID {
-						return &ClosedItem{Pane: p, SessionName: s.Name, WindowIndex: w.Index}
+						return &ClosedItem{Pane: p, Window: w, SessionName: s.Name, WindowIndex: w.Index}
 					}
 				}
 			}
@@ -246,7 +250,7 @@ func findClosedPane(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 				p := &w.Panes[k]
 				key := fmt.Sprintf("%s:%d:%d", s.Name, w.Index, p.Index)
 				if !live[key] {
-					return &ClosedItem{Pane: p, SessionName: s.Name, WindowIndex: w.Index}
+					return &ClosedItem{Pane: p, Window: w, SessionName: s.Name, WindowIndex: w.Index}
 				}
 			}
 		}

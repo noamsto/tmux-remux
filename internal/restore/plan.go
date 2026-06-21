@@ -97,28 +97,31 @@ type PlanStats struct {
 	WindowsSkippedIdle     int
 }
 
+// paneStartup composes the startup shell-command for a restored pane: replay
+// its stored scrollback, and relaunch the original command when it's on the
+// allow-list (otherwise fall through to the default shell).
+func paneStartup(p snapshot.Pane, opts BuildOptions) string {
+	so := StartupOpts{
+		Self:          opts.Self,
+		DefaultShell:  opts.DefaultShell,
+		IsBash:        opts.IsBash,
+		ScrollbackSHA: p.ScrollbackSHA,
+	}
+	for _, c := range opts.AllowList {
+		if c == p.Command {
+			so.RelaunchCmd = p.Command
+			so.RelaunchArgs = p.CommandArgs
+			break
+		}
+	}
+	return BuildStartupCommand(so)
+}
+
 // BuildPlan builds an ordered slice of Actions to restore the manifest,
 // honoring the filter and the allow-list of commands. The returned PlanStats
 // reports what was kept vs filtered, per reason.
 func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]bool, opts BuildOptions) ([]Action, PlanStats) {
-	allowed := map[string]bool{}
-	for _, c := range opts.AllowList {
-		allowed[c] = true
-	}
-
-	startupFor := func(p snapshot.Pane) string {
-		so := StartupOpts{
-			Self:          opts.Self,
-			DefaultShell:  opts.DefaultShell,
-			IsBash:        opts.IsBash,
-			ScrollbackSHA: p.ScrollbackSHA,
-		}
-		if allowed[p.Command] {
-			so.RelaunchCmd = p.Command
-			so.RelaunchArgs = p.CommandArgs
-		}
-		return BuildStartupCommand(so)
-	}
+	startupFor := func(p snapshot.Pane) string { return paneStartup(p, opts) }
 
 	var plan []Action
 	var stats PlanStats
@@ -184,4 +187,29 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 		}
 	}
 	return plan, stats
+}
+
+// BuildPaneRestore plans the restore of a single lost pane. When its parent
+// window is still live (windowLive), it splits the pane back into that window
+// (targeted by window id) and re-applies the saved layout — best-effort, since
+// the layout only lines up when the window's pane count matches the snapshot.
+// When the window is gone, it recreates the whole window from the snapshot via
+// BuildPlan. session is the pane's session; win is the snapshot of its parent
+// window (including the lost pane).
+func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session string, windowLive bool, opts BuildOptions) []Action {
+	if !windowLive {
+		plan, _ := BuildPlan(snapshot.Manifest{
+			V:        1,
+			Sessions: []snapshot.Session{{Name: session, Windows: []snapshot.Window{win}}},
+		}, filter.Filter{}, nil, opts)
+		return plan
+	}
+	target := win.ID
+	if target == "" {
+		target = fmt.Sprintf("%s:%d", session, win.Index)
+	}
+	return []Action{
+		SplitPane{Target: target, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
+		SetLayout{Window: target, Layout: win.Layout},
+	}
 }

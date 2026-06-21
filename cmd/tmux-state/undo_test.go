@@ -67,7 +67,7 @@ func TestRestorableCloseSkipsUnrecoverableHead(t *testing.T) {
 	// never made it into the snapshot. It must not block undo.
 	insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	ev, m, ok, err := restorableClose(ctx, db)
+	ev, item, prior, ok, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -77,28 +77,33 @@ func TestRestorableCloseSkipsUnrecoverableHead(t *testing.T) {
 	if ev.ID != recoverable {
 		t.Errorf("popped event %d, want %d (the recoverable one behind the unrecoverable head)", ev.ID, recoverable)
 	}
-	if len(m.Sessions) != 1 || m.Sessions[0].Name != "mono" {
+	if m := item.SubManifest(prior.Host, prior.SavedAt); len(m.Sessions) != 1 || m.Sessions[0].Name != "mono" {
 		t.Errorf("manifest = %+v, want one session 'mono'", m.Sessions)
 	}
 }
 
-func TestRestorableCloseSkipsLonePane(t *testing.T) {
+func TestRestorableClosePicksLonePane(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
 
-	recoverable := insertEvent(ctx, t, db, 200, "window-unlinked", closeWindowManifest(t, "@9"))
-	// A lone pane-died resolves via FindClosed but yields an empty restore plan
-	// (SubManifest drops solitary panes), so it must be skipped rather than
-	// silently consumed as a no-op.
-	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9"}))
-	insertEvent(ctx, t, db, 300, "pane-died", paneMan)
+	insertEvent(ctx, t, db, 200, "window-unlinked", closeWindowManifest(t, "@9"))
+	// A lone pane-died is now recoverable (its parent window @9 is in the
+	// snapshot), so it wins the head over the older window close.
+	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))
+	pane := insertEvent(ctx, t, db, 300, "pane-died", paneMan)
 
-	ev, _, ok, err := restorableClose(ctx, db)
+	ev, item, _, ok, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
-	if !ok || ev.ID != recoverable {
-		t.Errorf("popped event %d ok=%v, want the recoverable window event %d", ev.ID, ok, recoverable)
+	if !ok || ev.ID != pane {
+		t.Fatalf("popped event %d ok=%v, want the pane event %d", ev.ID, ok, pane)
+	}
+	if item.Pane == nil || item.Pane.ID != "%9" {
+		t.Errorf("item.Pane = %+v, want the lost pane %%9", item.Pane)
+	}
+	if item.Window == nil || item.Window.ID != "@9" {
+		t.Errorf("item.Window = %+v, want parent window @9", item.Window)
 	}
 }
 
@@ -107,7 +112,7 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	db := seedStore(ctx, t)
 	insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	_, _, ok, err := restorableClose(ctx, db)
+	_, _, _, ok, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}

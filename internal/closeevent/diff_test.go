@@ -178,6 +178,10 @@ func TestFindClosed_PaneIDDisambiguatesBurstCloses(t *testing.T) {
 	if got.Pane.ID != "%2" {
 		t.Errorf("got pane %+v, want ID %%2", got.Pane)
 	}
+	// The parent window must ride along so the pane can be split back into it.
+	if got.Window == nil || got.Window.ID != "@1" {
+		t.Errorf("got window %+v, want parent @1", got.Window)
+	}
 }
 
 func TestSubManifest_RoundTripsForRestore(t *testing.T) {
