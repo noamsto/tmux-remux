@@ -5,10 +5,12 @@ package main_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/noamsto/tmux-state/internal/restore"
 	"github.com/noamsto/tmux-state/internal/scrollback"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 	"github.com/noamsto/tmux-state/internal/store"
@@ -112,4 +114,73 @@ func TestSaveRestoreRoundtrip(t *testing.T) {
 	if !hasLazytmux {
 		t.Error("manifest missing lazytmux session")
 	}
+}
+
+func TestPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv := testutil.StartServer(t)
+	st := scopedTmux{socket: srv.Socket}
+
+	// The default window starts with one pane; split to two.
+	if _, err := srv.Tmux("split-window", "-t", "init"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sb := scrollback.New(filepath.Join(dir, "sb"))
+	saver := snapshot.NewSaver(db, sb, st, snapshot.SaverOptions{Host: "test"})
+	if err := saver.Save(ctx, "integration"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	ev, _ := db.LatestSnapshot(ctx)
+	var m snapshot.Manifest
+	if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
+		t.Fatal(err)
+	}
+	win := m.Sessions[0].Windows[0]
+	if len(win.Panes) != 2 {
+		t.Fatalf("snapshot window has %d panes, want 2", len(win.Panes))
+	}
+	lost := win.Panes[1]
+
+	// Kill the second pane; the window stays live with its first pane.
+	if _, err := srv.Tmux("kill-pane", "-t", fmt.Sprintf("init:%d.%d", win.Index, lost.Index)); err != nil {
+		t.Fatal(err)
+	}
+	if n := panesInWindow(t, st, win.Index); n != 1 {
+		t.Fatalf("after kill: %d panes, want 1", n)
+	}
+
+	plan := restore.BuildPaneRestore(lost, win, "init", true, restore.BuildOptions{DefaultShell: "/bin/sh"})
+	if err := restore.Apply(ctx, st, plan); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if n := panesInWindow(t, st, win.Index); n != 2 {
+		t.Errorf("after restore: %d panes, want 2 (the lost pane split back in)", n)
+	}
+}
+
+func panesInWindow(t *testing.T, st scopedTmux, windowIndex int) int {
+	t.Helper()
+	panes, err := st.ListPanes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, p := range panes {
+		if p.WindowIndex == windowIndex {
+			n++
+		}
+	}
+	return n
 }

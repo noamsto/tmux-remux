@@ -228,7 +228,7 @@ func newUndoCmd() *cobra.Command {
 				return fmt.Errorf("only --pop is supported in v0.1.0")
 			}
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
-				ev, m, ok, err := restorableClose(ctx, db)
+				ev, item, prior, ok, err := restorableClose(ctx, db)
 				if err != nil {
 					return err
 				}
@@ -237,7 +237,7 @@ func newUndoCmd() *cobra.Command {
 				}
 				t := tmux.NewClient("tmux")
 				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+				plan, m := buildRestorePlan(ctx, t, item, prior, opts)
 				if err := restore.Apply(ctx, t, plan); err != nil {
 					return err
 				}
@@ -258,39 +258,91 @@ const undoScanLimit = 50
 
 // restorableClose finds the most recent close event that can actually be
 // restored: its lost entity resolves against a pre-close snapshot AND yields a
-// non-empty restore manifest. It steps past events that can't (transient
-// entities born and gone within one snapshot gap, lone panes whose SubManifest
-// is empty) so a single unrecoverable head no longer blocks undo. ok is false
-// when nothing in the scan window is recoverable.
-func restorableClose(ctx context.Context, db *store.Store) (store.Event, snapshot.Manifest, bool, error) {
+// non-empty restore manifest. It steps past events that can't (entities born
+// and gone within one snapshot gap) so a single unrecoverable head no longer
+// blocks undo. It returns the resolved ClosedItem and the prior snapshot so the
+// caller can build the restore plan; ok is false when nothing in the scan
+// window is recoverable.
+func restorableClose(ctx context.Context, db *store.Store) (store.Event, *closeevent.ClosedItem, snapshot.Manifest, bool, error) {
 	evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: undoScanLimit})
 	if err != nil {
-		return store.Event{}, snapshot.Manifest{}, false, err
+		return store.Event{}, nil, snapshot.Manifest{}, false, err
 	}
 	for _, ev := range evs {
-		closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
-		if err != nil {
+		item, prior, ok := resolveEvent(ctx, db, ev)
+		if !ok {
 			continue
 		}
-		snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
-		if err != nil || snap == nil {
+		// Defense-in-depth: every item FindClosed returns now yields a
+		// non-empty sub-manifest, but guard against a future resolver that
+		// can't build a restore plan rather than popping an un-restorable head.
+		if len(item.SubManifest(prior.Host, prior.SavedAt).Sessions) == 0 {
 			continue
 		}
-		var prior snapshot.Manifest
-		if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
-			continue
-		}
-		item := closeevent.FindClosed(prior, closeMan, ev.Kind)
-		if item == nil {
-			continue
-		}
-		m := item.SubManifest(prior.Host, prior.SavedAt)
-		if len(m.Sessions) == 0 {
-			continue
-		}
-		return ev, m, true, nil
+		return ev, item, prior, true, nil
 	}
-	return store.Event{}, snapshot.Manifest{}, false, nil
+	return store.Event{}, nil, snapshot.Manifest{}, false, nil
+}
+
+// resolveEvent resolves a close event to its lost entity against the most
+// recent pre-close snapshot. ok is false when the event isn't a recoverable
+// close: unparsable, no prior snapshot, or the entity was never captured.
+func resolveEvent(ctx context.Context, db *store.Store, ev store.Event) (*closeevent.ClosedItem, snapshot.Manifest, bool) {
+	closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
+	if err != nil {
+		return nil, snapshot.Manifest{}, false
+	}
+	snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
+	if err != nil || snap == nil {
+		return nil, snapshot.Manifest{}, false
+	}
+	var prior snapshot.Manifest
+	if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
+		return nil, snapshot.Manifest{}, false
+	}
+	item := closeevent.FindClosed(prior, closeMan, ev.Kind)
+	if item == nil {
+		return nil, snapshot.Manifest{}, false
+	}
+	return item, prior, true
+}
+
+// buildRestorePlan turns a resolved close into a restore plan. A lost pane is
+// split back into its live parent window (or the window is recreated if it's
+// gone); a window or session is rebuilt via BuildPlan. Returns the plan and the
+// sub-manifest used for post-restore focus.
+func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.ClosedItem, prior snapshot.Manifest, opts restore.BuildOptions) ([]restore.Action, snapshot.Manifest) {
+	m := item.SubManifest(prior.Host, prior.SavedAt)
+	if item.Pane != nil {
+		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, windowLive(ctx, t, item.Window.ID), opts), m
+	}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+	return plan, m
+}
+
+// eventByID returns the event with the given id from evs, or a zero Event
+// (which resolveEvent rejects) when absent.
+func eventByID(evs []store.Event, id int64) store.Event {
+	for _, ev := range evs {
+		if ev.ID == id {
+			return ev
+		}
+	}
+	return store.Event{}
+}
+
+// windowLive reports whether a window with the given id is currently open.
+func windowLive(ctx context.Context, t *tmux.Client, windowID string) bool {
+	windows, err := t.ListWindows(ctx)
+	if err != nil {
+		return false
+	}
+	for _, w := range windows {
+		if w.ID == windowID {
+			return true
+		}
+	}
+	return false
 }
 
 // newPickCmd returns the pick subcommand.
@@ -340,16 +392,26 @@ func newPickCmd() *cobra.Command {
 					return nil // cancelled
 				}
 
-				manifest := final.SelectedManifest()
 				buildOpts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-				plan, _ := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
-				if err := restore.Apply(ctx, t, plan); err != nil {
-					return err
-				}
+
+				// Close mode restores one lost entity (the same split-or-recreate
+				// path as undo); snapshot mode replays a whole snapshot.
 				if mode == picker.ModeClose {
-					focusRestored(ctx, t, manifest)
+					item, prior, ok := resolveEvent(ctx, db, eventByID(evs, final.SelectedID()))
+					if !ok {
+						return nil
+					}
+					plan, m := buildRestorePlan(ctx, t, item, prior, buildOpts)
+					if err := restore.Apply(ctx, t, plan); err != nil {
+						return err
+					}
+					focusRestored(ctx, t, m)
+					return nil
 				}
-				return nil
+
+				manifest := final.SelectedManifest()
+				plan, _ := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
+				return restore.Apply(ctx, t, plan)
 			})
 		},
 	}
