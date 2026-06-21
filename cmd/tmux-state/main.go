@@ -228,31 +228,13 @@ func newUndoCmd() *cobra.Command {
 				return fmt.Errorf("only --pop is supported in v0.1.0")
 			}
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
-				evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 1})
-				if err != nil || len(evs) == 0 {
+				ev, m, ok, err := restorableClose(ctx, db)
+				if err != nil {
 					return err
 				}
-				ev := evs[0]
-				closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
-				if err != nil {
-					return fmt.Errorf("parse close event: %w", err)
+				if !ok {
+					return fmt.Errorf("nothing to undo — no recoverable close event")
 				}
-				snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
-				if err != nil {
-					return fmt.Errorf("find pre-close snapshot: %w", err)
-				}
-				if snap == nil {
-					return fmt.Errorf("no pre-close snapshot — nothing to undo against")
-				}
-				var prior snapshot.Manifest
-				if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
-					return fmt.Errorf("parse pre-close snapshot: %w", err)
-				}
-				item := closeevent.FindClosed(prior, closeMan, ev.Kind)
-				if item == nil {
-					return fmt.Errorf("could not identify closed entity in pre-close snapshot")
-				}
-				m := item.SubManifest(prior.Host, prior.SavedAt)
 				t := tmux.NewClient("tmux")
 				opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 				plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
@@ -267,6 +249,48 @@ func newUndoCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&pop, "pop", false, "restore most recent close event and remove it from history")
 	return cmd
+}
+
+// undoScanLimit bounds how far back undo --pop scans for a recoverable close
+// event. Generous enough to step past a run of unrecoverable heads, bounded so
+// a corrupt history can't turn undo into a full-table scan.
+const undoScanLimit = 50
+
+// restorableClose finds the most recent close event that can actually be
+// restored: its lost entity resolves against a pre-close snapshot AND yields a
+// non-empty restore manifest. It steps past events that can't (transient
+// entities born and gone within one snapshot gap, lone panes whose SubManifest
+// is empty) so a single unrecoverable head no longer blocks undo. ok is false
+// when nothing in the scan window is recoverable.
+func restorableClose(ctx context.Context, db *store.Store) (store.Event, snapshot.Manifest, bool, error) {
+	evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: undoScanLimit})
+	if err != nil {
+		return store.Event{}, snapshot.Manifest{}, false, err
+	}
+	for _, ev := range evs {
+		closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
+		if err != nil {
+			continue
+		}
+		snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
+		if err != nil || snap == nil {
+			continue
+		}
+		var prior snapshot.Manifest
+		if err := json.Unmarshal([]byte(snap.ManifestJSON), &prior); err != nil {
+			continue
+		}
+		item := closeevent.FindClosed(prior, closeMan, ev.Kind)
+		if item == nil {
+			continue
+		}
+		m := item.SubManifest(prior.Host, prior.SavedAt)
+		if len(m.Sessions) == 0 {
+			continue
+		}
+		return ev, m, true, nil
+	}
+	return store.Event{}, snapshot.Manifest{}, false, nil
 }
 
 // newPickCmd returns the pick subcommand.
