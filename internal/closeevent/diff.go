@@ -133,6 +133,34 @@ func findClosedSession(prior snapshot.Manifest, post CloseManifest) *ClosedItem 
 	return nil
 }
 
+// priorHasWindowIDs reports whether the snapshot records window ids at all.
+// Old snapshots (pre-id) leave them empty, in which case id-based matching is
+// meaningless and the positional fallback is the only option.
+func priorHasWindowIDs(prior snapshot.Manifest) bool {
+	for i := range prior.Sessions {
+		for j := range prior.Sessions[i].Windows {
+			if prior.Sessions[i].Windows[j].ID != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// priorHasPaneIDs reports whether the snapshot records pane ids at all.
+func priorHasPaneIDs(prior snapshot.Manifest) bool {
+	for i := range prior.Sessions {
+		for j := range prior.Sessions[i].Windows {
+			for k := range prior.Sessions[i].Windows[j].Panes {
+				if prior.Sessions[i].Windows[j].Panes[k].ID != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func findClosedWindow(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 	// ID match first: the event records the dying window's id, which pins the
 	// exact entity when several windows closed since the prior snapshot (a
@@ -153,6 +181,14 @@ func findClosedWindow(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 					return &ClosedItem{Window: w, SessionName: s.Name, WindowIndex: w.Index}
 				}
 			}
+		}
+		// The event recorded an id and the prior snapshot is id-aware but
+		// doesn't hold it: the window was born and gone within a snapshot gap,
+		// so it was never captured — unrecoverable. Falling through to the
+		// positional fallback would wrongly grab some other window that closed
+		// in the same gap.
+		if priorHasWindowIDs(prior) {
+			return nil
 		}
 	}
 	// Fallback for snapshots from before ids were recorded: first missing wins.
@@ -191,6 +227,11 @@ func findClosedPane(prior snapshot.Manifest, post CloseManifest) *ClosedItem {
 					}
 				}
 			}
+		}
+		// Id-aware prior without this pane: born and gone within a snapshot
+		// gap, never captured (see findClosedWindow).
+		if priorHasPaneIDs(prior) {
+			return nil
 		}
 	}
 	live := map[string]bool{}

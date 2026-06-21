@@ -111,6 +111,30 @@ func TestFindClosed_WindowIDDisambiguatesBurstCloses(t *testing.T) {
 	}
 }
 
+func TestFindClosed_BornInGapWindowIsUnrecoverable(t *testing.T) {
+	// The event names @9, but the id-aware prior snapshot never captured it
+	// (created and closed within one snapshot gap). Even though @2 also closed
+	// in that gap, the positional fallback must NOT grab @2 — @9 is simply
+	// unrecoverable.
+	prior := snapshot.Manifest{
+		Sessions: []snapshot.Session{
+			{Name: "s", Windows: []snapshot.Window{
+				{Index: 1, Name: "keep", ID: "@1"},
+				{Index: 2, Name: "also-closed", ID: "@2"},
+			}},
+		},
+	}
+	post := closeevent.CloseManifest{
+		WindowID: "@9",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s", Index: 1, Name: "keep", ID: "@1"}},
+		},
+	}
+	if got := closeevent.FindClosed(prior, post, "window-unlinked"); got != nil {
+		t.Errorf("expected nil for a window born within a snapshot gap, got %+v", got.Window)
+	}
+}
+
 func TestFindClosed_MovedWindowIsNotClosed(t *testing.T) {
 	// window-unlinked also fires on move-window: the window survives under
 	// another session, so the event must resolve to nothing.
