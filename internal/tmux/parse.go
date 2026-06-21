@@ -87,6 +87,7 @@ type PaneRow struct {
 	PID         int
 	LastUsed    int64
 	ID          string // tmux pane id, e.g. "%3"
+	Relaunch    string // @ts_relaunch pane option; verbatim relaunch command, empty when unset
 }
 
 // ParsePanes parses tmux list-panes -F output.
@@ -97,8 +98,8 @@ func ParsePanes(s string) ([]PaneRow, error) {
 	var out []PaneRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
-		if len(fields) != 8 {
-			return nil, fmt.Errorf("pane line %d: expected 8 fields, got %d", i+1, len(fields))
+		if len(fields) != 9 {
+			return nil, fmt.Errorf("pane line %d: expected 9 fields, got %d", i+1, len(fields))
 		}
 		wi, err := strconv.Atoi(fields[1])
 		if err != nil {
@@ -119,6 +120,7 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		out = append(out, PaneRow{
 			Session: fields[0], WindowIndex: wi, PaneIndex: pi,
 			Cwd: fields[3], Command: fields[4], PID: pid, LastUsed: lu, ID: fields[7],
+			Relaunch: fields[8],
 		})
 	}
 	return out, nil

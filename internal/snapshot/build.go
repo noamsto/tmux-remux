@@ -68,6 +68,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 					LastUsed:   p.LastUsed,
 					ChildCount: cc,
 					ID:         p.ID,
+					Relaunch:   p.Relaunch,
 				})
 			}
 			sess.Windows = append(sess.Windows, win)

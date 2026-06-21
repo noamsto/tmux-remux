@@ -62,7 +62,8 @@ type Pane struct {
 	LastUsed      int64    `json:"last_used"`
 	ChildCount    int      `json:"child_count"`
 	ScrollbackSHA string   `json:"scrollback_sha,omitempty"`
-	ID            string   `json:"id,omitempty"` // tmux pane id ("%7"); stable within a server lifetime
+	ID            string   `json:"id,omitempty"`       // tmux pane id ("%7"); stable within a server lifetime
+	Relaunch      string   `json:"relaunch,omitempty"` // @ts_relaunch override; exec'd verbatim on restore, bypassing the allow-list
 }
 
 // Fingerprint returns a sha256 hex of the manifest with timestamps zeroed,

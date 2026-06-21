@@ -28,6 +28,11 @@ type StartupOpts struct {
 	// data from tmux's `list-panes -F` allow-listed commands is plain ASCII
 	// in practice.
 	RelaunchArgs []string
+	// OverrideCmd, if non-empty, is exec'd verbatim as the relaunch target,
+	// taking precedence over RelaunchCmd/RelaunchArgs. It is a full /bin/sh -c
+	// command string supplied by the pane's @ts_relaunch option (the owning
+	// tool is responsible for quoting); tmux-state passes it through unaltered.
+	OverrideCmd string
 }
 
 // BuildStartupCommand composes the shell-command string passed to tmux as the
@@ -42,6 +47,9 @@ type StartupOpts struct {
 //	scrollback=yes relaunch=no   `'<self>' cat-scrollback <sha>; exec <shell> [-l]`
 //	scrollback=yes relaunch=yes  `'<self>' cat-scrollback <sha>; exec <cmd> <quoted-args...>`
 //
+// An OverrideCmd (pane @ts_relaunch) replaces the <cmd ...> exec target in the
+// relaunch=yes forms, emitted verbatim (no arg quoting).
+//
 // The output is interpreted by /bin/sh -c when tmux spawns the pane. See
 // StartupOpts.RelaunchArgs for the printable-ASCII assumption on args.
 func BuildStartupCommand(opts StartupOpts) string {
@@ -49,7 +57,7 @@ func BuildStartupCommand(opts StartupOpts) string {
 	if opts.ScrollbackSHA == "" {
 		// Without scrollback, an exec wrapper adds nothing; just emit the
 		// raw command (tmux runs it via /bin/sh -c).
-		if opts.RelaunchCmd == "" {
+		if opts.RelaunchCmd == "" && opts.OverrideCmd == "" {
 			return ""
 		}
 		return relaunch
@@ -60,6 +68,9 @@ func BuildStartupCommand(opts StartupOpts) string {
 // buildExecTarget returns the program-and-args portion that follows `exec`,
 // or that stands alone when no scrollback is involved.
 func buildExecTarget(opts StartupOpts) string {
+	if opts.OverrideCmd != "" {
+		return opts.OverrideCmd
+	}
 	if opts.RelaunchCmd != "" {
 		var b strings.Builder
 		b.WriteString(opts.RelaunchCmd)
