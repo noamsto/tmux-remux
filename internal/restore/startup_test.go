@@ -68,6 +68,32 @@ func TestBuildStartupCommand(t *testing.T) {
 			},
 			want: `ssh "-p" "2222" "host"`,
 		},
+		{
+			name: "override only: emitted verbatim, unquoted",
+			opts: restore.StartupOpts{
+				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				OverrideCmd: "claude --resume abc-123",
+			},
+			want: `claude --resume abc-123`,
+		},
+		{
+			name: "override + scrollback",
+			opts: restore.StartupOpts{
+				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				ScrollbackSHA: "abc123",
+				OverrideCmd:   "claude --resume abc-123",
+			},
+			want: `'/usr/bin/tmux-state' cat-scrollback abc123; exec claude --resume abc-123`,
+		},
+		{
+			name: "override wins over relaunch",
+			opts: restore.StartupOpts{
+				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				RelaunchCmd: "nvim", RelaunchArgs: []string{"file.go"},
+				OverrideCmd: "claude --resume abc-123",
+			},
+			want: `claude --resume abc-123`,
+		},
 	}
 
 	for _, tt := range tests {

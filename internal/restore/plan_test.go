@@ -67,6 +67,33 @@ func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 	t.Fatal("CreateWindow not found in plan")
 }
 
+func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
+	// A pane whose command is not allow-listed still relaunches via its
+	// @ts_relaunch override, emitted verbatim after the scrollback step.
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{{
+				Index: 1, Name: "main", Layout: "L",
+				Panes: []snapshot.Pane{
+					{Index: 1, Cwd: "/a", Command: "claude", ChildCount: 1, ScrollbackSHA: "deadbeef", Relaunch: "claude --resume abc-123"},
+				},
+			}},
+		}},
+	}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	wantStartup := `'/usr/bin/tmux-state' cat-scrollback deadbeef; exec claude --resume abc-123`
+	for _, a := range plan {
+		if cw, ok := a.(restore.CreateWindow); ok {
+			if cw.StartupCommand != wantStartup {
+				t.Errorf("CreateWindow.StartupCommand = %q, want %q", cw.StartupCommand, wantStartup)
+			}
+			return
+		}
+	}
+	t.Fatal("CreateWindow not found in plan")
+}
+
 func TestBuildPlanScrollbackWithoutAllowedCommandUsesShell(t *testing.T) {
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{{

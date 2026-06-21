@@ -98,8 +98,9 @@ type PlanStats struct {
 }
 
 // paneStartup composes the startup shell-command for a restored pane: replay
-// its stored scrollback, and relaunch the original command when it's on the
-// allow-list (otherwise fall through to the default shell).
+// its stored scrollback, then relaunch via the pane's @ts_relaunch override if
+// set, else the original command when it's on the allow-list (otherwise fall
+// through to the default shell).
 func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 	so := StartupOpts{
 		Self:          opts.Self,
@@ -107,11 +108,16 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 		IsBash:        opts.IsBash,
 		ScrollbackSHA: p.ScrollbackSHA,
 	}
-	for _, c := range opts.AllowList {
-		if c == p.Command {
-			so.RelaunchCmd = p.Command
-			so.RelaunchArgs = p.CommandArgs
-			break
+	if p.Relaunch != "" {
+		// A pane-supplied @ts_relaunch override wins over the allow-list.
+		so.OverrideCmd = p.Relaunch
+	} else {
+		for _, c := range opts.AllowList {
+			if c == p.Command {
+				so.RelaunchCmd = p.Command
+				so.RelaunchArgs = p.CommandArgs
+				break
+			}
 		}
 	}
 	return BuildStartupCommand(so)

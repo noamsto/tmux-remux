@@ -132,6 +132,8 @@ Configurable via env vars (TODO: also via flags). Defaults:
 
 Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `lazygit`, `lazydocker`, `k9s`, `kubectl`, `ssh`, `mosh`, `less`, `tail`, `watch`, etc. Anything not on the list restores as a fresh shell in the saved cwd.
 
+**Per-pane relaunch override.** A pane may set the `@ts_relaunch` user option to a full shell command (e.g. `set -p @ts_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
+
 ## Storage
 
 ```
