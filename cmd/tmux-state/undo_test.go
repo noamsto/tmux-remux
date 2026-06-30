@@ -9,6 +9,7 @@ import (
 	"github.com/noamsto/tmux-state/internal/closeevent"
 	"github.com/noamsto/tmux-state/internal/snapshot"
 	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-state/internal/tmux"
 )
 
 // seedStore returns an open store with a single snapshot capturing one window
@@ -104,6 +105,45 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	}
 	if item.Window == nil || item.Window.ID != "@9" {
 		t.Errorf("item.Window = %+v, want parent window @9", item.Window)
+	}
+}
+
+func TestReindexIntoLiveSessions(t *testing.T) {
+	// One window (mono:4) restored into a session that's still live with its
+	// index already taken: closing the window renumbered the rest, so 4 now
+	// holds a different window. Pinning 4 would fail new-window with "index in
+	// use"; reindex must move it to a free slot past the live max (5 -> 6).
+	m := snapshot.Manifest{Sessions: []snapshot.Session{{
+		Name:    "mono",
+		Windows: []snapshot.Window{{Index: 4, Name: "win"}},
+	}}}
+	live := []tmux.WindowRow{
+		{Session: "mono", Index: 1},
+		{Session: "mono", Index: 4},
+		{Session: "mono", Index: 5},
+		{Session: "other", Index: 4},
+	}
+	reindexIntoLiveSessions(&m, live)
+	if got := m.Sessions[0].Windows[0].Index; got != 6 {
+		t.Errorf("collided index = %d, want 6 (past the live max)", got)
+	}
+}
+
+func TestReindexLeavesFreeIndexAndDeadSessionAlone(t *testing.T) {
+	m := snapshot.Manifest{Sessions: []snapshot.Session{
+		// Live session, free index -> unchanged.
+		{Name: "mono", Windows: []snapshot.Window{{Index: 2}}},
+		// Session not currently live (whole-session restore) -> unchanged, it
+		// gets created fresh by CreateSession.
+		{Name: "gone", Windows: []snapshot.Window{{Index: 4}}},
+	}}
+	live := []tmux.WindowRow{{Session: "mono", Index: 1}}
+	reindexIntoLiveSessions(&m, live)
+	if got := m.Sessions[0].Windows[0].Index; got != 2 {
+		t.Errorf("free index = %d, want 2 (unchanged)", got)
+	}
+	if got := m.Sessions[1].Windows[0].Index; got != 4 {
+		t.Errorf("dead-session index = %d, want 4 (unchanged)", got)
 	}
 }
 
