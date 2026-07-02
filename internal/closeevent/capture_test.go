@@ -74,6 +74,52 @@ func TestCaptureStoresProvidedPostCloseIndex(t *testing.T) {
 	}
 }
 
+func TestCaptureSkipsMovedWindow(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// window-unlinked fires on move-window: @5 still exists in the post-close
+	// index under a different session, so nothing was closed.
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", WindowID: "@5", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s2", Index: 3, ID: "@5"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 {
+		t.Errorf("expected skip (id=0) for a still-live window, got id=%d", id)
+	}
+}
+
+func TestCaptureSkipsLivePane(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", PaneID: "%3", Host: "h",
+		Index: closeevent.IndexPost{
+			Panes: []tmux.PaneRow{{ID: "%3"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 {
+		t.Errorf("expected skip (id=0) for a still-live pane, got id=%d", id)
+	}
+}
+
 func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
