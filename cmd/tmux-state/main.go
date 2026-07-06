@@ -109,7 +109,7 @@ func newSaveCmd() *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
 				sb := scrollback.New(cfg.ScrollbackDir)
-				t := tmux.NewClient("tmux")
+				t := tmux.NewClient("tmux", cfg.DecorationOptions...)
 				saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 					Host:              hostname(),
 					CaptureScrollback: cfg.CaptureScrollback,
