@@ -31,8 +31,9 @@ type Client struct {
 }
 
 // NewClient returns a Client that invokes binary; if empty, "tmux" is used.
-// decorationOpts are appended to the list-windows format as #{@opt} fields and
-// captured into WindowRow.Decoration.
+// Each decorationOpts entry is wrapped as a #{opt} field appended to the
+// list-windows format and captured into WindowRow.Decoration (names are
+// typically @-prefixed user options, e.g. "@crew_color").
 func NewClient(binary string, decorationOpts ...string) *Client {
 	if binary == "" {
 		binary = "tmux"

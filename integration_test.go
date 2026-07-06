@@ -227,7 +227,10 @@ func TestDecorationRestoreRoundtrip(t *testing.T) {
 			continue
 		}
 		for j := range m.Sessions[i].Windows {
-			win = &m.Sessions[i].Windows[j]
+			if m.Sessions[i].Windows[j].Index == 0 {
+				win = &m.Sessions[i].Windows[j]
+				break
+			}
 		}
 	}
 	if win == nil {
