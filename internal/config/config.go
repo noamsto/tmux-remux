@@ -43,6 +43,12 @@ type Config struct {
 
 	// Allow-list of commands to relaunch on restore
 	CommandAllowList []string
+
+	// DecorationOptions is the allow-list of tmux window options snapshotted
+	// and re-applied verbatim on restore. Restores persona decoration (agent
+	// codename, tint) that a fan-out orchestrator stamped but that nothing
+	// re-derives after a server restart.
+	DecorationOptions []string
 }
 
 // Default returns a Config with XDG-resolved paths and sensible thresholds.
@@ -84,6 +90,8 @@ func Default() Config {
 			"k9s", "kubectl",
 			"ssh", "mosh",
 		},
+
+		DecorationOptions: []string{"@crew_name", "@crew_color"},
 	}
 }
 

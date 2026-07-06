@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/noamsto/tmux-state/internal/config"
@@ -64,5 +65,13 @@ func TestRestoreModeIsTyped(t *testing.T) {
 	var m config.RestoreMode = "auto"
 	if m != config.RestoreAuto {
 		t.Errorf("RestoreMode(\"auto\") != RestoreAuto")
+	}
+}
+
+func TestDefaultDecorationOptions(t *testing.T) {
+	got := config.Default().DecorationOptions
+	want := []string{"@crew_name", "@crew_color"}
+	if !slices.Equal(got, want) {
+		t.Errorf("DecorationOptions = %v, want %v", got, want)
 	}
 }
