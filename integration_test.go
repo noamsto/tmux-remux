@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/restore"
 	"github.com/noamsto/tmux-state/internal/scrollback"
 	"github.com/noamsto/tmux-state/internal/snapshot"
@@ -45,7 +49,7 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
-	return tmux.ParseWindows(out)
+	return tmux.ParseWindows(out, nil)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
 	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@ts_relaunch}"})
@@ -183,4 +187,71 @@ func panesInWindow(t *testing.T, st scopedTmux, windowIndex int) int {
 		}
 	}
 	return n
+}
+
+// TestDecorationRestoreRoundtrip captures decoration options (@crew_name,
+// @crew_color) from a real tmux server into a manifest, then replays the
+// resulting restore plan against a fresh server and confirms the options
+// land back on the recreated window. tmux.Client has no -S flag of its own —
+// it resolves its target socket from $TMUX (see withSynthesizedTmuxEnv in
+// internal/tmux/client.go) — so each phase points Client at the right server
+// by setting TMUX to that server's socket.
+func TestDecorationRestoreRoundtrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	src := testutil.StartServer(t)
+	if _, err := src.Tmux("rename-session", "-t", "init", "deco"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-window-option", "-t", "deco:0", "@crew_color", "colour141"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-window-option", "-t", "deco:0", "@crew_name", "dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TMUX", src.Socket+",0,0")
+	srcClient := tmux.NewClient("tmux", "@crew_name", "@crew_color")
+
+	ctx := context.Background()
+	m, err := snapshot.Build(ctx, srcClient, "test", time.Now().UnixMilli())
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+
+	var win *snapshot.Window
+	for i := range m.Sessions {
+		if m.Sessions[i].Name != "deco" {
+			continue
+		}
+		for j := range m.Sessions[i].Windows {
+			win = &m.Sessions[i].Windows[j]
+		}
+	}
+	if win == nil {
+		t.Fatal("deco window missing from manifest")
+	}
+	wantDecoration := map[string]string{"@crew_name": "dispatcher", "@crew_color": "colour141"}
+	if !reflect.DeepEqual(win.Decoration, wantDecoration) {
+		t.Errorf("captured Decoration = %#v, want %#v", win.Decoration, wantDecoration)
+	}
+
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{})
+
+	dst := testutil.StartServer(t)
+	t.Setenv("TMUX", dst.Socket+",0,0")
+	dstClient := tmux.NewClient("tmux")
+	if err := restore.Apply(ctx, dstClient, plan); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	out, err := dst.Tmux("show-options", "-w", "-v", "-t", "deco:0", "@crew_color")
+	if err != nil {
+		t.Fatalf("show-options: %v", err)
+	}
+	if got := strings.TrimSpace(out); got != "colour141" {
+		t.Errorf("restored @crew_color = %q, want %q", got, "colour141")
+	}
 }
