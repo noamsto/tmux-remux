@@ -49,6 +49,14 @@ func Apply(ctx context.Context, t Runner, plan []Action) error {
 			}
 		case SetLayout:
 			args = []string{"select-layout", "-t", v.Window, v.Layout}
+		case SetOption:
+			cmd := "set-window-option"
+			flags := "-q"
+			if v.Pane {
+				cmd = "set-option"
+				flags = "-pq"
+			}
+			args = []string{cmd, flags, "-t", v.Target, v.Name, v.Value}
 		default:
 			// Unknown action type is a programming error (not a runtime
 			// failure), so we abort rather than silently skip — callers

@@ -3,6 +3,7 @@ package restore
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/noamsto/tmux-state/internal/filter"
 	"github.com/noamsto/tmux-state/internal/snapshot"
@@ -67,6 +68,18 @@ type SetLayout struct {
 }
 
 func (SetLayout) isAction() {}
+
+// SetOption re-applies one captured window/pane option on restore via
+// set-window-option / set-option. Emitted per decoration key so persona
+// decoration (agent codename, tint) survives a server restart.
+type SetOption struct {
+	Target string // <session>:<window_index>
+	Pane   bool   // set-option -p vs set-window-option
+	Name   string
+	Value  string
+}
+
+func (SetOption) isAction() {}
 
 // BuildOptions carries the values needed to compose StartupCommands. Resolved
 // once per restore by the caller.
@@ -174,6 +187,17 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				StartupCommand:  startupFor(*firstPane),
 				AutomaticRename: win.AutomaticRename,
 			})
+			if len(win.Decoration) > 0 {
+				names := make([]string, 0, len(win.Decoration))
+				for k := range win.Decoration {
+					names = append(names, k)
+				}
+				sort.Strings(names)
+				target := fmt.Sprintf("%s:%d", sess.Name, win.Index)
+				for _, k := range names {
+					plan = append(plan, SetOption{Target: target, Name: k, Value: win.Decoration[k]})
+				}
+			}
 			for _, p := range keptPanes[1:] {
 				plan = append(plan, SplitPane{
 					Target:         fmt.Sprintf("%s:%d", sess.Name, win.Index),
