@@ -55,3 +55,13 @@ func TestFingerprintDifferentForDifferentStructure(t *testing.T) {
 		t.Errorf("expected different fingerprints")
 	}
 }
+
+func TestFingerprintIgnoresDecoration(t *testing.T) {
+	base := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{Index: 1}}}}}
+	withDecor := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{
+		Index: 1, Decoration: map[string]string{"@crew_color": "colour141"},
+	}}}}}
+	if base.Fingerprint() != withDecor.Fingerprint() {
+		t.Error("Fingerprint changed when only Decoration differs")
+	}
+}
