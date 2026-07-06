@@ -119,7 +119,7 @@ func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseWindows(out)
+	return ParseWindows(out, nil)
 }
 
 // ListPanes runs `tmux list-panes -a -F …` and parses the result.
