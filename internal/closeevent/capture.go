@@ -29,6 +29,14 @@ type Args struct {
 // event for the same session exists (cascade dedup). Returns the inserted
 // event id, or 0 if deduped.
 func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
+	// window-unlinked also fires on move-window, where the window survives under
+	// another session. When the closed entity's id is still in the post-close
+	// index nothing was lost, so drop it at the source rather than storing a row
+	// the picker can only render as "no recoverable entity".
+	if entityStillLive(a) {
+		return 0, nil
+	}
+
 	now := time.Now().UnixMilli()
 	cutoff := now - dedupWindow.Milliseconds()
 
@@ -79,6 +87,33 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 		Host:         a.Host,
 		ManifestJSON: string(wrapped),
 	})
+}
+
+// entityStillLive reports whether the close event's target still appears in the
+// post-close index, meaning it was not actually closed (e.g. a moved window).
+// Mirrors the id-still-present checks in findClosedWindow/findClosedPane.
+func entityStillLive(a Args) bool {
+	switch a.Kind {
+	case "window-unlinked":
+		if a.WindowID == "" {
+			return false
+		}
+		for _, w := range a.Index.Windows {
+			if w.ID == a.WindowID {
+				return true
+			}
+		}
+	case "pane-died":
+		if a.PaneID == "" {
+			return false
+		}
+		for _, p := range a.Index.Panes {
+			if p.ID == a.PaneID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func scopeFor(kind string) string {
