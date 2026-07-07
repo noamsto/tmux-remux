@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"maps"
 	"os"
 	"testing"
 
@@ -68,6 +69,24 @@ func TestBuildCarriesWindowAndPaneIDs(t *testing.T) {
 	}
 	if w.Panes[0].ID != "%7" {
 		t.Errorf("pane ID = %q, want %%7", w.Panes[0].ID)
+	}
+}
+
+func TestBuildCarriesDecoration(t *testing.T) {
+	fc := &fakeClient{
+		sessions: []tmux.SessionRow{{Name: "s1"}},
+		windows: []tmux.WindowRow{
+			{Session: "s1", Index: 1, Decoration: map[string]string{"@crew_color": "colour141"}},
+		},
+	}
+	m, err := snapshot.Build(context.Background(), fc, "h", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"@crew_color": "colour141"}
+	got := m.Sessions[0].Windows[0].Decoration
+	if !maps.Equal(got, want) {
+		t.Errorf("Decoration = %v, want %v", got, want)
 	}
 }
 

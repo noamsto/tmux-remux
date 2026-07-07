@@ -49,8 +49,9 @@ type Window struct {
 	// automatic-rename-format at save time. When true, restore re-enables
 	// automatic-rename so the live format takes over again — otherwise
 	// `new-window -n` would pin the stale stored name and disable the renamer.
-	AutomaticRename bool   `json:"automatic_rename,omitempty"`
-	Panes           []Pane `json:"panes"`
+	AutomaticRename bool              `json:"automatic_rename,omitempty"`
+	Decoration      map[string]string `json:"decoration,omitempty"`
+	Panes           []Pane            `json:"panes"`
 }
 
 // Pane captures one tmux pane's state, including optional scrollback hash.
@@ -78,6 +79,7 @@ func (m Manifest) Fingerprint() string {
 		s2.Windows = make([]Window, len(s.Windows))
 		for j, w := range s.Windows {
 			w2 := w
+			w2.Decoration = nil
 			w2.Panes = make([]Pane, len(w.Panes))
 			for k, p := range w.Panes {
 				p2 := p

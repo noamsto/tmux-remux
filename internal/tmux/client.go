@@ -26,15 +26,19 @@ var ErrNoServer = errors.New("tmux: no server running")
 // Client invokes a tmux-compatible binary. Defaults to the "tmux" command
 // when binary is empty.
 type Client struct {
-	binary string
+	binary         string
+	decorationOpts []string
 }
 
 // NewClient returns a Client that invokes binary; if empty, "tmux" is used.
-func NewClient(binary string) *Client {
+// Each decorationOpts entry is wrapped as a #{opt} field appended to the
+// list-windows format and captured into WindowRow.Decoration (names are
+// typically @-prefixed user options, e.g. "@crew_color").
+func NewClient(binary string, decorationOpts ...string) *Client {
 	if binary == "" {
 		binary = "tmux"
 	}
-	return &Client{binary: binary}
+	return &Client{binary: binary, decorationOpts: decorationOpts}
 }
 
 // Run executes the binary with the given args and returns stdout. Non-zero
@@ -91,10 +95,20 @@ func withSynthesizedTmuxEnv(env []string) []string {
 }
 
 const (
-	sessionFormat = "#{session_name}" + FieldSep + "#{session_last_attached}"
-	windowFormat  = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
-	paneFormat    = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@ts_relaunch}"
+	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}"
+	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
+	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@ts_relaunch}"
 )
+
+// WindowFormat returns the list-windows -F format, with one #{@opt} field per
+// decoration option appended in order.
+func (c *Client) WindowFormat() string {
+	f := baseWindowFormat
+	for _, o := range c.decorationOpts {
+		f += FieldSep + "#{" + o + "}"
+	}
+	return f
+}
 
 // ListSessions runs `tmux list-sessions -F …` and parses the result.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
@@ -112,14 +126,14 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRow, error) {
 // ListWindows runs `tmux list-windows -a -F …` and parses the result.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
-	out, err := c.Run(ctx, []string{"list-windows", "-a", "-F", windowFormat})
+	out, err := c.Run(ctx, []string{"list-windows", "-a", "-F", c.WindowFormat()})
 	if errors.Is(err, ErrNoServer) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return ParseWindows(out)
+	return ParseWindows(out, c.decorationOpts)
 }
 
 // ListPanes runs `tmux list-panes -a -F …` and parses the result.

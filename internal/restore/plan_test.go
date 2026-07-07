@@ -200,3 +200,54 @@ func TestBuildPlanStatsCountsKeptAndSkipped(t *testing.T) {
 		t.Errorf("stats mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestBuildPlanEmitsSortedSetOptions(t *testing.T) {
+	m := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Name: "s", Windows: []snapshot.Window{{
+			Index: 1, Layout: "L",
+			Decoration: map[string]string{"@crew_color": "colour141", "@crew_name": "dispatcher"},
+			Panes:      []snapshot.Pane{{Index: 0, Cwd: "/tmp", Command: "bash"}},
+		}},
+	}}}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{DefaultShell: "/bin/sh"})
+
+	var sets []restore.SetOption
+	var setIdx, layoutIdx int
+	for i, a := range plan {
+		if so, ok := a.(restore.SetOption); ok {
+			sets = append(sets, so)
+			setIdx = i
+		}
+		if _, ok := a.(restore.SetLayout); ok {
+			layoutIdx = i
+		}
+	}
+	if len(sets) != 2 {
+		t.Fatalf("got %d SetOption, want 2", len(sets))
+	}
+	// sorted by name: @crew_color before @crew_name
+	if sets[0].Name != "@crew_color" || sets[1].Name != "@crew_name" {
+		t.Errorf("SetOption not sorted by name: %+v", sets)
+	}
+	if sets[0].Target != "s:1" || sets[0].Value != "colour141" || sets[0].Pane {
+		t.Errorf("unexpected SetOption: %+v", sets[0])
+	}
+	if setIdx > layoutIdx {
+		t.Error("SetOption emitted after SetLayout; want before")
+	}
+}
+
+func TestBuildPlanNoDecorationNoSetOption(t *testing.T) {
+	m := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Name: "s", Windows: []snapshot.Window{{
+			Index: 1, Layout: "L",
+			Panes: []snapshot.Pane{{Index: 0, Cwd: "/tmp", Command: "bash"}},
+		}},
+	}}}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{DefaultShell: "/bin/sh"})
+	for _, a := range plan {
+		if _, ok := a.(restore.SetOption); ok {
+			t.Error("unexpected SetOption for window with no decoration")
+		}
+	}
+}

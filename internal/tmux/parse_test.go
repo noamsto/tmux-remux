@@ -1,6 +1,8 @@
 package tmux_test
 
 import (
+	"maps"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -35,7 +37,7 @@ func TestParseSessionsEmpty(t *testing.T) {
 
 func TestParseWindows(t *testing.T) {
 	input := "lazytmux\x1f1\x1fmain\x1fabcd,200x50,0,0,1\x1f@4\x1f1\nwork\x1f2\x1fbuild\x1fefgh,80x24,0,0,2\x1f@7\x1f0\n"
-	got, err := tmux.ParseWindows(input)
+	got, err := tmux.ParseWindows(input, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +47,52 @@ func TestParseWindows(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("ParseWindows mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseWindowsDecoration(t *testing.T) {
+	opts := []string{"@crew_name", "@crew_color"}
+	line := strings.Join([]string{
+		"sess", "2", "win", "layout", "@4", "1", "dispatcher", "colour141",
+	}, tmux.FieldSep)
+	rows, err := tmux.ParseWindows(line+"\n", opts)
+	if err != nil {
+		t.Fatalf("ParseWindows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	got := rows[0].Decoration
+	want := map[string]string{"@crew_name": "dispatcher", "@crew_color": "colour141"}
+	if !maps.Equal(got, want) {
+		t.Errorf("Decoration = %v, want %v", got, want)
+	}
+}
+
+func TestParseWindowsDecorationEmptyDropped(t *testing.T) {
+	opts := []string{"@crew_name", "@crew_color"}
+	// @crew_color unset -> empty trailing field
+	line := strings.Join([]string{
+		"sess", "2", "win", "layout", "@4", "1", "dispatcher", "",
+	}, tmux.FieldSep)
+	rows, err := tmux.ParseWindows(line+"\n", opts)
+	if err != nil {
+		t.Fatalf("ParseWindows: %v", err)
+	}
+	want := map[string]string{"@crew_name": "dispatcher"}
+	if !maps.Equal(rows[0].Decoration, want) {
+		t.Errorf("Decoration = %v, want %v", rows[0].Decoration, want)
+	}
+}
+
+func TestParseWindowsNoDecoration(t *testing.T) {
+	line := strings.Join([]string{"sess", "2", "win", "layout", "@4", "1"}, tmux.FieldSep)
+	rows, err := tmux.ParseWindows(line+"\n", nil)
+	if err != nil {
+		t.Fatalf("ParseWindows: %v", err)
+	}
+	if rows[0].Decoration != nil {
+		t.Errorf("Decoration = %v, want nil", rows[0].Decoration)
 	}
 }
 

@@ -103,6 +103,38 @@ func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	}
 }
 
+func TestApplySetOptionRunsSetWindowOption(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.SetOption{Target: "s:1", Name: "@crew_color", Value: "colour141"},
+	}
+	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"set-window-option", "-q", "-t", "s:1", "@crew_color", "colour141"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestApplySetOptionPaneRunsSetOption(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.SetOption{Target: "s:1", Pane: true, Name: "@crew_color", Value: "colour141"},
+	}
+	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"set-option", "-pq", "-t", "s:1", "@crew_color", "colour141"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
 type failingTmux struct {
 	runFn func(args []string) (string, error)
 }

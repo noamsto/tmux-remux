@@ -136,6 +136,21 @@ func TestServerStartTimeParsesSecondsToMillis(t *testing.T) {
 	}
 }
 
+func TestWindowFormatWithDecoration(t *testing.T) {
+	c := tmux.NewClient("tmux", "@crew_name", "@crew_color")
+	got := c.WindowFormat()
+	if !strings.HasSuffix(got, tmux.FieldSep+"#{@crew_name}"+tmux.FieldSep+"#{@crew_color}") {
+		t.Errorf("format missing decoration fields: %q", got)
+	}
+}
+
+func TestWindowFormatNoDecoration(t *testing.T) {
+	c := tmux.NewClient("tmux")
+	if strings.Contains(c.WindowFormat(), "#{@") {
+		t.Errorf("unexpected decoration field in %q", c.WindowFormat())
+	}
+}
+
 func TestServerStartTimeRejectsGarbage(t *testing.T) {
 	fake := writeFakeTmux(t, `echo not-a-number`)
 	c := tmux.NewClient(fake)
