@@ -6,9 +6,12 @@ import (
 	"strings"
 )
 
-// FieldSep is ASCII unit separator (U+001F), used as a tmux -F field separator.
-// Safe because tmux session/window/pane names cannot contain control characters.
-const FieldSep = "\x1f"
+// FieldSep is the tab character, used as a tmux -F field separator. tmux 3.4
+// vis-encodes "unsafe" control bytes in -F output (e.g. the unit separator
+// U+001F becomes the literal 4-char string `\037`), which corrupts parsing;
+// tab is one of the few control characters it emits verbatim across all
+// versions. tmux names/paths for this tool's sessions never contain a tab.
+const FieldSep = "\t"
 
 // SessionRow is a parsed tmux list-sessions row.
 type SessionRow struct {
@@ -16,7 +19,7 @@ type SessionRow struct {
 	LastAttached int64
 }
 
-// ParseSessions parses the output of `tmux list-sessions -F "<name>\x1f<last_attached>"`.
+// ParseSessions parses the output of `tmux list-sessions -F "<name>\t<last_attached>"`.
 func ParseSessions(s string) ([]SessionRow, error) {
 	if s == "" {
 		return nil, nil

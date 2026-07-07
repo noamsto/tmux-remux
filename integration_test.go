@@ -31,22 +31,27 @@ func (s scopedTmux) Run(ctx context.Context, args []string) (string, error) {
 	}
 	return string(out), nil
 }
+
+// Formats mirror internal/tmux/client.go and share tmux.FieldSep so the test
+// can't drift from the parsers.
+const sep = tmux.FieldSep
+
 func (s scopedTmux) ListSessions(ctx context.Context) ([]tmux.SessionRow, error) {
-	out, err := s.Run(ctx, []string{"list-sessions", "-F", "#{session_name}\x1f#{session_last_attached}"})
+	out, err := s.Run(ctx, []string{"list-sessions", "-F", "#{session_name}" + sep + "#{session_last_attached}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
 	return tmux.ParseSessions(out)
 }
 func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
-	out, err := s.Run(ctx, []string{"list-windows", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{window_name}\x1f#{window_layout}\x1f#{window_id}"})
+	out, err := s.Run(ctx, []string{"list-windows", "-a", "-F", "#{session_name}" + sep + "#{window_index}" + sep + "#{window_name}" + sep + "#{window_layout}" + sep + "#{window_id}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
 	return tmux.ParseWindows(out)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
-	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}"})
+	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}" + sep + "#{window_index}" + sep + "#{pane_index}" + sep + "#{pane_current_path}" + sep + "#{pane_current_command}" + sep + "#{pane_pid}" + sep + "#{pane_last_used}" + sep + "#{pane_id}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}

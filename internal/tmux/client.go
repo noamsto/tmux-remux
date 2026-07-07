@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -40,16 +39,8 @@ func NewClient(binary string) *Client {
 // Run executes the binary with the given args and returns stdout. Non-zero
 // exit with a "no server" stderr is mapped to ErrNoServer; other failures are
 // wrapped with stderr.
-//
-// When TMUX is not set in the calling environment, Run synthesizes a TMUX
-// value pointing at the default socket. tmux 3.x rewrites control bytes
-// (0x01-0x1f) in -F format output to "_" when invoked outside a client,
-// which silently corrupts the \x1f field separator used by ParseSessions and
-// friends. Setting TMUX to any non-empty value with a real socket path makes
-// tmux preserve those bytes. See parse.go FieldSep.
 func (c *Client) Run(ctx context.Context, args []string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.binary, args...) //nolint:gosec // binary and args are trusted callers
-	cmd.Env = withSynthesizedTmuxEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -66,28 +57,6 @@ func (c *Client) Run(ctx context.Context, args []string) (string, error) {
 func isNoServerStderr(s string) bool {
 	return strings.Contains(s, "no server running on ") ||
 		strings.Contains(s, "error connecting to ")
-}
-
-// withSynthesizedTmuxEnv returns env unchanged when TMUX is already set,
-// otherwise appends a synthesized TMUX=<socket>,0,0 entry. The socket path
-// follows tmux's own default-socket logic: $TMUX_TMPDIR/tmux-<UID>/default,
-// with /tmp as the TMUX_TMPDIR fallback. The pid/session-id components are
-// dummies — tmux only checks that TMUX is non-empty and that the socket path
-// resolves to a running server.
-func withSynthesizedTmuxEnv(env []string) []string {
-	tmpdir := ""
-	for _, e := range env {
-		if strings.HasPrefix(e, "TMUX=") {
-			return env
-		}
-		if v, ok := strings.CutPrefix(e, "TMUX_TMPDIR="); ok {
-			tmpdir = v
-		}
-	}
-	if tmpdir == "" {
-		tmpdir = "/tmp"
-	}
-	return append(env, fmt.Sprintf("TMUX=%s/tmux-%d/default,0,0", tmpdir, os.Getuid()))
 }
 
 const (

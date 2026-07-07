@@ -3,7 +3,6 @@ package tmux_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,56 +68,6 @@ func TestRunPropagatesOtherStderr(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown command") {
 		t.Errorf("error %v does not include stderr", err)
-	}
-}
-
-// TestRunSynthesizesTmuxEnvWhenUnset verifies that when the parent has no
-// TMUX env, Run sets one before exec. This is what prevents tmux 3.x from
-// rewriting the \x1f field separator to "_" in -F output (see client.go
-// comment on Run).
-func TestRunSynthesizesTmuxEnvWhenUnset(t *testing.T) {
-	parentTmux, hadParentTmux := os.LookupEnv("TMUX")
-	t.Cleanup(func() {
-		if hadParentTmux {
-			_ = os.Setenv("TMUX", parentTmux)
-		} else {
-			_ = os.Unsetenv("TMUX")
-		}
-	})
-	if err := os.Unsetenv("TMUX"); err != nil {
-		t.Fatal(err)
-	}
-
-	fake := writeFakeTmux(t, `printf 'TMUX=%s\n' "$TMUX"`)
-	c := tmux.NewClient(fake)
-	out, err := c.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := strings.TrimSpace(out)
-	if !strings.HasPrefix(got, "TMUX=") || got == "TMUX=" {
-		t.Fatalf("expected non-empty TMUX in subprocess env, got %q", got)
-	}
-	wantSuffix := fmt.Sprintf("/tmux-%d/default,0,0", os.Getuid())
-	if !strings.HasSuffix(got, wantSuffix) {
-		t.Errorf("got %q, want suffix %q", got, wantSuffix)
-	}
-}
-
-// TestRunPreservesParentTmuxEnv confirms we don't clobber TMUX when the
-// caller already sits inside a tmux client (hooks, keybindings).
-func TestRunPreservesParentTmuxEnv(t *testing.T) {
-	const sentinel = "/some/socket,1,2"
-	t.Setenv("TMUX", sentinel)
-
-	fake := writeFakeTmux(t, `printf '%s' "$TMUX"`)
-	c := tmux.NewClient(fake)
-	out, err := c.Run(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out != sentinel {
-		t.Errorf("TMUX = %q, want %q (Run must not overwrite an existing value)", out, sentinel)
 	}
 }
 

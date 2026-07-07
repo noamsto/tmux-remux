@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseSessions(t *testing.T) {
-	input := "lazytmux\x1f1745700000\nwork\x1f1745699000\n"
+	input := "lazytmux\t1745700000\nwork\t1745699000\n"
 	got, err := tmux.ParseSessions(input)
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestParseSessionsEmpty(t *testing.T) {
 }
 
 func TestParseWindows(t *testing.T) {
-	input := "lazytmux\x1f1\x1fmain\x1fabcd,200x50,0,0,1\x1f@4\nwork\x1f2\x1fbuild\x1fefgh,80x24,0,0,2\x1f@7\n"
+	input := "lazytmux\t1\tmain\tabcd,200x50,0,0,1\t@4\nwork\t2\tbuild\tefgh,80x24,0,0,2\t@7\n"
 	got, err := tmux.ParseWindows(input)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestParseWindows(t *testing.T) {
 }
 
 func TestParsePanes(t *testing.T) {
-	input := "lazytmux\x1f1\x1f1\x1f/home/me\x1fnvim\x1f12345\x1f1745700000\x1f%3\nlazytmux\x1f1\x1f2\x1f/tmp\x1fbash\x1f12346\x1f1745699000\x1f%9\n"
+	input := "lazytmux\t1\t1\t/home/me\tnvim\t12345\t1745700000\t%3\nlazytmux\t1\t2\t/tmp\tbash\t12346\t1745699000\t%9\n"
 	got, err := tmux.ParsePanes(input)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestParsePanes(t *testing.T) {
 
 func TestParseSessionsEmptyLastAttached(t *testing.T) {
 	// tmux emits empty session_last_attached for sessions that have never been attached.
-	got, err := tmux.ParseSessions("never-attached\x1f\nlazytmux\x1f1745700000\n")
+	got, err := tmux.ParseSessions("never-attached\t\nlazytmux\t1745700000\n")
 	if err != nil {
 		t.Fatalf("ParseSessions: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestParseSessionsEmptyLastAttached(t *testing.T) {
 
 func TestParsePanesEmptyLastUsed(t *testing.T) {
 	// tmux emits empty pane_last_used for freshly-created panes.
-	input := "s1\x1f1\x1f1\x1f/x\x1fbash\x1f1234\x1f\x1f%1\n"
+	input := "s1\t1\t1\t/x\tbash\t1234\t\t%1\n"
 	got, err := tmux.ParsePanes(input)
 	if err != nil {
 		t.Fatalf("ParsePanes: %v", err)
