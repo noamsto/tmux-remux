@@ -58,8 +58,8 @@ Requires Go 1.23+. No CGO needed (pure-Go SQLite via `modernc.org/sqlite`).
 
 Copy [`examples/tmux.conf`](examples/tmux.conf) into your `~/.tmux.conf` (or `source` it). It wires:
 
-- 8 tmux hooks for save + close-event capture + live-index updates
-- `prefix + u` (undo pop), `prefix + U` (close-event picker), `prefix + R` (snapshot picker), `prefix + Ctrl-s` (save now)
+- 6 tmux hooks for save + close-event capture
+- `prefix + u` (undo pop), `prefix + U` (close-event picker popup), `prefix + R` (snapshot picker popup), `prefix + Ctrl-s` (save now)
 - `run-shell -b 'tmux-state restore --auto'` for auto-restore on tmux start
 
 Then schedule the save timer:
