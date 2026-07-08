@@ -68,7 +68,10 @@ download_release_binary() {
   local asset="tmux-state_${os}_${arch}.tar.gz"
   local base_url="https://github.com/${REPO}/releases/download/${version}"
   local tmp_dir
-  tmp_dir="$(mktemp -d)"
+
+  mkdir -p "$dest_dir" || return 1
+  # Stage on the same filesystem as dest_dir so the final `mv` is an atomic rename.
+  tmp_dir="$(mktemp -d "$dest_dir/tmux-state-tmp.XXXXXX")" || return 1
   trap 'rm -rf "$tmp_dir"; trap - RETURN' RETURN
 
   curl -fsSL -o "$tmp_dir/$asset" "$base_url/$asset" || return 1
@@ -76,9 +79,8 @@ download_release_binary() {
   verify_checksum "$tmp_dir" "$asset" || return 1
 
   tar -xzf "$tmp_dir/$asset" -C "$tmp_dir" || return 1
-  mkdir -p "$dest_dir"
-  mv "$tmp_dir/tmux-state" "$dest_dir/tmux-state"
-  chmod +x "$dest_dir/tmux-state"
+  mv "$tmp_dir/tmux-state" "$dest_dir/tmux-state" || return 1
+  chmod +x "$dest_dir/tmux-state" || return 1
 }
 
 resolve_binary() {
@@ -118,22 +120,28 @@ wire_plugin() {
   local auto_restore
   auto_restore="$(tmux_option_or_default "@tmux_state_auto_restore" "on")"
 
-  tmux set-hook -g session-created "run-shell -b '${bin} save --reason=hook:session-created'"
-  tmux set-hook -g window-linked   "run-shell -b '${bin} save --reason=hook:window-linked'"
-  tmux set-hook -g client-detached "run-shell -b '${bin} save --reason=hook:client-detached'"
+  # `bin` is quoted with an inner '...' so a path containing spaces still
+  # survives the shell that finally runs the command: for hooks, tmux's own
+  # parser strips the outer "..." when the hook fires and hands run-shell the
+  # inner '${bin}' literally, which /bin/sh -c then re-parses as one word.
+  tmux set-hook -g session-created "run-shell -b \"'${bin}' save --reason=hook:session-created\""
+  tmux set-hook -g window-linked   "run-shell -b \"'${bin}' save --reason=hook:window-linked\""
+  tmux set-hook -g client-detached "run-shell -b \"'${bin}' save --reason=hook:client-detached\""
 
-  tmux set-hook -g pane-exited     "run-shell -b '${bin} capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session}'"
-  tmux set-hook -g window-unlinked "run-shell -b '${bin} capture-event window-unlinked --window=#{hook_window} --session=#{hook_session}'"
-  tmux set-hook -g session-closed  "run-shell -b '${bin} capture-event session-closed --session=#{hook_session}'"
+  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session}\""
+  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session=#{hook_session}\""
+  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session=#{hook_session}\""
 
   if [ "$auto_restore" = "on" ]; then
-    tmux run-shell -b "${bin} restore --auto"
+    tmux run-shell -b "'${bin}' restore --auto"
   fi
 
-  tmux bind-key u   run-shell "${bin} undo --pop"
-  tmux bind-key U   display-popup -E -w 90% -h 85% "${bin} pick --kind=close"
-  tmux bind-key R   display-popup -E -w 90% -h 85% "${bin} pick --kind=snapshot"
-  tmux bind-key C-s run-shell "${bin} save --reason=keybinding"
+  # bind-key's arguments are NOT re-parsed by tmux (they arrive pre-split from
+  # this shell invocation), so only the inner '...' quoting is needed here.
+  tmux bind-key u   run-shell "'${bin}' undo --pop"
+  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close"
+  tmux bind-key R   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=snapshot"
+  tmux bind-key C-s run-shell "'${bin}' save --reason=keybinding"
 }
 
 main() {
