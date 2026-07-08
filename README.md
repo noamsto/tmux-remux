@@ -54,6 +54,31 @@ go build -o tmux-state ./cmd/tmux-state
 
 Requires Go 1.23+. No CGO needed (pure-Go SQLite via `modernc.org/sqlite`).
 
+### TPM (tmux plugin manager)
+
+```tmux
+set -g @plugin 'noamsto/tmux-state'
+```
+
+Then `prefix + I` to fetch and load it. The plugin script (`tmux-state.tmux`)
+resolves a `tmux-state` binary in this order: an existing copy on `PATH`, a
+previously-downloaded copy cached in the plugin's own `bin/` directory, or a
+fresh download of the matching prebuilt release archive (verified against its
+published `checksums.txt`) for your OS/arch. It then wires the same hooks and
+binds as [`examples/tmux.conf`](examples/tmux.conf).
+
+Options (set before `run '~/.tmux/plugins/tpm/tpm'`):
+
+| Option | Default | Meaning |
+|---|---|---|
+| `@tmux_state_version` | `latest` | Pin a specific release tag instead of always fetching the newest. |
+| `@tmux_state_auto_restore` | `on` | Set to `off` to skip `restore --auto` on tmux start (undo/save/picker binds still work). |
+
+The systemd/launchd save timer (see below) is not managed by the plugin — the
+tmux hooks above cover structural saves (new session, new window, detach,
+close); the periodic 60s snapshot timer is still a separate, optional manual
+step.
+
 ## Quick start
 
 Copy [`examples/tmux.conf`](examples/tmux.conf) into your `~/.tmux.conf` (or `source` it). It wires:
@@ -189,7 +214,6 @@ Full design at [`docs/specs/2026-04-26-tmux-state-design.md`](docs/specs/2026-04
 
 **Out of scope (likely forever):**
 - Cloud sync — wrong threat model (see "Privacy and security")
-- Plugin-manager packaging (TPM, etc.) — Nix is the supported install path; from-source works for everyone else
 
 ## Contributing
 
