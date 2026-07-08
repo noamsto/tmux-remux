@@ -6,7 +6,6 @@
 # and wires the same hooks/binds as examples/tmux.conf.
 set -euo pipefail
 
-# shellcheck disable=SC2034  # CURRENT_DIR is used by the download fallback added in the release-download commit
 CURRENT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="noamsto/tmux-state"
 
@@ -40,13 +39,78 @@ detect_arch() {
   esac
 }
 
+resolve_latest_version() {
+  local url
+  url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")"
+  printf '%s' "${url##*/}"
+}
+
+verify_checksum() {
+  local dir="$1" asset="$2"
+  local sha_cmd
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha_cmd=(sha256sum)
+  elif command -v shasum >/dev/null 2>&1; then
+    sha_cmd=(shasum -a 256)
+  else
+    printf 'tmux-state: no sha256sum or shasum found\n' >&2
+    return 1
+  fi
+  (
+    cd "$dir" || exit 1
+    grep " ${asset}\$" checksums.txt > expected.sha256
+    "${sha_cmd[@]}" -c expected.sha256
+  ) >/dev/null
+}
+
+download_release_binary() {
+  local version="$1" os="$2" arch="$3" dest_dir="$4"
+  local asset="tmux-state_${os}_${arch}.tar.gz"
+  local base_url="https://github.com/${REPO}/releases/download/${version}"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"; trap - RETURN' RETURN
+
+  curl -fsSL -o "$tmp_dir/$asset" "$base_url/$asset" || return 1
+  curl -fsSL -o "$tmp_dir/checksums.txt" "$base_url/checksums.txt" || return 1
+  verify_checksum "$tmp_dir" "$asset" || return 1
+
+  tar -xzf "$tmp_dir/$asset" -C "$tmp_dir" || return 1
+  mkdir -p "$dest_dir"
+  mv "$tmp_dir/tmux-state" "$dest_dir/tmux-state"
+  chmod +x "$dest_dir/tmux-state"
+}
+
 resolve_binary() {
   local path_bin
   if path_bin="$(command -v tmux-state 2>/dev/null)"; then
     printf '%s' "$path_bin"
     return 0
   fi
-  return 1
+
+  local cache_dir="$CURRENT_DIR/bin"
+  local cached_bin="$cache_dir/tmux-state"
+  if [ -x "$cached_bin" ]; then
+    printf '%s' "$cached_bin"
+    return 0
+  fi
+
+  local os arch
+  if ! os="$(detect_os)"; then
+    return 1
+  fi
+  if ! arch="$(detect_arch)"; then
+    return 1
+  fi
+
+  local version
+  version="$(tmux_option_or_default "@tmux_state_version" "latest")"
+  if [ "$version" = "latest" ]; then
+    version="$(resolve_latest_version)" || return 1
+  fi
+
+  download_release_binary "$version" "$os" "$arch" "$cache_dir" || return 1
+  printf '%s' "$cached_bin"
 }
 
 wire_plugin() {
