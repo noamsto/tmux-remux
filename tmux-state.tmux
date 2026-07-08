@@ -130,10 +130,10 @@ wire_plugin() {
     tmux run-shell -b "${bin} restore --auto"
   fi
 
-  tmux bind-key u   run-shell "'${bin} undo --pop'"
-  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin} pick --kind=close'"
-  tmux bind-key R   display-popup -E -w 90% -h 85% "'${bin} pick --kind=snapshot'"
-  tmux bind-key C-s run-shell "'${bin} save --reason=keybinding'"
+  tmux bind-key u   run-shell "${bin} undo --pop"
+  tmux bind-key U   display-popup -E -w 90% -h 85% "${bin} pick --kind=close"
+  tmux bind-key R   display-popup -E -w 90% -h 85% "${bin} pick --kind=snapshot"
+  tmux bind-key C-s run-shell "${bin} save --reason=keybinding"
 }
 
 main() {
