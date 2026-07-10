@@ -1,3 +1,5 @@
 [default.extend-words]
 # Catppuccin tmux option prefix: @thm_mauve, @thm_red, @thm_lavender, …
 thm = "thm"
+# Go variable in a plan doc's code sample: sav := snapshot.NewSaver(...)
+sav = "sav"
