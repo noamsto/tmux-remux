@@ -27,7 +27,7 @@ import (
 )
 
 // Version is the released version. Bumped on tagged releases.
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 var hostname = sync.OnceValue(func() string {
 	h, _ := os.Hostname()
