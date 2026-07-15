@@ -1,0 +1,7 @@
+{
+  "name": "tmux-remux",
+  "owner": { "name": "noamsto" },
+  "plugins": [
+    { "name": "tmux-remux", "source": "./claude-plugin", "description": "Resume-on-restore for Claude Code panes under tmux-remux" }
+  ]
+}
