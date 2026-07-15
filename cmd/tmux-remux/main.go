@@ -47,6 +47,7 @@ type CLI struct {
 	Prune         PruneCmd         `cmd:"" help:"Apply retention limits to events"`
 	GC            GCCmd            `cmd:"" name:"gc" help:"Reap orphan scrollback files"`
 	CatScrollback CatScrollbackCmd `cmd:"" name:"cat-scrollback" hidden:"" help:"Stream stored scrollback to stdout (internal helper)"`
+	RelaunchStamp RelaunchStampCmd `cmd:"" name:"relaunch-stamp" hidden:"" help:"Stamp @remux_relaunch from an agent start hook (internal helper)"`
 }
 
 func main() {
