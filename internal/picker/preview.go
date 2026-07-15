@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 // structuralANSI matches CSI sequences whose final byte is NOT 'm' (i.e.,

@@ -1,4 +1,4 @@
-// Package main is the tmux-state CLI entry point.
+// Package main is the tmux-remux CLI entry point.
 package main
 
 import (
@@ -13,17 +13,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/noamsto/tmux-state/internal/applog"
-	"github.com/noamsto/tmux-state/internal/closeevent"
-	"github.com/noamsto/tmux-state/internal/config"
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/lockfile"
-	"github.com/noamsto/tmux-state/internal/picker"
-	"github.com/noamsto/tmux-state/internal/restore"
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/store"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/applog"
+	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/config"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/lockfile"
+	"github.com/noamsto/tmux-remux/internal/picker"
+	"github.com/noamsto/tmux-remux/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // Version is the released version. Bumped on tagged releases.
@@ -36,7 +36,7 @@ var hostname = sync.OnceValue(func() string {
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "tmux-state: error:", err)
+		fmt.Fprintln(os.Stderr, "tmux-remux: error:", err)
 		if log, lerr := applog.Open(loadConfig().LogPath); lerr == nil {
 			log.Logf("error: %v (args: %v)", err, os.Args[1:])
 			_ = log.Close()
@@ -47,7 +47,7 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "tmux-state",
+		Use:           "tmux-remux",
 		Short:         "Fast, smart tmux state persistence",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -206,7 +206,7 @@ func newRestoreCmd() *cobra.Command {
 				// there may be no attached client to display to.
 				if auto && (stats.SessionsKept > 0 || stats.SessionsSkippedIdle > 0) {
 					_, _ = t.Run(ctx, []string{"display-message",
-						fmt.Sprintf("tmux-state: restored %d sessions (%d filtered)",
+						fmt.Sprintf("tmux-remux: restored %d sessions (%d filtered)",
 							stats.SessionsKept, stats.SessionsSkippedIdle)})
 				}
 				return nil

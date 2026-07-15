@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // CloseManifest is the unmarshalled close-event ManifestJSON payload.

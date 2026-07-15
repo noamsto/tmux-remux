@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-remux/internal/store"
 )
 
 const dedupWindow = 2000 * time.Millisecond

@@ -1,4 +1,4 @@
-# tmux-state
+# tmux-remux
 
 Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](https://github.com/tmux-plugins/tmux-resurrect) and [`tmux-continuum`](https://github.com/tmux-plugins/tmux-continuum), backed by SQLite and content-addressed scrollback files.
 
@@ -14,7 +14,7 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 
 ## Why not tmux-resurrect / tmux-continuum?
 
-| | resurrect + continuum | tmux-state |
+| | resurrect + continuum | tmux-remux |
 |---|---|---|
 | Maintenance | Stalled (last meaningful commit ~2020) | Active |
 | Save speed (40 panes) | ~3-5s, sequential `tmux display-message` per pane | ~70ms, three batched `tmux -F` queries + parallel `capture-pane` |
@@ -24,7 +24,7 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 | Storage | Plain text + bash glue | SQLite + content-addressed compressed scrollback (refcount-deduped) |
 | Implementation | ~1500 lines of bash | ~3500 lines of Go (with tests) |
 
-If you love your existing resurrect+continuum setup, this won't change your life. If you've been keeping `@continuum-restore 'off'` because auto-restore is too noisy to trust — that's the problem `tmux-state` exists to fix.
+If you love your existing resurrect+continuum setup, this won't change your life. If you've been keeping `@continuum-restore 'off'` because auto-restore is too noisy to trust — that's the problem `tmux-remux` exists to fix.
 
 ## Install
 
@@ -32,24 +32,24 @@ If you love your existing resurrect+continuum setup, this won't change your life
 
 ```nix
 {
-  inputs.tmux-state.url = "github:noamsto/tmux-state";
+  inputs.tmux-remux.url = "github:noamsto/tmux-remux";
 
-  outputs = { self, nixpkgs, tmux-state, ... }: {
-    # … reference tmux-state.packages.${system}.default in home-manager
+  outputs = { self, nixpkgs, tmux-remux, ... }: {
+    # … reference tmux-remux.packages.${system}.default in home-manager
     # or your environment.systemPackages, e.g.:
-    # home.packages = [ tmux-state.packages.${pkgs.system}.default ];
+    # home.packages = [ tmux-remux.packages.${pkgs.system}.default ];
   };
 }
 ```
 
-Or run directly: `nix run github:noamsto/tmux-state -- version`.
+Or run directly: `nix run github:noamsto/tmux-remux -- version`.
 
 ### From source
 
 ```bash
-git clone https://github.com/noamsto/tmux-state
-cd tmux-state
-go build -o tmux-state ./cmd/tmux-state
+git clone https://github.com/noamsto/tmux-remux
+cd tmux-remux
+go build -o tmux-remux ./cmd/tmux-remux
 ```
 
 Requires Go 1.23+. No CGO needed (pure-Go SQLite via `modernc.org/sqlite`).
@@ -57,11 +57,11 @@ Requires Go 1.23+. No CGO needed (pure-Go SQLite via `modernc.org/sqlite`).
 ### TPM (tmux plugin manager)
 
 ```tmux
-set -g @plugin 'noamsto/tmux-state'
+set -g @plugin 'noamsto/tmux-remux'
 ```
 
-Then `prefix + I` to fetch and load it. The plugin script (`tmux-state.tmux`)
-resolves a `tmux-state` binary in this order: an existing copy on `PATH`, a
+Then `prefix + I` to fetch and load it. The plugin script (`tmux-remux.tmux`)
+resolves a `tmux-remux` binary in this order: an existing copy on `PATH`, a
 previously-downloaded copy cached in the plugin's own `bin/` directory, or a
 fresh download of the matching prebuilt release archive (verified against its
 published `checksums.txt`) for your OS/arch. It then wires the same hooks and
@@ -71,8 +71,8 @@ Options (set before `run '~/.tmux/plugins/tpm/tpm'`):
 
 | Option | Default | Meaning |
 |---|---|---|
-| `@tmux_state_version` | `latest` | Pin a specific release tag instead of always fetching the newest. |
-| `@tmux_state_auto_restore` | `on` | Set to `off` to skip `restore --auto` on tmux start (undo/save/picker binds still work). |
+| `@tmux_remux_version` | `latest` | Pin a specific release tag instead of always fetching the newest. |
+| `@tmux_remux_auto_restore` | `on` | Set to `off` to skip `restore --auto` on tmux start (undo/save/picker binds still work). |
 
 The systemd/launchd save timer (see below) is not managed by the plugin — the
 tmux hooks above cover structural saves (new session, new window, detach,
@@ -85,27 +85,27 @@ Copy [`examples/tmux.conf`](examples/tmux.conf) into your `~/.tmux.conf` (or `so
 
 - 6 tmux hooks for save + close-event capture
 - `prefix + u` (undo pop), `prefix + U` (close-event picker popup), `prefix + R` (snapshot picker popup), `prefix + Ctrl-s` (save now)
-- `run-shell -b 'tmux-state restore --auto'` for auto-restore on tmux start
+- `run-shell -b 'tmux-remux restore --auto'` for auto-restore on tmux start
 
 Then schedule the save timer:
 
 ```ini
-# ~/.config/systemd/user/tmux-state-save.service
+# ~/.config/systemd/user/tmux-remux-save.service
 [Unit]
-Description=Save tmux-state snapshot
+Description=Save tmux-remux snapshot
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/tmux-state save --reason=timer
+ExecStart=%h/.local/bin/tmux-remux save --reason=timer
 
-# ~/.config/systemd/user/tmux-state-save.timer
+# ~/.config/systemd/user/tmux-remux-save.timer
 [Unit]
-Description=Periodic tmux-state save
+Description=Periodic tmux-remux save
 
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=60s
-Unit=tmux-state-save.service
+Unit=tmux-remux-save.service
 
 [Install]
 WantedBy=timers.target
@@ -113,26 +113,26 @@ WantedBy=timers.target
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now tmux-state-save.timer
+systemctl --user enable --now tmux-remux-save.timer
 ```
 
-That's it. `tmux-state save --reason=manual` to test, `tmux-state list` to see what was captured.
+That's it. `tmux-remux save --reason=manual` to test, `tmux-remux list` to see what was captured.
 
 ## Subcommands
 
 | Command | Purpose |
 |---|---|
-| `tmux-state save` | Snapshot the running server now (idempotent — skipped if nothing changed) |
-| `tmux-state restore --auto` | Restore the newest snapshot from before the current server started (so saves made by the freshly started server never shadow the pre-shutdown state), filtered by smart filter |
-| `tmux-state undo --pop` | Restore the most recent close event (pane / window / session) |
-| `tmux-state pick --kind=close` | Interactive picker over close events |
-| `tmux-state pick --kind=snapshot` | Interactive picker over snapshot history (default) |
-| `tmux-state capture-event KIND` | Record a close event (called from tmux hooks; not for direct use) |
-| `tmux-state list` | List events, human-readable |
-| `tmux-state list --json` | List events as newline-delimited JSON (for external pickers) |
-| `tmux-state prune` | Apply retention limits (default: keep the 20 newest snapshots plus the newest snapshot per UTC day for the last 7 days; 50 close events) |
-| `tmux-state gc` | Reap orphan scrollback files (refcount = 0) |
-| `tmux-state version` | Print version |
+| `tmux-remux save` | Snapshot the running server now (idempotent — skipped if nothing changed) |
+| `tmux-remux restore --auto` | Restore the newest snapshot from before the current server started (so saves made by the freshly started server never shadow the pre-shutdown state), filtered by smart filter |
+| `tmux-remux undo --pop` | Restore the most recent close event (pane / window / session) |
+| `tmux-remux pick --kind=close` | Interactive picker over close events |
+| `tmux-remux pick --kind=snapshot` | Interactive picker over snapshot history (default) |
+| `tmux-remux capture-event KIND` | Record a close event (called from tmux hooks; not for direct use) |
+| `tmux-remux list` | List events, human-readable |
+| `tmux-remux list --json` | List events as newline-delimited JSON (for external pickers) |
+| `tmux-remux prune` | Apply retention limits (default: keep the 20 newest snapshots plus the newest snapshot per UTC day for the last 7 days; 50 close events) |
+| `tmux-remux gc` | Reap orphan scrollback files (refcount = 0) |
+| `tmux-remux version` | Print version |
 
 ### `pick`
 
@@ -157,12 +157,12 @@ Configurable via env vars (TODO: also via flags). Defaults:
 
 Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `lazygit`, `lazydocker`, `k9s`, `kubectl`, `ssh`, `mosh`, `less`, `tail`, `watch`, etc. Anything not on the list restores as a fresh shell in the saved cwd.
 
-**Per-pane relaunch override.** A pane may set the `@ts_relaunch` user option to a full shell command (e.g. `set -p @ts_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
+**Per-pane relaunch override.** A pane may set the `@remux_relaunch` user option to a full shell command (e.g. `set -p @remux_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
 
 ## Storage
 
 ```
-$XDG_DATA_HOME/tmux-state/
+$XDG_DATA_HOME/tmux-remux/
 ├── state.db                                  SQLite event store (events, scrollbacks, meta)
 ├── state.db-wal                              SQLite WAL file
 ├── state.db-shm                              SQLite shared memory
@@ -173,9 +173,9 @@ $XDG_DATA_HOME/tmux-state/
 
 `$XDG_DATA_HOME` defaults to `~/.local/share`. Storage lives outside `/nix/store` and survives Nix garbage collection / generation rollback.
 
-Scrollback files are content-addressed and refcounted — identical scrollbacks across snapshots are stored once. Files orphan-reaped weekly by `tmux-state gc`.
+Scrollback files are content-addressed and refcounted — identical scrollbacks across snapshots are stored once. Files orphan-reaped weekly by `tmux-remux gc`.
 
-Concurrent writers are serialized by an advisory `flock` on `$XDG_RUNTIME_DIR/tmux-state/write.lock` plus SQLite WAL.
+Concurrent writers are serialized by an advisory `flock` on `$XDG_RUNTIME_DIR/tmux-remux/write.lock` plus SQLite WAL.
 
 ## Privacy and security
 
@@ -185,11 +185,11 @@ Concurrent writers are serialized by an advisory `flock` on `$XDG_RUNTIME_DIR/tm
 - Error messages with stack traces and internal hostnames (medium)
 - Secrets pasted into prompts, env vars echoed by buggy programs, or output of `env` / `printenv` (high)
 
-Don't sync `$XDG_DATA_HOME/tmux-state/` to cloud storage, don't commit it, don't share snapshots. If you need cross-host portability of session structure (without the scrollback bytes), set `captureScrollback = false` and rely on cwd + command relaunch.
+Don't sync `$XDG_DATA_HOME/tmux-remux/` to cloud storage, don't commit it, don't share snapshots. If you need cross-host portability of session structure (without the scrollback bytes), set `captureScrollback = false` and rely on cwd + command relaunch.
 
 ## Architecture
 
-- `cmd/tmux-state/main.go` — cobra CLI with the 11 subcommands above
+- `cmd/tmux-remux/main.go` — cobra CLI with the 11 subcommands above
 - `internal/store` — SQLite layer (atomic transactional migrations, prepared queries)
 - `internal/scrollback` — content-addressed file store with zstd compression and refcount-driven GC
 - `internal/tmux` — wrapper around `exec.Command("tmux", …)` and parsers for `-F` output
@@ -198,7 +198,7 @@ Don't sync `$XDG_DATA_HOME/tmux-state/` to cloud storage, don't commit it, don't
 - `internal/restore` — plan builder + apply (best-effort tmux command sequence)
 - `internal/closeevent` — pane/window/session close hooks with cascade dedup
 - `internal/lockfile` — advisory `flock` to serialize concurrent writers
-- `internal/picker` — Bubble Tea TUI for `tmux-state pick` (master/detail tree preview + filter toggles)
+- `internal/picker` — Bubble Tea TUI for `tmux-remux pick` (master/detail tree preview + filter toggles)
 - `internal/config` — XDG-resolved paths and threshold defaults
 
 Full design at [`docs/specs/2026-04-26-tmux-state-design.md`](docs/specs/2026-04-26-tmux-state-design.md).

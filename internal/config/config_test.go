@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/config"
+	"github.com/noamsto/tmux-remux/internal/config"
 )
 
 func TestDefaultsResolveFromXDG(t *testing.T) {
@@ -15,13 +15,13 @@ func TestDefaultsResolveFromXDG(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", tmp)
 
 	c := config.Default()
-	if got, want := c.DBPath, filepath.Join(tmp, "tmux-state", "state.db"); got != want {
+	if got, want := c.DBPath, filepath.Join(tmp, "tmux-remux", "state.db"); got != want {
 		t.Errorf("DBPath = %q, want %q", got, want)
 	}
-	if got, want := c.ScrollbackDir, filepath.Join(tmp, "tmux-state", "scrollbacks"); got != want {
+	if got, want := c.ScrollbackDir, filepath.Join(tmp, "tmux-remux", "scrollbacks"); got != want {
 		t.Errorf("ScrollbackDir = %q, want %q", got, want)
 	}
-	if got, want := c.LockPath, filepath.Join(tmp, "tmux-state", "write.lock"); got != want {
+	if got, want := c.LockPath, filepath.Join(tmp, "tmux-remux", "write.lock"); got != want {
 		t.Errorf("LockPath = %q, want %q", got, want)
 	}
 }
@@ -52,6 +52,35 @@ func TestEnsureDirsCreatesPaths(t *testing.T) {
 		if _, err := os.Stat(d); err != nil {
 			t.Errorf("expected dir %q to exist: %v", d, err)
 		}
+	}
+}
+
+func TestEnsureDirsMigratesLegacyDataDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("XDG_RUNTIME_DIR", tmp)
+
+	legacy := filepath.Join(tmp, "tmux-state")
+	if err := os.MkdirAll(legacy, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "state.db"), []byte("snapshot"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := config.Default().EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy dir should be gone after migration, stat err = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(tmp, "tmux-remux", "state.db"))
+	if err != nil {
+		t.Fatalf("read migrated db: %v", err)
+	}
+	if string(got) != "snapshot" {
+		t.Errorf("migrated content = %q, want %q", got, "snapshot")
 	}
 }
 

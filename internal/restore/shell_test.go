@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/restore"
 )
 
 type stubRunner struct {

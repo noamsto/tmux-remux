@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
 )
 
 var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -18,7 +18,7 @@ var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // hidden from --help and the API is not stable. The pane-creation command
 // emitted by restore.BuildPlan invokes:
 //
-//	<tmux-state-binary> cat-scrollback <sha>
+//	<tmux-remux-binary> cat-scrollback <sha>
 //
 // to render saved scrollback as static terminal output before exec'ing the
 // pane's interactive program. See spec 2026-05-10-fast-restore-design.md.

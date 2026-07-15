@@ -3,7 +3,7 @@ package restore_test
 import (
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/restore"
 )
 
 func TestBuildStartupCommand(t *testing.T) {
@@ -14,13 +14,13 @@ func TestBuildStartupCommand(t *testing.T) {
 	}{
 		{
 			name: "empty: no scrollback no relaunch",
-			opts: restore.StartupOpts{Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh"},
+			opts: restore.StartupOpts{Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh"},
 			want: "",
 		},
 		{
 			name: "relaunch only",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				RelaunchCmd:  "nvim",
 				RelaunchArgs: []string{"file.go"},
 			},
@@ -29,40 +29,40 @@ func TestBuildStartupCommand(t *testing.T) {
 		{
 			name: "scrollback only",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc123",
 			},
-			want: `'/usr/bin/tmux-state' cat-scrollback abc123; exec /bin/zsh`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec /bin/zsh`,
 		},
 		{
 			name: "scrollback + relaunch",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc123",
 				RelaunchCmd:   "htop",
 			},
-			want: `'/usr/bin/tmux-state' cat-scrollback abc123; exec htop`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec htop`,
 		},
 		{
 			name: "scrollback + bash gets -l",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/usr/bin/bash", IsBash: true,
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/usr/bin/bash", IsBash: true,
 				ScrollbackSHA: "abc123",
 			},
-			want: `'/usr/bin/tmux-state' cat-scrollback abc123; exec /usr/bin/bash -l`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec /usr/bin/bash -l`,
 		},
 		{
 			name: "self path with single quote gets escaped",
 			opts: restore.StartupOpts{
-				Self: "/weird'path/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/weird'path/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc",
 			},
-			want: `'/weird'\''path/tmux-state' cat-scrollback abc; exec /bin/zsh`,
+			want: `'/weird'\''path/tmux-remux' cat-scrollback abc; exec /bin/zsh`,
 		},
 		{
 			name: "relaunch with multiple quoted args",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				RelaunchCmd:  "ssh",
 				RelaunchArgs: []string{"-p", "2222", "host"},
 			},
@@ -71,7 +71,7 @@ func TestBuildStartupCommand(t *testing.T) {
 		{
 			name: "override only: emitted verbatim, unquoted",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				OverrideCmd: "claude --resume abc-123",
 			},
 			want: `claude --resume abc-123`,
@@ -79,16 +79,16 @@ func TestBuildStartupCommand(t *testing.T) {
 		{
 			name: "override + scrollback",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc123",
 				OverrideCmd:   "claude --resume abc-123",
 			},
-			want: `'/usr/bin/tmux-state' cat-scrollback abc123; exec claude --resume abc-123`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec claude --resume abc-123`,
 		},
 		{
 			name: "override wins over relaunch",
 			opts: restore.StartupOpts{
-				Self: "/usr/bin/tmux-state", DefaultShell: "/bin/zsh",
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				RelaunchCmd: "nvim", RelaunchArgs: []string{"file.go"},
 				OverrideCmd: "claude --resume abc-123",
 			},

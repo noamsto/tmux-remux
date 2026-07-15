@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// RestoreMode controls how tmux-state behaves when a tmux server starts.
+// RestoreMode controls how tmux-remux behaves when a tmux server starts.
 // See [RestoreAuto], [RestoreInteractive], [RestoreOff].
 type RestoreMode string
 
@@ -19,7 +19,7 @@ const (
 	RestoreOff         RestoreMode = "off"
 )
 
-// Config holds runtime settings for tmux-state. Construct via [Default].
+// Config holds runtime settings for tmux-remux. Construct via [Default].
 type Config struct {
 	// Storage paths
 	DBPath        string
@@ -61,8 +61,8 @@ func Default() Config {
 	if runtimeDir == "" {
 		runtimeDir = "/tmp"
 	}
-	root := filepath.Join(dataHome, "tmux-state")
-	rt := filepath.Join(runtimeDir, "tmux-state")
+	root := filepath.Join(dataHome, "tmux-remux")
+	rt := filepath.Join(runtimeDir, "tmux-remux")
 
 	return Config{
 		DBPath:        filepath.Join(root, "state.db"),
@@ -95,8 +95,17 @@ func Default() Config {
 	}
 }
 
-// EnsureDirs creates the directories required for the config's paths.
+// legacyDataDir is the pre-rename storage directory name. On the first run after
+// the tmux-state → tmux-remux rename, EnsureDirs relocates it so existing
+// snapshots and scrollbacks survive the rename.
+const legacyDataDir = "tmux-state"
+
+// EnsureDirs creates the directories required for the config's paths, first
+// migrating a legacy tmux-state data directory into place if one exists.
 func (c Config) EnsureDirs() error {
+	if err := c.migrateLegacyDataDir(); err != nil {
+		return err
+	}
 	for _, d := range []string{
 		filepath.Dir(c.DBPath),
 		c.ScrollbackDir,
@@ -106,6 +115,28 @@ func (c Config) EnsureDirs() error {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return fmt.Errorf("mkdir %q: %w", d, err)
 		}
+	}
+	return nil
+}
+
+// migrateLegacyDataDir renames a leftover tmux-state data directory to the
+// tmux-remux path. It is a no-op once the new directory exists (already
+// migrated or a fresh install) or when no legacy directory is present. The
+// runtime lock directory is ephemeral and needs no migration.
+func (c Config) migrateLegacyDataDir() error {
+	dataRoot := filepath.Dir(c.DBPath)
+	legacyRoot := filepath.Join(filepath.Dir(dataRoot), legacyDataDir)
+	if legacyRoot == dataRoot {
+		return nil
+	}
+	if _, err := os.Stat(dataRoot); err == nil {
+		return nil
+	}
+	if _, err := os.Stat(legacyRoot); err != nil {
+		return nil
+	}
+	if err := os.Rename(legacyRoot, dataRoot); err != nil {
+		return fmt.Errorf("migrate legacy data dir %q → %q: %w", legacyRoot, dataRoot, err)
 	}
 	return nil
 }

@@ -3,9 +3,9 @@ package closeevent_test
 import (
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/closeevent"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 func TestFindClosed_WindowUnlinked(t *testing.T) {

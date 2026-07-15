@@ -127,7 +127,7 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 func renderList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height)
 	if len(m.events) == 0 {
-		return frame.Render(rowDim.Render("No snapshots yet — run `tmux-state save`."))
+		return frame.Render(rowDim.Render("No snapshots yet — run `tmux-remux save`."))
 	}
 	// Inner content height = frame height − 2 (top+bottom border).
 	rows := height - 2

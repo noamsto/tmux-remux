@@ -1,12 +1,12 @@
-// Package restore plans and applies tmux-state restore operations.
+// Package restore plans and applies tmux-remux restore operations.
 package restore
 
 import (
 	"fmt"
 	"sort"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 // Action is one step of a restore plan. Concrete types are in this file.
@@ -84,7 +84,7 @@ func (SetOption) isAction() {}
 // BuildOptions carries the values needed to compose StartupCommands. Resolved
 // once per restore by the caller.
 type BuildOptions struct {
-	// Self is the absolute path of the running tmux-state binary
+	// Self is the absolute path of the running tmux-remux binary
 	// (os.Executable() in production). Used only when a pane has stored
 	// scrollback; ignored otherwise.
 	Self string
@@ -111,7 +111,7 @@ type PlanStats struct {
 }
 
 // paneStartup composes the startup shell-command for a restored pane: replay
-// its stored scrollback, then relaunch via the pane's @ts_relaunch override if
+// its stored scrollback, then relaunch via the pane's @remux_relaunch override if
 // set, else the original command when it's on the allow-list (otherwise fall
 // through to the default shell).
 func paneStartup(p snapshot.Pane, opts BuildOptions) string {
@@ -122,7 +122,7 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 		ScrollbackSHA: p.ScrollbackSHA,
 	}
 	if p.Relaunch != "" {
-		// A pane-supplied @ts_relaunch override wins over the allow-list.
+		// A pane-supplied @remux_relaunch override wins over the allow-list.
 		so.OverrideCmd = p.Relaunch
 	} else {
 		for _, c := range opts.AllowList {

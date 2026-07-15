@@ -9,10 +9,10 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/store"
 )
 
 // Mode is "snapshot" (tree pane visible) or "close" (list-only).

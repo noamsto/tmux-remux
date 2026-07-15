@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/restore"
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/store"
-	"github.com/noamsto/tmux-state/internal/tmux"
-	"github.com/noamsto/tmux-state/testutil"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/testutil"
 )
 
 // scopedTmux runs tmux against a specific socket. Implements both the Lister
@@ -52,7 +52,7 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	return tmux.ParseWindows(out, nil)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
-	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@ts_relaunch}"})
+	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}

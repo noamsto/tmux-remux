@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 func TestSkipIdleShells(t *testing.T) {

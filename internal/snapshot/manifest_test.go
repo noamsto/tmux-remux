@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 func TestManifestRoundTrip(t *testing.T) {

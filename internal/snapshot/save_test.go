@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/store"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 type captureClient struct {

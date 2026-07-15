@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 type fakeClient struct {

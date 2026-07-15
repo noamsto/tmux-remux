@@ -8,7 +8,7 @@ import (
 // StartupOpts is the input to BuildStartupCommand. Fields not relevant to a
 // given branch may be left zero.
 type StartupOpts struct {
-	// Self is the absolute path of the running tmux-state binary, used to
+	// Self is the absolute path of the running tmux-remux binary, used to
 	// invoke the cat-scrollback subcommand. Single-quoted on output.
 	Self string
 	// DefaultShell is the resolved shell to exec when no allow-listed
@@ -30,8 +30,8 @@ type StartupOpts struct {
 	RelaunchArgs []string
 	// OverrideCmd, if non-empty, is exec'd verbatim as the relaunch target,
 	// taking precedence over RelaunchCmd/RelaunchArgs. It is a full /bin/sh -c
-	// command string supplied by the pane's @ts_relaunch option (the owning
-	// tool is responsible for quoting); tmux-state passes it through unaltered.
+	// command string supplied by the pane's @remux_relaunch option (the owning
+	// tool is responsible for quoting); tmux-remux passes it through unaltered.
 	OverrideCmd string
 }
 
@@ -47,7 +47,7 @@ type StartupOpts struct {
 //	scrollback=yes relaunch=no   `'<self>' cat-scrollback <sha>; exec <shell> [-l]`
 //	scrollback=yes relaunch=yes  `'<self>' cat-scrollback <sha>; exec <cmd> <quoted-args...>`
 //
-// An OverrideCmd (pane @ts_relaunch) replaces the <cmd ...> exec target in the
+// An OverrideCmd (pane @remux_relaunch) replaces the <cmd ...> exec target in the
 // relaunch=yes forms, emitted verbatim (no arg quoting).
 //
 // The output is interpreted by /bin/sh -c when tmux spawns the pane. See

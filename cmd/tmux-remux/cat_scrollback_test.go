@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
 )
 
 func TestCatScrollbackStreamsExistingSha(t *testing.T) {
