@@ -159,6 +159,25 @@ func TestServerStartTimeRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestSetPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n' "$@" > %s`, argsFile))
+	c := tmux.NewClient(fake)
+
+	if err := c.SetPaneOption(context.Background(), "%3", "@remux_relaunch", "claude --resume abc-123"); err != nil {
+		t.Fatalf("SetPaneOption: %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "set-option\n-pq\n-t\n%3\n@remux_relaunch\nclaude --resume abc-123\n"
+	if string(got) != want {
+		t.Errorf("tmux args =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // writeFakeTmux drops a tiny bash script in t.TempDir whose body is `body`
 // and returns its path so tests can use it as the Client binary.
 func writeFakeTmux(t *testing.T, body string) string {

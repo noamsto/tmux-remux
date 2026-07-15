@@ -175,3 +175,11 @@ func (c *Client) ServerStartTime(ctx context.Context) (int64, error) {
 	}
 	return secs * 1000, nil
 }
+
+// SetPaneOption sets a pane-scoped option (tmux set-option -p). The -q flag
+// keeps it quiet: a pane that vanished between a hook firing and this call must
+// not surface an error to the caller. Pass value="" to unset.
+func (c *Client) SetPaneOption(ctx context.Context, pane, name, value string) error {
+	_, err := c.Run(ctx, []string{"set-option", "-pq", "-t", pane, name, value})
+	return err
+}
