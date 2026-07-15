@@ -179,7 +179,7 @@ Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `
 ### Agent resume-on-restore
 
 tmux-remux can stamp `@remux_relaunch` automatically for agent CLIs, so a pane
-running Claude Code, Codex, or Cursor restores as its exact prior session:
+running Claude Code or Codex restores as its exact prior session:
 
 - **Claude Code** — install the bundled Claude Code plugin (`claude-plugin/`,
   see its README): a `SessionStart` hook stamps `claude --resume <id>`, a
@@ -190,7 +190,7 @@ running Claude Code, Codex, or Cursor restores as its exact prior session:
   hook fires only after the first turn, so a brand-new Codex pane snapshotted
   before its first turn restores as a shell.
 
-All three share one binary core (`relaunch-stamp`). The stamp is exec'd verbatim
+Both share one binary core (`relaunch-stamp`). The stamp is exec'd verbatim
 on restore via the `@remux_relaunch` override.
 
 ## Storage
