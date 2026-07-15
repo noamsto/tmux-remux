@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/noamsto/tmux-state/internal/restore"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 func paneRestoreWindow() snapshot.Window {

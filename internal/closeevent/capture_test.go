@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/closeevent"
-	"github.com/noamsto/tmux-state/internal/store"
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 func TestCaptureSessionInsertsRow(t *testing.T) {

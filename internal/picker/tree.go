@@ -1,4 +1,4 @@
-// Package picker renders a Bubble Tea TUI over tmux-state events.
+// Package picker renders a Bubble Tea TUI over tmux-remux events.
 package picker
 
 import (
@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 // NodeKind identifies the level of a TreeNode.

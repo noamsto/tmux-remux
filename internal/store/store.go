@@ -1,4 +1,4 @@
-// Package store provides typed access to the tmux-state SQLite event store.
+// Package store provides typed access to the tmux-remux SQLite event store.
 package store
 
 import (
@@ -14,10 +14,10 @@ import (
 	// Register the modernc.org/sqlite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
 
-	"github.com/noamsto/tmux-state/internal/store/migrations"
+	"github.com/noamsto/tmux-remux/internal/store/migrations"
 )
 
-// Store wraps a *sql.DB connection to the tmux-state SQLite database.
+// Store wraps a *sql.DB connection to the tmux-remux SQLite database.
 type Store struct {
 	db *sql.DB
 }

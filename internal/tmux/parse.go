@@ -101,7 +101,7 @@ type PaneRow struct {
 	PID         int
 	LastUsed    int64
 	ID          string // tmux pane id, e.g. "%3"
-	Relaunch    string // @ts_relaunch pane option; verbatim relaunch command, empty when unset
+	Relaunch    string // @remux_relaunch pane option; verbatim relaunch command, empty when unset
 }
 
 // ParsePanes parses tmux list-panes -F output.

@@ -53,15 +53,15 @@
 
         packages = {
           default = pkgs.buildGoModule {
-            pname = "tmux-state";
+            pname = "tmux-remux";
             version = "0.4.0";
             src = ./.;
             vendorHash = "sha256-feTaHjzADy4H2yJrx04rmRzyLvmY2q0Tevj+Ibh1bPk=";
-            subPackages = ["cmd/tmux-state"];
+            subPackages = ["cmd/tmux-remux"];
             doCheck = true;
             meta = {
               description = "Fast, smart tmux state persistence";
-              mainProgram = "tmux-state";
+              mainProgram = "tmux-remux";
               license = lib.licenses.mit;
             };
           };
@@ -69,7 +69,7 @@
 
         apps.default = {
           type = "app";
-          program = "${self'.packages.default}/bin/tmux-state";
+          program = "${self'.packages.default}/bin/tmux-remux";
         };
       };
     };

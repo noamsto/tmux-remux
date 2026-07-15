@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/store"
 )
 
 // CaptureLister extends Lister with the ability to capture pane scrollback.

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/snapshot"
-	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/store"
 )
 
 func TestLoadScrollbackCmd_ReturnsContent(t *testing.T) {

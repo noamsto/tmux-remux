@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/noamsto/tmux-state/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/restore"
 )
 
 type recordingTmux struct {
@@ -42,7 +42,7 @@ func TestApplyEmitsTmuxCallsWithoutStartup(t *testing.T) {
 
 func TestApplyAppendsStartupCommandWhenPresent(t *testing.T) {
 	rt := &recordingTmux{}
-	startup := `'/usr/bin/tmux-state' cat-scrollback abc; exec /bin/zsh`
+	startup := `'/usr/bin/tmux-remux' cat-scrollback abc; exec /bin/zsh`
 	plan := []restore.Action{
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: startup},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: "htop"},

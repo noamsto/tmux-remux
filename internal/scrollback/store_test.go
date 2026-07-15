@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
 )
 
 func TestPutHashesAndStores(t *testing.T) {

@@ -1,4 +1,4 @@
-module github.com/noamsto/tmux-state
+module github.com/noamsto/tmux-remux
 
 go 1.25.5
 

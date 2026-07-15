@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/applog"
+	"github.com/noamsto/tmux-remux/internal/applog"
 )
 
 func TestLogfAppendsTimestampedLines(t *testing.T) {

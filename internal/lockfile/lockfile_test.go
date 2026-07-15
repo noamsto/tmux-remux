@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/lockfile"
+	"github.com/noamsto/tmux-remux/internal/lockfile"
 )
 
 func TestAcquireRelease(t *testing.T) {

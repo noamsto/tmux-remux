@@ -6,9 +6,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/noamsto/tmux-state/internal/picker"
-	"github.com/noamsto/tmux-state/internal/scrollback"
-	"github.com/noamsto/tmux-state/internal/store"
+	"github.com/noamsto/tmux-remux/internal/picker"
+	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/store"
 )
 
 func TestModel_TabSwitchesFocus_SnapshotMode(t *testing.T) {

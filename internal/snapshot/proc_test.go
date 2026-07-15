@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 func TestChildCountForSelfIsAtLeastZero(t *testing.T) {

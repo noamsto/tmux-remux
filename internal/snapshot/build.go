@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/noamsto/tmux-state/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // Lister is the subset of tmux.Client used by Build. Lets tests inject a fake.

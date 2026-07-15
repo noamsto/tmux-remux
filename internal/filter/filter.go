@@ -4,7 +4,7 @@ package filter
 import (
 	"time"
 
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 var defaultIdleShells = map[string]bool{

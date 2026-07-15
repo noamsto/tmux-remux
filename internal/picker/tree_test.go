@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/picker"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/picker"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 func TestBuildTree_TwoSessionsTwoWindowsTwoPanes(t *testing.T) {

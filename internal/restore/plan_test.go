@@ -6,13 +6,13 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/noamsto/tmux-state/internal/filter"
-	"github.com/noamsto/tmux-state/internal/restore"
-	"github.com/noamsto/tmux-state/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/filter"
+	"github.com/noamsto/tmux-remux/internal/restore"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
 var defaultOpts = restore.BuildOptions{
-	Self:         "/usr/bin/tmux-state",
+	Self:         "/usr/bin/tmux-remux",
 	DefaultShell: "/bin/zsh",
 	AllowList:    []string{"nvim"},
 }
@@ -55,7 +55,7 @@ func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 		}},
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
-	wantStartup := `'/usr/bin/tmux-state' cat-scrollback deadbeef; exec nvim`
+	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; exec nvim`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
 			if cw.StartupCommand != wantStartup {
@@ -69,7 +69,7 @@ func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 
 func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
 	// A pane whose command is not allow-listed still relaunches via its
-	// @ts_relaunch override, emitted verbatim after the scrollback step.
+	// @remux_relaunch override, emitted verbatim after the scrollback step.
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{{
 			Name: "s1",
@@ -82,7 +82,7 @@ func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
 		}},
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
-	wantStartup := `'/usr/bin/tmux-state' cat-scrollback deadbeef; exec claude --resume abc-123`
+	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; exec claude --resume abc-123`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
 			if cw.StartupCommand != wantStartup {
@@ -107,7 +107,7 @@ func TestBuildPlanScrollbackWithoutAllowedCommandUsesShell(t *testing.T) {
 		}},
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
-	wantStartup := `'/usr/bin/tmux-state' cat-scrollback abc; exec /bin/zsh`
+	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback abc; exec /bin/zsh`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
 			if cw.StartupCommand != wantStartup {
