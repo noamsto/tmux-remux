@@ -48,6 +48,7 @@ type CLI struct {
 	GC            GCCmd            `cmd:"" name:"gc" help:"Reap orphan scrollback files"`
 	CatScrollback CatScrollbackCmd `cmd:"" name:"cat-scrollback" hidden:"" help:"Stream stored scrollback to stdout (internal helper)"`
 	RelaunchStamp RelaunchStampCmd `cmd:"" name:"relaunch-stamp" hidden:"" help:"Stamp @remux_relaunch from an agent start hook (internal helper)"`
+	InstallHook   InstallHookCmd   `cmd:"" name:"install-hook" help:"Wire an agent start hook for resume-on-restore"`
 }
 
 func main() {
