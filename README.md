@@ -172,6 +172,8 @@ Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `
 
 **Per-pane relaunch override.** A pane may set the `@remux_relaunch` user option to a full shell command (e.g. `set -p @remux_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
 
+> **Coding agents:** to install tmux-remux yourself and mark your own pane for exact relaunch, follow [`docs/agent-install.md`](docs/agent-install.md) (Linux + macOS).
+
 ## Storage
 
 ```
