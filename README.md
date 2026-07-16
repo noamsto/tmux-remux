@@ -10,7 +10,7 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 - **Smart restore** — on tmux start, applies a filter that drops stale sessions, idle plain-shell panes, and duplicates of sessions already running. No more "all my closed splits from last week reappear."
 - **Undo** — `prefix + u` instantly re-opens the last pane, window, or session you closed by accident (e.g. `Ctrl+D` cascade).
 - **History** — every snapshot and close event lives in a SQLite store you can query, browse interactively, and prune.
-- **One static binary** — no plugin manager, no shell scripts, no cron. systemd user timer + tmux hooks do the work.
+- **One static binary** — no plugin manager, no shell scripts, no cron. A systemd (Linux) or launchd (macOS) user timer + tmux hooks do the work.
 
 ## Why not tmux-resurrect / tmux-continuum?
 
@@ -87,7 +87,9 @@ Copy [`examples/tmux.conf`](examples/tmux.conf) into your `~/.tmux.conf` (or `so
 - `prefix + u` (undo pop), `prefix + U` (close-event picker popup), `prefix + R` (snapshot picker popup), `prefix + Ctrl-s` (save now)
 - `run-shell -b 'tmux-remux restore --auto'` for auto-restore on tmux start
 
-Then schedule the save timer:
+Then schedule the periodic save timer for your platform.
+
+### Linux (systemd)
 
 ```ini
 # ~/.config/systemd/user/tmux-remux-save.service
@@ -115,6 +117,17 @@ WantedBy=timers.target
 systemctl --user daemon-reload
 systemctl --user enable --now tmux-remux-save.timer
 ```
+
+### macOS (launchd)
+
+Copy [`examples/tmux-remux-save.plist`](examples/tmux-remux-save.plist) into `~/Library/LaunchAgents/`, edit the `tmux-remux` path (launchd needs an absolute path — no `~`/`$HOME` expansion), then load it:
+
+```bash
+cp examples/tmux-remux-save.plist ~/Library/LaunchAgents/io.github.noamsto.tmux-remux-save.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.noamsto.tmux-remux-save.plist
+```
+
+`StartInterval=60` fires the save every 60s. The plist sets a `PATH` covering Homebrew (Apple Silicon and Intel) because launchd starts with a minimal environment and `tmux-remux` shells out to `tmux`. To unload: `launchctl bootout gui/$(id -u)/io.github.noamsto.tmux-remux-save`.
 
 That's it. `tmux-remux save --reason=manual` to test, `tmux-remux list` to see what was captured.
 
