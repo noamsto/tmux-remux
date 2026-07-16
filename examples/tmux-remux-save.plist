@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- examples/tmux-remux-save.plist — macOS launchd equivalent of the systemd save timer.
+     Install to ~/Library/LaunchAgents/ and load with `launchctl bootstrap` (see README Quick start). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.github.noamsto.tmux-remux-save</string>
+
+    <!-- Absolute path required — launchd does not expand ~ or $HOME here.
+         Replace YOU with your username (`echo $HOME`). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOU/.local/bin/tmux-remux</string>
+        <string>save</string>
+        <string>--reason=timer</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- launchd starts with a minimal PATH; tmux-remux shells out to `tmux`,
+         so point PATH at wherever tmux lives (Homebrew Apple Silicon / Intel). -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/tmux-remux-save.err.log</string>
+</dict>
+</plist>
