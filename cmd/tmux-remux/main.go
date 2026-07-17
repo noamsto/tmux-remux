@@ -68,7 +68,7 @@ func main() {
 
 // withStore opens the DB after ensuring storage directories exist, takes an
 // exclusive flock on cfg.LockPath to serialize writers, runs fn, and closes
-// the DB. Used by every subcommand RunE.
+// the DB. Used by every subcommand's Run.
 func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) error) error {
 	ctx, cancel := signalCtx()
 	defer cancel()
