@@ -7,36 +7,30 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/spf13/cobra"
-
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 )
 
 var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-// newCatScrollbackCmd is an INTERNAL helper used by restore plans. It is
-// hidden from --help and the API is not stable. The pane-creation command
-// emitted by restore.BuildPlan invokes:
+// CatScrollbackCmd is an INTERNAL helper used by restore plans. It is hidden
+// from --help and the API is not stable. The pane-creation command emitted by
+// restore.BuildPlan invokes:
 //
 //	<tmux-remux-binary> cat-scrollback <sha>
 //
 // to render saved scrollback as static terminal output before exec'ing the
 // pane's interactive program. See spec 2026-05-10-fast-restore-design.md.
-func newCatScrollbackCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "cat-scrollback <sha>",
-		Short:  "Stream stored scrollback to stdout (internal helper)",
-		Args:   cobra.ExactArgs(1),
-		Hidden: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := loadConfig()
-			if err := cfg.EnsureDirs(); err != nil {
-				return err
-			}
-			store := scrollback.New(cfg.ScrollbackDir)
-			return runCatScrollback(cmd.Context(), store, args[0], os.Stdout)
-		},
+type CatScrollbackCmd struct {
+	SHA string `arg:"" help:"scrollback content hash"`
+}
+
+func (c CatScrollbackCmd) Run() error {
+	cfg := loadConfig()
+	if err := cfg.EnsureDirs(); err != nil {
+		return err
 	}
+	store := scrollback.New(cfg.ScrollbackDir)
+	return runCatScrollback(context.Background(), store, c.SHA, os.Stdout)
 }
 
 // runCatScrollback streams the scrollback identified by sha to w.
