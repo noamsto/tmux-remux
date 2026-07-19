@@ -145,6 +145,8 @@ That's it. `tmux-remux save --reason=manual` to test, `tmux-remux list` to see w
 | `tmux-remux list --json` | List events as newline-delimited JSON (for external pickers) |
 | `tmux-remux prune` | Apply retention limits (default: keep the 20 newest snapshots plus the newest snapshot per UTC day for the last 7 days; 50 close events) |
 | `tmux-remux gc` | Reap orphan scrollback files (refcount = 0) |
+| `tmux-remux relaunch-stamp` | Stamp `@remux_relaunch` from an agent start hook so restore reopens the session (internal; wired via the Claude plugin or `install-hook`) |
+| `tmux-remux install-hook codex` | Wire Codex's `SessionStart` hook (`~/.codex/config.toml`) to `relaunch-stamp` |
 | `tmux-remux version` | Print version |
 
 ### `pick`
@@ -173,6 +175,23 @@ Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `
 **Per-pane relaunch override.** A pane may set the `@remux_relaunch` user option to a full shell command (e.g. `set -p @remux_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
 
 > **Coding agents:** to install tmux-remux yourself and mark your own pane for exact relaunch, follow [`docs/agent-install.md`](docs/agent-install.md) (Linux + macOS).
+
+### Agent resume-on-restore
+
+tmux-remux can stamp `@remux_relaunch` automatically for agent CLIs, so a pane
+running Claude Code or Codex restores as its exact prior session:
+
+- **Claude Code** — install the bundled Claude Code plugin (`claude-plugin/`,
+  see its README): a `SessionStart` hook stamps `claude --resume <id>`, a
+  `SessionEnd` hook clears it. Remote Control reconnects for free on resume.
+- **Codex** — `tmux-remux install-hook codex` appends a `SessionStart` hook to
+  `~/.codex/config.toml`, then run `codex` → `/hooks` → "Trust all" once per
+  machine (Codex requires manual trust; it cannot be pre-seeded). Note Codex's
+  hook fires only after the first turn, so a brand-new Codex pane snapshotted
+  before its first turn restores as a shell.
+
+Both share one binary core (`relaunch-stamp`). The stamp is exec'd verbatim
+on restore via the `@remux_relaunch` override.
 
 ## Storage
 

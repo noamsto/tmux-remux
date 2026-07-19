@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup", "hooks": [{"type": "command", "command": "tmux-remux relaunch-stamp --agent claude"}] },
+      { "matcher": "resume", "hooks": [{"type": "command", "command": "tmux-remux relaunch-stamp --agent claude"}] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{"type": "command", "command": "tmux-remux relaunch-stamp --clear"}] }
+    ]
+  }
+}

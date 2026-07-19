@@ -1,0 +1,5 @@
+{
+  "name": "tmux-remux",
+  "version": "0.1.0",
+  "description": "Resume-on-restore: stamps @remux_relaunch so tmux-remux restores this Claude session instead of a bare shell"
+}
