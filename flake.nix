@@ -56,7 +56,7 @@
             pname = "tmux-remux";
             version = "0.4.0";
             src = ./.;
-            vendorHash = "sha256-feTaHjzADy4H2yJrx04rmRzyLvmY2q0Tevj+Ibh1bPk=";
+            vendorHash = "sha256-ar6wBvQ3g4Ih2JJfoTLRh2ihEhNnOtbn2hdaWqHSdlw=";
             subPackages = ["cmd/tmux-remux"];
             doCheck = true;
             meta = {
