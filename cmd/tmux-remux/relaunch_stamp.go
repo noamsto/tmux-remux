@@ -6,12 +6,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 const relaunchOption = "@remux_relaunch"
+
+// sessionIDPattern bounds hook-supplied session ids to a shell-safe charset.
+// The id is interpolated into a resume command that restore later exec's
+// verbatim via /bin/sh -c (see restore.BuildStartupCommand OverrideCmd), so an
+// id carrying shell metacharacters (spaces, ;, $, backticks) must never reach
+// the @remux_relaunch pane option. Agent session ids are UUIDs in practice.
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // relaunchPreset maps an --agent name to how its resume command is built.
 // "{id}" in cmdTemplate is replaced with the session id read from the hook's
@@ -99,7 +107,9 @@ func runRelaunchStamp(ctx context.Context, setter paneOptionSetter, r io.Reader,
 	}
 
 	id := parseSessionID(r, idField)
-	if id == "" {
+	if !sessionIDPattern.MatchString(id) {
+		// Empty or shell-unsafe id: never stamp. Restore exec's this value
+		// verbatim, so a malformed id is dropped rather than quoted.
 		return nil
 	}
 	value := strings.ReplaceAll(tmpl, "{id}", id)

@@ -60,10 +60,7 @@ func (m PickerModel) renderPreview(width int) string {
 	if frameHeight < 5 {
 		frameHeight = 5
 	}
-	innerHeight := frameHeight - 2
-	if innerHeight < 1 {
-		innerHeight = 1
-	}
+	innerHeight := m.previewInnerHeight()
 	innerWidth := width - 4
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -133,6 +130,21 @@ func previewWindow(s string, width, height, scroll, scrollX int) string {
 		start = 0
 	}
 	return strings.Join(lines[start:end], "\n")
+}
+
+// previewInnerHeight is the number of scrollback rows the preview pane shows:
+// the body height (m.height − footer) minus the frame's border. Single source
+// of truth for renderPreview and the scroll-clamp math in Update/handleKey,
+// which otherwise drifted apart at very small terminal heights.
+func (m PickerModel) previewInnerHeight() int {
+	frameHeight := m.height - 1
+	if frameHeight < 5 {
+		frameHeight = 5
+	}
+	if inner := frameHeight - 2; inner > 1 {
+		return inner
+	}
+	return 1
 }
 
 // previewMaxScroll returns the largest valid m.previewScroll for the current

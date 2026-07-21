@@ -24,6 +24,10 @@ type SaverOptions struct {
 	CaptureScrollback bool
 	MinSaveInterval   time.Duration
 	ScrollbackWorkers int
+	// Logf, when set, receives non-fatal diagnostics (e.g. a pane whose
+	// scrollback capture failed). A func hook keeps this package free of an
+	// applog dependency. Nil is a no-op.
+	Logf func(format string, a ...any)
 }
 
 // Saver wires together store, scrollback, and tmux to perform snapshots.
@@ -40,6 +44,12 @@ func NewSaver(db *store.Store, sb *scrollback.Store, t CaptureLister, opts Saver
 		opts.ScrollbackWorkers = 4
 	}
 	return &Saver{db: db, sb: sb, tmux: t, opts: opts}
+}
+
+func (s *Saver) logf(format string, a ...any) {
+	if s.opts.Logf != nil {
+		s.opts.Logf(format, a...)
+	}
 }
 
 // Save snapshots the live tmux server. Returns nil if the snapshot was
@@ -147,6 +157,12 @@ func (s *Saver) captureScrollbacks(ctx context.Context, m *Manifest) error {
 			defer func() { <-sem }()
 			content, err := s.tmux.CapturePane(ctx, j.target)
 			if err != nil {
+				// Non-fatal: the pane may have died mid-save, or capture hit a
+				// transient failure. Don't abort the snapshot, but log so a
+				// systemic failure (e.g. a wedged socket) isn't invisible.
+				mu.Lock()
+				s.logf("save: capture-pane %s: %v", j.target, err)
+				mu.Unlock()
 				return
 			}
 			sha, n, err := s.sb.Put(ctx, content)

@@ -24,7 +24,7 @@ func TestBuildStartupCommand(t *testing.T) {
 				RelaunchCmd:  "nvim",
 				RelaunchArgs: []string{"file.go"},
 			},
-			want: `nvim "file.go"`,
+			want: `nvim 'file.go'`,
 		},
 		{
 			name: "scrollback only",
@@ -66,7 +66,16 @@ func TestBuildStartupCommand(t *testing.T) {
 				RelaunchCmd:  "ssh",
 				RelaunchArgs: []string{"-p", "2222", "host"},
 			},
-			want: `ssh "-p" "2222" "host"`,
+			want: `ssh '-p' '2222' 'host'`,
+		},
+		{
+			name: "relaunch arg with shell metacharacters is single-quoted",
+			opts: restore.StartupOpts{
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
+				RelaunchCmd:  "nvim",
+				RelaunchArgs: []string{"$(touch pwned)"},
+			},
+			want: `nvim '$(touch pwned)'`,
 		},
 		{
 			name: "override only: emitted verbatim, unquoted",

@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // View renders the full picker UI. Called by Bubble Tea after every Update.
@@ -17,11 +19,17 @@ func (m PickerModel) View() tea.View {
 		return v
 	}
 
+	if m.width == 0 {
+		// First frame, before Bubble Tea delivers the initial WindowSizeMsg.
+		return tea.NewView("")
+	}
+
 	listWidth, treeWidth, previewWidth := m.paneWidthsThree()
-	// Reserve one row for the footer; everything else (border + content) goes
-	// into the body frames. Without an explicit height, list/tree overflow
-	// past the popup and push the footer off-screen.
-	bodyHeight := m.height - 1
+	// Render the footer first and reserve its measured height; the body frames
+	// take the rest. Measuring (rather than assuming exactly one row) keeps the
+	// body from overflowing the popup and pushing the footer off-screen.
+	footer := m.renderFooter(m.width)
+	bodyHeight := m.height - lipgloss.Height(footer)
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
@@ -30,23 +38,23 @@ func (m PickerModel) View() tea.View {
 	var content string
 	switch {
 	case m.width < 80:
-		content = lipgloss.JoinVertical(lipgloss.Top, list, m.renderFooter(m.width))
+		content = lipgloss.JoinVertical(lipgloss.Left, list, footer)
 	case m.mode == ModeClose:
 		// Close mode: list + tree (showing the diff-derived sub-manifest of
 		// what was lost). No scrollback preview — close events don't carry
 		// pane scrollback.
 		tree := renderTree(m, m.width-listWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
-		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
+		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	case previewWidth == 0:
 		tree := renderTree(m, treeWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
-		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
+		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	default:
 		tree := renderTree(m, treeWidth, bodyHeight)
 		preview := m.renderPreview(previewWidth)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree, preview)
-		content = lipgloss.JoinVertical(lipgloss.Top, body, m.renderFooter(m.width))
+		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	}
 
 	v := tea.NewView(content)
@@ -59,15 +67,19 @@ func (m PickerModel) View() tea.View {
 // an optional transient warning note. Format: `key:value` pairs in lavender +
 // state color, separated by a dim "·" so the eye can lock onto each pair.
 func (m PickerModel) renderFooter(width int) string {
-	toggle := func(b bool, key, label string) string {
+	// Key/desc come from the bindings themselves, so a rebind can't leave the
+	// footer advertising a stale key.
+	toggle := func(b bool, bind key.Binding) string {
 		state := footerOff.Render("off")
 		if b {
 			state = footerOn.Render("on")
 		}
-		return footerKey.Render(key) + footerSep.Render(":") + state + footerSep.Render(" "+label)
+		h := bind.Help()
+		return footerKey.Render(h.Key) + footerSep.Render(":") + state + footerSep.Render(" "+h.Desc)
 	}
-	hint := func(key, label string) string {
-		return footerKey.Render(key) + footerSep.Render(":"+label)
+	hint := func(bind key.Binding) string {
+		h := bind.Help()
+		return footerKey.Render(h.Key) + footerSep.Render(":"+h.Desc)
 	}
 	sep := footerSep.Render(" · ")
 
@@ -75,20 +87,27 @@ func (m PickerModel) renderFooter(width int) string {
 	counter := fmt.Sprintf("%d panes / %d skipped", c.KeptPanes, c.SkippedPanes)
 
 	parts := []string{
-		toggle(m.filter.SkipIdleShells, "s", "skip idle"),
-		toggle(m.filter.SkipRunningSessions, "d", "skip running"),
-		toggle(m.dimOlderThan > 0, "a", "age≤24h"),
+		toggle(m.filter.SkipIdleShells, m.keys.ToggleIdle),
+		toggle(m.filter.SkipRunningSessions, m.keys.ToggleSkipRunning),
+		toggle(m.dimOlderThan > 0, m.keys.ToggleAge),
 		counter,
-		hint("↵", "restore"),
+		hint(m.keys.Enter),
 	}
 	if m.width >= 120 && m.mode == ModeSnapshot {
-		parts = append(parts, hint("tab", "tree"))
-		parts = append(parts, hint("M-hjkl", "scroll preview"))
+		parts = append(parts, hint(m.keys.Tab))
+		parts = append(parts, hint(m.keys.PreviewUp))
 	}
 	line := strings.Join(parts, sep)
 	if m.footerNote != "" {
 		line = footerWarn.Render(m.footerNote) + sep + line
 	}
+	// Truncate: footerBar.Width wraps overflow to a second row otherwise, which
+	// would break the single-row height View() reserves for the footer.
+	innerWidth := width - footerBar.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	line = ansi.Truncate(line, innerWidth, "…")
 	return footerBar.Width(width).Render(line)
 }
 
@@ -125,7 +144,7 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 }
 
 func renderList(m PickerModel, width, height int) string {
-	frame := listFrame.Width(width).Height(height)
+	frame := listFrame.Width(width).Height(height).MaxHeight(height)
 	if len(m.events) == 0 {
 		return frame.Render(rowDim.Render("No snapshots yet — run `tmux-remux save`."))
 	}
@@ -133,6 +152,13 @@ func renderList(m PickerModel, width, height int) string {
 	rows := height - 2
 	if rows < 1 {
 		rows = 1
+	}
+	// Inner content width excludes border + padding; rows must be truncated to
+	// it, since lipgloss .Width() wraps overflow onto extra physical lines and
+	// breaks the one-row-per-event assumption scrollWindow depends on.
+	innerWidth := width - listFrame.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
 	}
 	start, end := scrollWindow(m.cursor, len(m.events), rows)
 
@@ -162,7 +188,8 @@ func renderList(m PickerModel, width, height int) string {
 		case dim:
 			style = rowDim
 		}
-		b.WriteString(style.Width(width - 2).Render(line))
+		line = ansi.Truncate(line, innerWidth, "…")
+		b.WriteString(style.Width(innerWidth).Render(line))
 		if i < end-1 {
 			b.WriteString("\n")
 		}
@@ -191,7 +218,7 @@ func scrollWindow(cursor, total, rows int) (int, int) {
 }
 
 func renderTree(m PickerModel, width, height int) string {
-	frame := treeFrame.Width(width).Height(height)
+	frame := treeFrame.Width(width).Height(height).MaxHeight(height)
 	if m.cursor < 0 || m.cursor >= len(m.events) {
 		return frame.Render("")
 	}
@@ -207,9 +234,17 @@ func renderTree(m PickerModel, width, height int) string {
 		return frame.Render(rowDim.Render("(empty snapshot)"))
 	}
 
+	// Inner content width excludes border + padding; every node row (and the
+	// header) is truncated to it — lipgloss frames wrap overflow, which would
+	// desync the one-row-per-node windowing below.
+	innerWidth := width - treeFrame.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+
 	var b strings.Builder
 	header := fmt.Sprintf("Contents (#%d)", ev.ID)
-	b.WriteString(previewHeader.Render(header))
+	b.WriteString(ansi.Truncate(previewHeader.Render(header), innerWidth, "…"))
 	b.WriteString("\n")
 
 	highlightIdx := -1
@@ -229,7 +264,7 @@ func renderTree(m PickerModel, width, height int) string {
 	}
 	start, end := scrollWindow(highlightIdx, len(rows), visible)
 	for i := start; i < end; i++ {
-		b.WriteString(rows[i])
+		b.WriteString(ansi.Truncate(rows[i], innerWidth, "…"))
 		if i < end-1 {
 			b.WriteString("\n")
 		}

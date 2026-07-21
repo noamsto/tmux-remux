@@ -144,7 +144,7 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			inner := m.height - 3
+			inner := m.previewInnerHeight()
 			maxScroll := m.previewMaxScroll(inner)
 			m.previewScroll += 3
 			if m.previewScroll > maxScroll {
@@ -277,11 +277,11 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.footerNote = ""
 	// Preview scroll: Alt+J/K / PgUp/PgDn. Available whenever the picker is in
 	// snapshot mode — scroll up to read past output without leaving the cursor
-	// pane. We approximate the inner height with m.height-3 (footer+borders).
+	// pane.
 	if m.mode == ModeSnapshot {
 		switch {
 		case key.Matches(msg, m.keys.PreviewUp):
-			inner := m.height - 3
+			inner := m.previewInnerHeight()
 			maxScroll := m.previewMaxScroll(inner)
 			if m.previewScroll < maxScroll {
 				m.previewScroll++
