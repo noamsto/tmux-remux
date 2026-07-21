@@ -10,9 +10,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/klauspost/compress/zstd"
 )
+
+// shaPattern bounds a content hash to a lowercase-hex sha256. Get/Stream/Delete
+// reject anything else, so a tampered manifest referencing a malformed sha can
+// neither drive path() outside dir (via "/" or "..") nor panic it on sha[:2].
+var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 // Store is a content-addressed file store for compressed scrollback contents.
 type Store struct {
@@ -35,7 +41,7 @@ func (s *Store) Put(_ context.Context, content []byte) (string, int64, error) {
 		return sha, info.Size(), nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return "", 0, fmt.Errorf("mkdir: %w", err)
 	}
 
@@ -77,6 +83,9 @@ func (s *Store) Put(_ context.Context, content []byte) (string, int64, error) {
 
 // Get reads and decompresses the scrollback identified by sha.
 func (s *Store) Get(_ context.Context, sha string) ([]byte, error) {
+	if !shaPattern.MatchString(sha) {
+		return nil, fmt.Errorf("invalid scrollback sha %q", sha)
+	}
 	f, err := os.Open(s.path(sha))
 	if err != nil {
 		return nil, fmt.Errorf("open scrollback: %w", err)
@@ -100,6 +109,9 @@ func (s *Store) Get(_ context.Context, sha string) ([]byte, error) {
 // is not honored during reads. To interrupt an in-flight stream, the caller
 // closes the returned ReadCloser.
 func (s *Store) Stream(_ context.Context, sha string) (io.ReadCloser, error) {
+	if !shaPattern.MatchString(sha) {
+		return nil, fmt.Errorf("invalid scrollback sha %q", sha)
+	}
 	f, err := os.Open(s.path(sha))
 	if err != nil {
 		return nil, fmt.Errorf("open scrollback: %w", err)
@@ -128,6 +140,9 @@ func (r *streamReader) Close() error {
 // Delete removes the scrollback file identified by sha. Missing files are not
 // an error.
 func (s *Store) Delete(_ context.Context, sha string) error {
+	if !shaPattern.MatchString(sha) {
+		return fmt.Errorf("invalid scrollback sha %q", sha)
+	}
 	if err := os.Remove(s.path(sha)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove scrollback: %w", err)
 	}

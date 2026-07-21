@@ -112,7 +112,10 @@ func (c Config) EnsureDirs() error {
 		filepath.Dir(c.LockPath),
 		filepath.Dir(c.LogPath),
 	} {
-		if err := os.MkdirAll(d, 0o750); err != nil {
+		// 0o700: session names, cwds, and command lines live in state.db, which
+		// sqlite creates group-readable (0644); a private dir is what keeps them
+		// off other local group members.
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("mkdir %q: %w", d, err)
 		}
 	}

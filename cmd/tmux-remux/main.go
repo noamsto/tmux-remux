@@ -78,7 +78,7 @@ func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) 
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
-	lock, err := lockfile.Acquire(cfg.LockPath)
+	lock, err := lockfile.Acquire(ctx, cfg.LockPath)
 	if err != nil {
 		return err
 	}
@@ -106,12 +106,18 @@ type SaveCmd struct {
 
 func (c SaveCmd) Run() error {
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
+		log, err := applog.Open(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
 		t := tmux.NewClient("tmux", cfg.DecorationOptions...)
 		saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 			Host:              hostname(),
 			CaptureScrollback: cfg.CaptureScrollback,
 			MinSaveInterval:   cfg.MinSaveInterval,
+			Logf:              log.Logf,
 		})
 		if err := saver.Save(ctx, c.Reason); err != nil {
 			return err
@@ -175,10 +181,15 @@ func (c RestoreCmd) Run() error {
 			return nil
 		}
 
+		// ListSessions already maps "no server" to (nil, nil); any error here
+		// is real. Abort rather than proceed with an empty running-set — an
+		// unknown "is it running" state must not be treated as "not running",
+		// or BuildPlan recreates a live session and injects windows into it.
 		running := map[string]bool{}
 		rows, err := t.ListSessions(ctx)
 		if err != nil {
-			log.Logf("restore: list sessions: %v (skip-running disabled this pass)", err)
+			log.Logf("restore: list sessions: %v — aborting to avoid clobbering live sessions", err)
+			return err
 		}
 		for _, s := range rows {
 			running[s.Name] = true
@@ -394,11 +405,16 @@ func (c PickCmd) Run() error {
 		}
 
 		t := tmux.NewClient("tmux")
+		// A real ListSessions error (no-server is already (nil, nil)) leaves us
+		// unable to tell which sessions are live; restoring anyway could inject
+		// windows into an attached session, so abort before opening the picker.
 		runningSet := map[string]bool{}
-		if sessions, err := t.ListSessions(ctx); err == nil {
-			for _, s := range sessions {
-				runningSet[s.Name] = true
-			}
+		sessions, err := t.ListSessions(ctx)
+		if err != nil {
+			return fmt.Errorf("list running sessions: %w", err)
+		}
+		for _, s := range sessions {
+			runningSet[s.Name] = true
 		}
 
 		sb := scrollback.New(cfg.ScrollbackDir)
@@ -570,6 +586,11 @@ type GCCmd struct{}
 
 func (GCCmd) Run() error {
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
+		log, err := applog.Open(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
 		orphans, err := db.ScrollbacksWithZeroRef(ctx)
 		if err != nil {
@@ -579,7 +600,12 @@ func (GCCmd) Run() error {
 			if err := sb.Delete(ctx, sha); err != nil {
 				continue
 			}
-			_ = db.DeleteScrollback(ctx, sha)
+			// File is gone; drop the row. The next gc retries on failure
+			// (sb.Delete of a missing file is a no-op), so this self-heals —
+			// log a persistently failing delete so it's not silently dangling.
+			if err := db.DeleteScrollback(ctx, sha); err != nil {
+				log.Logf("gc: delete scrollback row %s: %v", sha, err)
+			}
 		}
 		return nil
 	})

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,27 @@ func TestRelaunchStampNoIDDoesNotClobber(t *testing.T) {
 	f := run(t, `{}`, relaunchStampOpts{agent: "claude", pane: "%3"})
 	if len(f.calls) != 0 {
 		t.Errorf("expected no set call, got %+v", f.calls)
+	}
+}
+
+func TestRelaunchStampRejectsShellMetacharacters(t *testing.T) {
+	// The id is exec'd verbatim by /bin/sh -c on restore (via @remux_relaunch),
+	// so a shell-unsafe id must be dropped, not stamped.
+	for _, id := range []string{
+		"abc; rm -rf ~",
+		"$(touch pwned)",
+		"a`id`",
+		"a b",
+		"a|b",
+	} {
+		payload, err := json.Marshal(map[string]string{"session_id": id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := run(t, string(payload), relaunchStampOpts{agent: "claude", pane: "%3"})
+		if len(f.calls) != 0 {
+			t.Errorf("id %q: expected no stamp, got %+v", id, f.calls)
+		}
 	}
 }
 

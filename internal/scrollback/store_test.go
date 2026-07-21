@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/noamsto/tmux-remux/internal/scrollback"
@@ -105,6 +106,24 @@ func TestStreamReadsExistingSha(t *testing.T) {
 	}
 	if string(got) != string(content) {
 		t.Errorf("got %q, want %q", got, content)
+	}
+}
+
+func TestInvalidShaRejected(t *testing.T) {
+	ctx := context.Background()
+	store := scrollback.New(t.TempDir())
+	// Malformed shas (traversal, short) must be rejected before path() slices
+	// sha[:2] or escapes the store dir — not silently probed on disk.
+	for _, sha := range []string{"", "a", "../../etc/passwd", "not-hex-" + strings.Repeat("z", 56)} {
+		if _, err := store.Get(ctx, sha); err == nil {
+			t.Errorf("Get(%q): expected error", sha)
+		}
+		if _, err := store.Stream(ctx, sha); err == nil {
+			t.Errorf("Stream(%q): expected error", sha)
+		}
+		if err := store.Delete(ctx, sha); err == nil {
+			t.Errorf("Delete(%q): expected error", sha)
+		}
 	}
 }
 

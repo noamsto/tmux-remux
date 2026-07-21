@@ -356,7 +356,7 @@ func (s *Store) ScrollbacksWithZeroRef(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var sha string
 		if err := rows.Scan(&sha); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan orphan sha: %w", err)
 		}
 		out = append(out, sha)
 	}

@@ -1,7 +1,6 @@
 package restore
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -20,13 +19,11 @@ type StartupOpts struct {
 	ScrollbackSHA string
 	// RelaunchCmd, if non-empty, becomes the exec target instead of DefaultShell.
 	RelaunchCmd string
-	// RelaunchArgs are appended to RelaunchCmd, each strconv.Quote'd.
-	// Contract: args are assumed to be plain printable ASCII. strconv.Quote
-	// produces Go string syntax, not strict POSIX double-quote syntax;
-	// non-ASCII or non-printable bytes would emit Go escape sequences
-	// (\x.., \u...., \U........) that /bin/sh does not interpret. Snapshot
-	// data from tmux's `list-panes -F` allow-listed commands is plain ASCII
-	// in practice.
+	// RelaunchArgs are appended to RelaunchCmd, each POSIX single-quoted via
+	// shellQuoteSingle. The result is parsed by /bin/sh -c, so single-quoting
+	// is what neutralizes shell metacharacters — strconv.Quote would leave $
+	// and backticks live inside its double quotes, so an arg like $(cmd) or
+	// `cmd` would be command-substituted by the shell.
 	RelaunchArgs []string
 	// OverrideCmd, if non-empty, is exec'd verbatim as the relaunch target,
 	// taking precedence over RelaunchCmd/RelaunchArgs. It is a full /bin/sh -c
@@ -76,7 +73,7 @@ func buildExecTarget(opts StartupOpts) string {
 		b.WriteString(opts.RelaunchCmd)
 		for _, a := range opts.RelaunchArgs {
 			b.WriteByte(' ')
-			b.WriteString(strconv.Quote(a))
+			b.WriteString(shellQuoteSingle(a))
 		}
 		return b.String()
 	}
