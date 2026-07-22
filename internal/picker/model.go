@@ -71,6 +71,10 @@ type PickerModel struct {
 	// and the sub-manifest of what was lost. Populated by SetCloseContexts
 	// before Bootstrap. Keys are store.Event IDs. Empty in snapshot mode.
 	closeContexts map[int64]CloseContext
+	// hiddenCount is the number of unrecoverable close events the caller
+	// filtered out before constructing the model. Rendered as a footer line so
+	// the user knows the list is pruned. Close mode only.
+	hiddenCount int
 }
 
 // CloseContext is the picker-facing summary of a single close event, used to
@@ -498,6 +502,12 @@ func (m *PickerModel) SetCloseContexts(ctx map[int64]CloseContext) {
 		return
 	}
 	m.closeContexts = ctx
+}
+
+// SetHiddenCount records how many unrecoverable close events the caller
+// filtered out. Rendered as a footer line in the list pane. Close mode only.
+func (m *PickerModel) SetHiddenCount(n int) {
+	m.hiddenCount = n
 }
 
 // CloseContextFor returns the cached close context for the given event ID,
