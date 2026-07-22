@@ -43,7 +43,7 @@ func TestBuildPaneRestoreTargetsSessionIndexWithoutWindowID(t *testing.T) {
 
 	plan := restore.BuildPaneRestore(lost, win, "s1", true, defaultOpts)
 	want := []restore.Action{
-		restore.SplitPane{Target: "s1:2", Cwd: "/a", StartupCommand: "nvim"},
+		restore.SplitPane{Target: "s1:2", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh"},
 		restore.SetLayout{Window: "s1:2", Layout: "LAY"},
 	}
 	if diff := cmp.Diff(want, plan); diff != "" {
@@ -58,7 +58,7 @@ func TestBuildPaneRestoreRecreatesGoneWindow(t *testing.T) {
 	plan := restore.BuildPaneRestore(lost, win, "s1", false, defaultOpts)
 	want := []restore.Action{
 		restore.CreateSession{Name: "s1", Cwd: "/a"},
-		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim"},
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh"},
 		restore.SplitPane{Target: "s1:2", Cwd: "/b", StartupCommand: ""},
 		restore.SetLayout{Window: "s1:2", Layout: "LAY"},
 	}
