@@ -418,9 +418,16 @@ func (c PickCmd) Run() error {
 		}
 
 		sb := scrollback.New(cfg.ScrollbackDir)
+		var ctxs map[int64]picker.CloseContext
+		hidden := 0
+		if mode == picker.ModeClose {
+			ctxs = buildCloseContexts(ctx, db, evs)
+			evs, hidden = partitionRecoverable(evs, ctxs)
+		}
 		m := picker.NewPickerModel(mode, evs, runningSet, sb)
 		if mode == picker.ModeClose {
-			m.SetCloseContexts(buildCloseContexts(ctx, db, evs))
+			m.SetCloseContexts(ctxs)
+			m.SetHiddenCount(hidden)
 		}
 		m.Bootstrap()
 
@@ -457,10 +464,27 @@ func (c PickCmd) Run() error {
 	})
 }
 
+// partitionRecoverable splits close events into those with a recoverable entity
+// (a non-empty sub-manifest in ctxs) and a count of those without. An
+// unrecoverable close — entity born-and-died inside a snapshot gap, or a window
+// moved rather than closed — carries nothing to restore, so the picker hides it
+// behind the returned count instead of listing a dead "(invalid manifest)" row.
+func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext) (kept []store.Event, hidden int) {
+	kept = make([]store.Event, 0, len(evs))
+	for _, ev := range evs {
+		if len(ctxs[ev.ID].SubManifest.Sessions) == 0 {
+			hidden++
+			continue
+		}
+		kept = append(kept, ev)
+	}
+	return kept, hidden
+}
+
 // buildCloseContexts resolves each close event against its parent snapshot
 // (most recent snapshot < event.Ts) to derive a short label + sub-manifest of
-// the lost entity. Best-effort: events without a recoverable parent get an
-// empty context, which the picker renders as the bare Kind name.
+// the lost entity. Best-effort: events without a recoverable parent get no map
+// entry, and partitionRecoverable filters those out of the picker as hidden.
 func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event) map[int64]picker.CloseContext {
 	out := make(map[int64]picker.CloseContext, len(evs))
 	priorCache := map[int64]snapshot.Manifest{}
