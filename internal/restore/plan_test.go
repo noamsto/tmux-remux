@@ -33,7 +33,7 @@ func TestBuildPlanForFreshServer(t *testing.T) {
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
 	want := []restore.Action{
 		restore.CreateSession{Name: "s1", Cwd: "/a"},
-		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim"},
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh"},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: ""},
 		restore.SetLayout{Window: "s1:1", Layout: "L"},
 	}
@@ -55,7 +55,7 @@ func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 		}},
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
-	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; exec nvim`
+	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; nvim; exec /bin/zsh`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
 			if cw.StartupCommand != wantStartup {
@@ -82,7 +82,7 @@ func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
 		}},
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
-	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; exec claude --resume abc-123`
+	wantStartup := `'/usr/bin/tmux-remux' cat-scrollback deadbeef; claude --resume abc-123; exec /bin/zsh`
 	for _, a := range plan {
 		if cw, ok := a.(restore.CreateWindow); ok {
 			if cw.StartupCommand != wantStartup {

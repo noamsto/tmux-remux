@@ -19,14 +19,16 @@ type StartupOpts struct {
 	ScrollbackSHA string
 	// RelaunchCmd, if non-empty, becomes the exec target instead of DefaultShell.
 	RelaunchCmd string
-	// RelaunchArgs are appended to RelaunchCmd, each POSIX single-quoted via
-	// shellQuoteSingle. The result is parsed by /bin/sh -c, so single-quoting
-	// is what neutralizes shell metacharacters — strconv.Quote would leave $
-	// and backticks live inside its double quotes, so an arg like $(cmd) or
-	// `cmd` would be command-substituted by the shell.
+	// RelaunchArgs are appended to RelaunchCmd, each single-quoted via
+	// shellQuoteSingle. tmux runs the startup string through the pane's
+	// default-shell (POSIX sh, bash, zsh, or fish), and single quotes are
+	// literal in all of them — so single-quoting is what neutralizes shell
+	// metacharacters. strconv.Quote would leave $ and backticks live inside
+	// its double quotes, so an arg like $(cmd) or `cmd` would be
+	// command-substituted by the shell.
 	RelaunchArgs []string
 	// OverrideCmd, if non-empty, is exec'd verbatim as the relaunch target,
-	// taking precedence over RelaunchCmd/RelaunchArgs. It is a full /bin/sh -c
+	// taking precedence over RelaunchCmd/RelaunchArgs. It is a full shell
 	// command string supplied by the pane's @remux_relaunch option (the owning
 	// tool is responsible for quoting); tmux-remux passes it through unaltered.
 	OverrideCmd string
@@ -37,34 +39,44 @@ type StartupOpts struct {
 // empty string when no startup work is needed (caller omits the trailing arg
 // so tmux uses its default-command).
 //
-// Output forms (matches spec §"Plan composition" table):
+// Output forms:
 //
 //	scrollback=no  relaunch=no   ""
-//	scrollback=no  relaunch=yes  `<cmd> <quoted-args...>`
+//	scrollback=no  relaunch=yes  `<cmd> <quoted-args...>; exec <shell> [-l]`
 //	scrollback=yes relaunch=no   `'<self>' cat-scrollback <sha>; exec <shell> [-l]`
-//	scrollback=yes relaunch=yes  `'<self>' cat-scrollback <sha>; exec <cmd> <quoted-args...>`
+//	scrollback=yes relaunch=yes  `'<self>' cat-scrollback <sha>; <cmd> <quoted-args...>; exec <shell> [-l]`
 //
-// An OverrideCmd (pane @remux_relaunch) replaces the <cmd ...> exec target in the
-// relaunch=yes forms, emitted verbatim (no arg quoting).
+// The relaunched command runs as a child, then the pane exec's the default
+// shell — so quitting the agent/program drops back to an interactive prompt
+// instead of tearing down the pane (and a lone-pane window) with it, matching
+// how the command was originally launched from a shell.
 //
-// The output is interpreted by /bin/sh -c when tmux spawns the pane. See
+// An OverrideCmd (pane @remux_relaunch) replaces the <cmd ...> relaunch target
+// in the relaunch=yes forms, emitted verbatim (no arg quoting).
+//
+// tmux spawns the pane by running the output through the pane's default-shell
+// (the same shell dropped back into) — POSIX sh, bash, zsh, or fish; `;` and
+// `exec` and literal single quotes behave the same across all of them. See
 // StartupOpts.RelaunchArgs for the printable-ASCII assumption on args.
 func BuildStartupCommand(opts StartupOpts) string {
-	relaunch := buildExecTarget(opts)
+	relaunch := buildRelaunchTarget(opts)
+	shell := shellExec(opts)
 	if opts.ScrollbackSHA == "" {
-		// Without scrollback, an exec wrapper adds nothing; just emit the
-		// raw command (tmux runs it via /bin/sh -c).
-		if opts.RelaunchCmd == "" && opts.OverrideCmd == "" {
+		if relaunch == "" {
 			return ""
 		}
-		return relaunch
+		return relaunch + "; exec " + shell
 	}
-	return shellQuoteSingle(opts.Self) + " cat-scrollback " + opts.ScrollbackSHA + "; exec " + relaunch
+	prefix := shellQuoteSingle(opts.Self) + " cat-scrollback " + opts.ScrollbackSHA + "; "
+	if relaunch == "" {
+		return prefix + "exec " + shell
+	}
+	return prefix + relaunch + "; exec " + shell
 }
 
-// buildExecTarget returns the program-and-args portion that follows `exec`,
-// or that stands alone when no scrollback is involved.
-func buildExecTarget(opts StartupOpts) string {
+// buildRelaunchTarget returns the program-and-args to run before dropping to
+// the shell, or "" when the pane has no command to relaunch.
+func buildRelaunchTarget(opts StartupOpts) string {
 	if opts.OverrideCmd != "" {
 		return opts.OverrideCmd
 	}
@@ -77,6 +89,11 @@ func buildExecTarget(opts StartupOpts) string {
 		}
 		return b.String()
 	}
+	return ""
+}
+
+// shellExec returns the default-shell exec line, with -l for bash.
+func shellExec(opts StartupOpts) string {
 	if opts.IsBash {
 		return opts.DefaultShell + " -l"
 	}

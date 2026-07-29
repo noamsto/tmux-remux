@@ -18,13 +18,21 @@ func TestBuildStartupCommand(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "relaunch only",
+			name: "relaunch only drops to shell on exit",
 			opts: restore.StartupOpts{
 				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				RelaunchCmd:  "nvim",
 				RelaunchArgs: []string{"file.go"},
 			},
-			want: `nvim 'file.go'`,
+			want: `nvim 'file.go'; exec /bin/zsh`,
+		},
+		{
+			name: "relaunch drops to bash login shell",
+			opts: restore.StartupOpts{
+				Self: "/usr/bin/tmux-remux", DefaultShell: "/usr/bin/bash", IsBash: true,
+				RelaunchCmd: "nvim",
+			},
+			want: `nvim; exec /usr/bin/bash -l`,
 		},
 		{
 			name: "scrollback only",
@@ -35,13 +43,13 @@ func TestBuildStartupCommand(t *testing.T) {
 			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec /bin/zsh`,
 		},
 		{
-			name: "scrollback + relaunch",
+			name: "scrollback + relaunch drops to shell on exit",
 			opts: restore.StartupOpts{
 				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc123",
 				RelaunchCmd:   "htop",
 			},
-			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec htop`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; htop; exec /bin/zsh`,
 		},
 		{
 			name: "scrollback + bash gets -l",
@@ -66,7 +74,7 @@ func TestBuildStartupCommand(t *testing.T) {
 				RelaunchCmd:  "ssh",
 				RelaunchArgs: []string{"-p", "2222", "host"},
 			},
-			want: `ssh '-p' '2222' 'host'`,
+			want: `ssh '-p' '2222' 'host'; exec /bin/zsh`,
 		},
 		{
 			name: "relaunch arg with shell metacharacters is single-quoted",
@@ -75,24 +83,24 @@ func TestBuildStartupCommand(t *testing.T) {
 				RelaunchCmd:  "nvim",
 				RelaunchArgs: []string{"$(touch pwned)"},
 			},
-			want: `nvim '$(touch pwned)'`,
+			want: `nvim '$(touch pwned)'; exec /bin/zsh`,
 		},
 		{
-			name: "override only: emitted verbatim, unquoted",
+			name: "override only: emitted verbatim, then drops to shell",
 			opts: restore.StartupOpts{
 				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				OverrideCmd: "claude --resume abc-123",
 			},
-			want: `claude --resume abc-123`,
+			want: `claude --resume abc-123; exec /bin/zsh`,
 		},
 		{
-			name: "override + scrollback",
+			name: "override + scrollback drops to shell on exit",
 			opts: restore.StartupOpts{
 				Self: "/usr/bin/tmux-remux", DefaultShell: "/bin/zsh",
 				ScrollbackSHA: "abc123",
 				OverrideCmd:   "claude --resume abc-123",
 			},
-			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; exec claude --resume abc-123`,
+			want: `'/usr/bin/tmux-remux' cat-scrollback abc123; claude --resume abc-123; exec /bin/zsh`,
 		},
 		{
 			name: "override wins over relaunch",
@@ -101,7 +109,7 @@ func TestBuildStartupCommand(t *testing.T) {
 				RelaunchCmd: "nvim", RelaunchArgs: []string{"file.go"},
 				OverrideCmd: "claude --resume abc-123",
 			},
-			want: `claude --resume abc-123`,
+			want: `claude --resume abc-123; exec /bin/zsh`,
 		},
 	}
 
