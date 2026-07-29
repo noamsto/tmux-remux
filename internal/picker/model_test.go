@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/noamsto/tmux-remux/internal/picker"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 )
 
@@ -219,5 +220,63 @@ func TestModel_ViewHighlightsTreeCursor(t *testing.T) {
 	// When focus is on the tree pane, the first visible node must be highlighted.
 	if !strings.Contains(out, "203;166;247") {
 		t.Errorf("expected mauve-background highlight in tree pane, got:\n%s", out)
+	}
+}
+
+// closeModel builds a close-mode picker with one recoverable event whose
+// context carries a label + a one-session sub-manifest, plus a hidden count.
+func closeModel(t *testing.T, hidden int) picker.PickerModel {
+	t.Helper()
+	events := []store.Event{{ID: 1, Ts: time.Now().UnixMilli(), Kind: "window-unlinked"}}
+	m := picker.NewPickerModel(picker.ModeClose, events, nil, nil)
+	m.SetCloseContexts(map[int64]picker.CloseContext{
+		1: {
+			Label: "mono/win (1p)",
+			SubManifest: snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+				Name: "mono", Windows: []snapshot.Window{{Index: 4, Name: "win"}},
+			}}},
+		},
+	})
+	m.SetHiddenCount(hidden)
+	m.Bootstrap()
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	return upd.(picker.PickerModel)
+}
+
+func TestModel_CloseModeShowsHiddenCountLine(t *testing.T) {
+	out := closeModel(t, 14).View().Content
+	if !strings.Contains(out, "14 unrecoverable closes hidden") {
+		t.Errorf("expected hidden-count line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "mono/win (1p)") {
+		t.Errorf("recoverable row should still render, got:\n%s", out)
+	}
+}
+
+func TestModel_CloseModeHiddenCountSingular(t *testing.T) {
+	out := closeModel(t, 1).View().Content
+	if !strings.Contains(out, "1 unrecoverable close hidden") {
+		t.Errorf("expected singular phrasing, got:\n%s", out)
+	}
+	if strings.Contains(out, "closes hidden") {
+		t.Errorf("singular count must not use plural noun, got:\n%s", out)
+	}
+}
+
+func TestModel_CloseModeNoHiddenLineWhenZero(t *testing.T) {
+	out := closeModel(t, 0).View().Content
+	if strings.Contains(out, "hidden") {
+		t.Errorf("no hidden line expected when count is 0, got:\n%s", out)
+	}
+}
+
+func TestModel_CloseModeAllHiddenEmptyState(t *testing.T) {
+	m := picker.NewPickerModel(picker.ModeClose, nil, nil, nil)
+	m.SetHiddenCount(5)
+	m.Bootstrap()
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	out := upd.(picker.PickerModel).View().Content
+	if !strings.Contains(out, "No recoverable closes (5 hidden)") {
+		t.Errorf("expected all-hidden empty state, got:\n%s", out)
 	}
 }

@@ -9,7 +9,7 @@ require (
 	github.com/alecthomas/kong v1.16.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/google/go-cmp v0.7.0
-	github.com/klauspost/compress v1.19.0
+	github.com/klauspost/compress v1.19.1
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.53.0

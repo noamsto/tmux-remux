@@ -146,21 +146,35 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 func renderList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height).MaxHeight(height)
 	if len(m.events) == 0 {
-		return frame.Render(rowDim.Render("No snapshots yet — run `tmux-remux save`."))
+		msg := "No snapshots yet — run `tmux-remux save`."
+		if m.mode == ModeClose {
+			msg = "No close events yet."
+			if m.hiddenCount > 0 {
+				msg = fmt.Sprintf("No recoverable closes (%d hidden).", m.hiddenCount)
+			}
+		}
+		return frame.Render(rowDim.Render(msg))
 	}
-	// Inner content height = frame height − 2 (top+bottom border).
-	rows := height - 2
-	if rows < 1 {
-		rows = 1
-	}
-	// Inner content width excludes border + padding; rows must be truncated to
-	// it, since lipgloss .Width() wraps overflow onto extra physical lines and
-	// breaks the one-row-per-event assumption scrollWindow depends on.
+	// Inner content width excludes border + padding; rows and the footer must be
+	// truncated to it, since lipgloss .Width() wraps overflow onto extra physical
+	// lines and breaks the one-row-per-event assumption scrollWindow depends on.
 	innerWidth := width - listFrame.GetHorizontalFrameSize()
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
-	start, end := scrollWindow(m.cursor, len(m.events), rows)
+	// Inner content height = frame height − 2 (top+bottom border). Reserve the
+	// bottom line for the hidden-count footer, but only when there is more than
+	// one row — at the minimum height the lone row goes to events.
+	rows := height - 2
+	if rows < 1 {
+		rows = 1
+	}
+	showFooter := m.hiddenCount > 0 && rows > 1
+	eventRows := rows
+	if showFooter {
+		eventRows--
+	}
+	start, end := scrollWindow(m.cursor, len(m.events), eventRows)
 
 	var b strings.Builder
 	now := time.Now()
@@ -169,9 +183,9 @@ func renderList(m PickerModel, width, height int) string {
 		ts := time.UnixMilli(ev.Ts).Format("01-02 15:04")
 		var line string
 		if m.mode == ModeClose {
-			// Show the diff-derived label (e.g., "lazytmux/main 🧠 (1p)")
-			// instead of the generic "hook"; falls back to the Kind when the
-			// context lookup failed (no prior snapshot).
+			// Show the diff-derived label (e.g., "lazytmux/main 🧠 (1p)").
+			// Recoverable events always carry a label; the Kind fallback is a
+			// defensive guard for an unpopulated context.
 			label := m.closeContexts[ev.ID].Label
 			if label == "" {
 				label = ev.Kind
@@ -194,7 +208,26 @@ func renderList(m PickerModel, width, height int) string {
 			b.WriteString("\n")
 		}
 	}
+	if showFooter {
+		// Pin the footer to the bottom of the inner area, blank-padding the gap
+		// between the last event row and the footer line.
+		for pad := end - start; pad < eventRows; pad++ {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
+	}
 	return frame.Render(b.String())
+}
+
+// hiddenPhrase renders the pluralized "N unrecoverable close(s)" fragment.
+func hiddenPhrase(n int) string {
+	noun := "closes"
+	if n == 1 {
+		noun = "close"
+	}
+	return fmt.Sprintf("%d unrecoverable %s", n, noun)
 }
 
 // scrollWindow returns [start,end) such that `cursor` falls inside and the
