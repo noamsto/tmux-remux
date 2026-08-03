@@ -52,8 +52,9 @@ func (s *Saver) logf(format string, a ...any) {
 	}
 }
 
-// Save snapshots the live tmux server. Returns nil if the snapshot was
-// skipped (no tmux server running, throttled, or fingerprint unchanged).
+// Save snapshots the live tmux server. Returns nil if the snapshot was skipped
+// (no tmux server running, fingerprint unchanged, or a non-structural change
+// inside MinSaveInterval).
 func (s *Saver) Save(ctx context.Context, reason string) error {
 	now := time.Now()
 	manifest, err := Build(ctx, s.tmux, s.opts.Host, now.UnixMilli())
@@ -76,11 +77,21 @@ func (s *Saver) Save(ctx context.Context, reason string) error {
 	if fp == prevFP {
 		return nil
 	}
-	if time.Since(time.UnixMilli(prevTS)) < s.opts.MinSaveInterval {
+	// MinSaveInterval may only drop churn — a cwd or command change that the
+	// next save will pick up anyway. Dropping a structural change instead
+	// loses it forever: a window or pane created inside the throttle window
+	// would never reach a snapshot, and undo can only restore what a snapshot
+	// recorded. So structure always saves; the throttle downgrades it to a
+	// scrollback-free snapshot, which keeps a restore storm's hook-per-window
+	// saves cheap.
+	structFP := manifest.StructureFingerprint()
+	prevStructFP, _ := s.db.GetMeta(ctx, "last_save_structure_fingerprint")
+	throttled := time.Since(time.UnixMilli(prevTS)) < s.opts.MinSaveInterval
+	if throttled && structFP == prevStructFP {
 		return nil
 	}
 
-	if s.opts.CaptureScrollback {
+	if s.opts.CaptureScrollback && !throttled {
 		if err := s.captureScrollbacks(ctx, &manifest); err != nil {
 			return err
 		}
@@ -118,6 +129,9 @@ func (s *Saver) Save(ctx context.Context, reason string) error {
 	}
 
 	if err := s.db.SetMeta(ctx, "last_save_fingerprint", fp); err != nil {
+		return err
+	}
+	if err := s.db.SetMeta(ctx, "last_save_structure_fingerprint", structFP); err != nil {
 		return err
 	}
 	if err := s.db.SetMeta(ctx, "last_save_ts", strconv.FormatInt(manifest.SavedAt, 10)); err != nil {

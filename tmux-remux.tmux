@@ -127,8 +127,16 @@ wire_plugin() {
   tmux set-hook -g session-created "run-shell -b \"'${bin}' save --reason=hook:session-created\""
   tmux set-hook -g window-linked   "run-shell -b \"'${bin}' save --reason=hook:window-linked\""
   tmux set-hook -g client-detached "run-shell -b \"'${bin}' save --reason=hook:client-detached\""
+  # tmux has no pane-created hook, so a new pane would otherwise wait for the
+  # next window/session event or the save timer before any snapshot recorded it
+  # — and undo can't restore a pane no snapshot ever saw.
+  tmux set-hook -g after-split-window "run-shell -b \"'${bin}' save --reason=hook:after-split-window\""
 
   tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session}\""
+  # prefix+x kills the pane without its program exiting, so pane-exited never
+  # fires. after-kill-pane is a command hook and carries no hook_pane — the id
+  # is recovered by diffing the survivors against the last snapshot.
+  tmux set-hook -g after-kill-pane "run-shell -b \"'${bin}' capture-event pane-died\""
   tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session=#{hook_session}\""
   tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session=#{hook_session}\""
 

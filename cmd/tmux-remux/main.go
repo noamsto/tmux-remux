@@ -227,22 +227,27 @@ func (c UndoCmd) Run() error {
 		return fmt.Errorf("only --pop is supported in v0.1.0")
 	}
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
-		ev, item, prior, ok, err := restorableClose(ctx, db)
+		target, err := restorableClose(ctx, db)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if len(target.Discarded) > 0 {
+			if err := deleteEvents(ctx, db, target.Discarded); err != nil {
+				return err
+			}
+			return fmt.Errorf("%s", discardSummary(target.Discarded, target.OK))
+		}
+		if !target.OK {
 			return fmt.Errorf("nothing to undo — no recoverable close event")
 		}
 		t := tmux.NewClient("tmux")
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
-		plan, m := buildRestorePlan(ctx, t, item, prior, opts)
+		plan, m := buildRestorePlan(ctx, t, target.Item, target.Prior, opts)
 		if err := restore.Apply(ctx, t, plan); err != nil {
 			return err
 		}
 		focusRestored(ctx, t, m)
-		_, err = db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", ev.ID)
-		return err
+		return deleteEvents(ctx, db, []store.Event{target.Event})
 	})
 }
 
@@ -251,32 +256,70 @@ func (c UndoCmd) Run() error {
 // a corrupt history can't turn undo into a full-table scan.
 const undoScanLimit = 50
 
+// undoTarget is the result of scanning the close history for undo: the newest
+// restorable close, plus the unrecoverable ones sitting in front of it.
+type undoTarget struct {
+	Event store.Event
+	Item  *closeevent.ClosedItem
+	Prior snapshot.Manifest
+	OK    bool
+	// Discarded is the leading run of close events no snapshot ever captured.
+	// Recoverability only decays (snapshots get pruned, never added behind a
+	// timestamp), so these can never become restorable and undo drops them.
+	Discarded []store.Event
+}
+
 // restorableClose finds the most recent close event that can actually be
 // restored: its lost entity resolves against a pre-close snapshot AND yields a
-// non-empty restore manifest. It steps past events that can't (entities born
-// and gone within one snapshot gap) so a single unrecoverable head no longer
-// blocks undo. It returns the resolved ClosedItem and the prior snapshot so the
-// caller can build the restore plan; ok is false when nothing in the scan
-// window is recoverable.
-func restorableClose(ctx context.Context, db *store.Store) (store.Event, *closeevent.ClosedItem, snapshot.Manifest, bool, error) {
+// non-empty restore manifest. Unrecoverable events in front of it (entities born
+// and gone within one snapshot gap) are reported in Discarded rather than
+// skipped over silently — resurrecting an hours-old close when the user asked to
+// undo the one they just made looks like undo doing nothing. OK is false when
+// nothing in the scan window is recoverable.
+func restorableClose(ctx context.Context, db *store.Store) (undoTarget, error) {
 	evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: undoScanLimit})
 	if err != nil {
-		return store.Event{}, nil, snapshot.Manifest{}, false, err
+		return undoTarget{}, err
 	}
+	var t undoTarget
 	for _, ev := range evs {
 		item, prior, ok := resolveEvent(ctx, db, ev)
-		if !ok {
-			continue
-		}
-		// Defense-in-depth: every item FindClosed returns now yields a
-		// non-empty sub-manifest, but guard against a future resolver that
+		// Defense-in-depth on the sub-manifest: every item FindClosed returns
+		// now yields a non-empty one, but guard against a future resolver that
 		// can't build a restore plan rather than popping an un-restorable head.
-		if len(item.SubManifest(prior.Host, prior.SavedAt).Sessions) == 0 {
+		if !ok || len(item.SubManifest(prior.Host, prior.SavedAt).Sessions) == 0 {
+			t.Discarded = append(t.Discarded, ev)
 			continue
 		}
-		return ev, item, prior, true, nil
+		t.Event, t.Item, t.Prior, t.OK = ev, item, prior, true
+		return t, nil
 	}
-	return store.Event{}, nil, snapshot.Manifest{}, false, nil
+	return t, nil
+}
+
+func deleteEvents(ctx context.Context, db *store.Store, evs []store.Event) error {
+	for _, ev := range evs {
+		if _, err := db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", ev.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// discardSummary explains why undo restored nothing this press. `more` reports
+// whether a recoverable close survives behind the discarded run.
+func discardSummary(evs []store.Event, more bool) string {
+	head := evs[0]
+	age := time.Since(time.UnixMilli(head.Ts)).Round(time.Second)
+	what := fmt.Sprintf("last %s close (%s ago)", head.Scope, age)
+	if len(evs) > 1 {
+		what = fmt.Sprintf("last %d closes (newest: %s, %s ago)", len(evs), head.Scope, age)
+	}
+	tail := "nothing older is recoverable either"
+	if more {
+		tail = "press prefix+u again to undo the one before it"
+	}
+	return fmt.Sprintf("%s never made it into a snapshot — discarded; %s", what, tail)
 }
 
 // resolveEvent resolves a close event to its lost entity against the most

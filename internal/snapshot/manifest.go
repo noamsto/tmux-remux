@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -92,5 +93,25 @@ func (m Manifest) Fingerprint() string {
 	}
 	data, _ := json.Marshal(cp)
 	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// StructureFingerprint returns a sha256 hex over the identity of every session,
+// window, and pane — which entities exist, ignoring what they are doing (cwd,
+// command, layout, scrollback). It changes only when something was created or
+// destroyed, which is the one class of change a save must never drop: an entity
+// that never reaches a snapshot can never be restored once it closes.
+func (m Manifest) StructureFingerprint() string {
+	var ids []string
+	for _, s := range m.Sessions {
+		ids = append(ids, "s\x1f"+s.Name)
+		for _, w := range s.Windows {
+			ids = append(ids, fmt.Sprintf("w\x1f%s\x1f%d", w.ID, w.Index))
+			for _, p := range w.Panes {
+				ids = append(ids, fmt.Sprintf("p\x1f%s\x1f%d", p.ID, p.Index))
+			}
+		}
+	}
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\x1e")))
 	return hex.EncodeToString(sum[:])
 }

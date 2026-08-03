@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 )
 
@@ -29,6 +30,17 @@ type Args struct {
 // event for the same session exists (cascade dedup). Returns the inserted
 // event id, or 0 if deduped.
 func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
+	// after-kill-pane is a command hook, so it carries no hook_pane: a pane
+	// killed with prefix+x used to leave no trace at all. Recover its id by
+	// diffing the survivors against the last snapshot instead.
+	if a.Kind == "pane-died" && a.PaneID == "" {
+		resolved, ok, err := resolveKilledPane(ctx, db, a)
+		if err != nil || !ok {
+			return 0, err
+		}
+		a = resolved
+	}
+
 	// window-unlinked also fires on move-window, where the window survives under
 	// another session. When the closed entity's id is still in the post-close
 	// index nothing was lost, so drop it at the source rather than storing a row
@@ -87,6 +99,53 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 		Host:         a.Host,
 		ManifestJSON: string(wrapped),
 	})
+}
+
+// resolveKilledPane fills in the pane and window ids of an id-less pane-died
+// event by finding the pane the latest snapshot knows about but the post-close
+// index no longer lists. It reports false unless exactly one pane went missing
+// AND its window survived: more than one missing pane means the snapshot is
+// stale or a whole window/session came down (which window-unlinked and
+// session-closed already record), and guessing there would restore the wrong
+// pane. Recording nothing beats recording a lie.
+func resolveKilledPane(ctx context.Context, db *store.Store, a Args) (Args, bool, error) {
+	snap, err := db.LatestSnapshot(ctx)
+	if err != nil || snap == nil {
+		return a, false, err
+	}
+	var prior snapshot.Manifest
+	if json.Unmarshal([]byte(snap.ManifestJSON), &prior) != nil {
+		return a, false, nil
+	}
+
+	live := map[string]bool{}
+	for _, p := range a.Index.Panes {
+		live[p.ID] = true
+	}
+	liveWindows := map[string]bool{}
+	for _, w := range a.Index.Windows {
+		liveWindows[w.ID] = true
+	}
+
+	missing := 0
+	lost := a
+	for i := range prior.Sessions {
+		for j := range prior.Sessions[i].Windows {
+			w := &prior.Sessions[i].Windows[j]
+			for k := range w.Panes {
+				p := &w.Panes[k]
+				if p.ID == "" || live[p.ID] {
+					continue
+				}
+				missing++
+				lost.PaneID, lost.WindowID = p.ID, w.ID
+			}
+		}
+	}
+	if missing != 1 || !liveWindows[lost.WindowID] {
+		return a, false, nil
+	}
+	return lost, true, nil
 }
 
 // entityStillLive reports whether the close event's target still appears in the
