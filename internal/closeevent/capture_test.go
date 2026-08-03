@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
 )
@@ -143,5 +144,98 @@ func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
 	}
 	if id2 != 0 {
 		t.Errorf("expected dedup (id2=0), got id2=%d", id2)
+	}
+}
+
+// seedSnapshot stores a snapshot of one window (@1) holding two panes.
+func seedSnapshot(ctx context.Context, t *testing.T, db *store.Store) {
+	t.Helper()
+	m := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+		Name: "s1",
+		Windows: []snapshot.Window{{
+			Index: 1, ID: "@1",
+			Panes: []snapshot.Pane{
+				{Index: 0, ID: "%1", Command: "fish"},
+				{Index: 1, ID: "%2", Command: "nvim"},
+			},
+		}},
+	}}}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertEvent(ctx, store.Event{
+		Ts: 100, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(b),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// prefix+x fires after-kill-pane, a command hook carrying no hook_pane. The
+// dead pane has to be identified by diffing the survivors against the snapshot.
+func TestCaptureResolvesIDLessPaneFromSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedSnapshot(ctx, t, db)
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("expected the killed pane to be recorded")
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.PaneID != "%2" || man.WindowID != "@1" {
+		t.Errorf("resolved pane=%q window=%q, want %%2 in @1", man.PaneID, man.WindowID)
+	}
+}
+
+func TestCaptureDropsIDLessPaneWhenAmbiguous(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string]closeevent.IndexPost{
+		// Window gone too: window-unlinked owns this close, and the pane alone
+		// can't be restored into a window that no longer exists.
+		"window died with the pane": {},
+		// Two panes missing at once — a stale snapshot or a bulk teardown.
+		// Picking either one would restore the wrong pane.
+		"more than one pane missing": {
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+		},
+	}
+	for name, post := range cases {
+		t.Run(name, func(t *testing.T) {
+			db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			seedSnapshot(ctx, t, db)
+
+			id, err := closeevent.Capture(ctx, db, closeevent.Args{
+				Kind: "pane-died", Host: "h", Index: post,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id != 0 {
+				t.Errorf("recorded event %d, want none", id)
+			}
+		})
 	}
 }
