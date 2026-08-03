@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -58,28 +60,42 @@ func closeWindowManifest(t *testing.T, closedID string) string {
 	return string(mustJSON(t, closeevent.CloseManifest{WindowID: closedID}))
 }
 
-func TestRestorableCloseSkipsUnrecoverableHead(t *testing.T) {
+func TestRestorableCloseReportsUnrecoverableHead(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
 
 	// Recoverable: @9 is in the snapshot, and it's gone from the post-close index.
 	recoverable := insertEvent(ctx, t, db, 200, "window-unlinked", closeWindowManifest(t, "@9"))
 	// Newer but unrecoverable: @14 was born+died inside a snapshot gap, so it
-	// never made it into the snapshot. It must not block undo.
-	insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
+	// never made it into the snapshot. It must surface as discarded rather than
+	// be stepped over — restoring @9 here would look like undo doing nothing.
+	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	ev, item, prior, ok, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
-	if !ok {
-		t.Fatal("expected a recoverable event, got none")
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != unrecoverable {
+		t.Fatalf("Discarded = %+v, want just event %d", target.Discarded, unrecoverable)
 	}
-	if ev.ID != recoverable {
-		t.Errorf("popped event %d, want %d (the recoverable one behind the unrecoverable head)", ev.ID, recoverable)
+	if !target.OK {
+		t.Fatal("expected a recoverable event behind the discarded head, got none")
 	}
-	if m := item.SubManifest(prior.Host, prior.SavedAt); len(m.Sessions) != 1 || m.Sessions[0].Name != "mono" {
+	if target.Event.ID != recoverable {
+		t.Errorf("target event %d, want %d", target.Event.ID, recoverable)
+	}
+	if m := target.Item.SubManifest(target.Prior.Host, target.Prior.SavedAt); len(m.Sessions) != 1 || m.Sessions[0].Name != "mono" {
 		t.Errorf("manifest = %+v, want one session 'mono'", m.Sessions)
+	}
+}
+
+func TestDiscardSummaryMentionsFollowUpPress(t *testing.T) {
+	evs := []store.Event{{Ts: time.Now().UnixMilli(), Scope: "window"}}
+	if got := discardSummary(evs, true); !strings.Contains(got, "prefix+u again") {
+		t.Errorf("summary = %q, want a hint to press again", got)
+	}
+	if got := discardSummary(evs, false); !strings.Contains(got, "nothing older") {
+		t.Errorf("summary = %q, want the exhausted-history wording", got)
 	}
 }
 
@@ -93,18 +109,21 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))
 	pane := insertEvent(ctx, t, db, 300, "pane-died", paneMan)
 
-	ev, item, _, ok, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
-	if !ok || ev.ID != pane {
-		t.Fatalf("popped event %d ok=%v, want the pane event %d", ev.ID, ok, pane)
+	if !target.OK || target.Event.ID != pane {
+		t.Fatalf("popped event %d ok=%v, want the pane event %d", target.Event.ID, target.OK, pane)
 	}
-	if item.Pane == nil || item.Pane.ID != "%9" {
-		t.Errorf("item.Pane = %+v, want the lost pane %%9", item.Pane)
+	if len(target.Discarded) != 0 {
+		t.Errorf("Discarded = %+v, want none", target.Discarded)
 	}
-	if item.Window == nil || item.Window.ID != "@9" {
-		t.Errorf("item.Window = %+v, want parent window @9", item.Window)
+	if target.Item.Pane == nil || target.Item.Pane.ID != "%9" {
+		t.Errorf("item.Pane = %+v, want the lost pane %%9", target.Item.Pane)
+	}
+	if target.Item.Window == nil || target.Item.Window.ID != "@9" {
+		t.Errorf("item.Window = %+v, want parent window @9", target.Item.Window)
 	}
 }
 
@@ -150,13 +169,16 @@ func TestReindexLeavesFreeIndexAndDeadSessionAlone(t *testing.T) {
 func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
-	insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
+	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	_, _, _, ok, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
-	if ok {
+	if target.OK {
 		t.Error("expected no recoverable event, got one")
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != unrecoverable {
+		t.Errorf("Discarded = %+v, want just event %d", target.Discarded, unrecoverable)
 	}
 }

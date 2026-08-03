@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -95,6 +96,70 @@ func TestSaveSkipsWhenFingerprintUnchangedAndThrottled(t *testing.T) {
 	all, _ := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: 100})
 	if len(all) != 1 {
 		t.Errorf("expected 1 event (second was throttled), got %d", len(all))
+	}
+}
+
+// A window created inside the throttle window used to be dropped along with the
+// save, so it existed in no snapshot at all — and undo can only restore what a
+// snapshot recorded. Structure must outrank the throttle.
+func TestSaveThrottleNeverDropsANewWindow(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"))
+	defer db.Close()
+	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
+	cc := &captureClient{
+		fakeClient: &fakeClient{
+			sessions: []tmux.SessionRow{{Name: "s1"}},
+			windows:  []tmux.WindowRow{{Session: "s1", Index: 1, Name: "w", ID: "@1"}},
+			panes:    []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 1, Command: "bash", ID: "%1"}},
+		},
+		captured: map[string][]byte{},
+	}
+	saver := snapshot.NewSaver(db, sb, cc, snapshot.SaverOptions{
+		Host: "h", CaptureScrollback: true, MinSaveInterval: time.Hour,
+	})
+	if err := saver.Save(ctx, "baseline"); err != nil {
+		t.Fatal(err)
+	}
+
+	cc.windows = append(cc.windows, tmux.WindowRow{Session: "s1", Index: 2, Name: "new", ID: "@2"})
+	cc.panes = append(cc.panes, tmux.PaneRow{Session: "s1", WindowIndex: 2, PaneIndex: 1, Command: "fish", ID: "%2"})
+	if err := saver.Save(ctx, "hook:window-linked"); err != nil {
+		t.Fatal(err)
+	}
+
+	ev, err := db.LatestSnapshot(ctx)
+	if err != nil || ev == nil {
+		t.Fatalf("LatestSnapshot = %v, %v", ev, err)
+	}
+	var m snapshot.Manifest
+	if err := json.Unmarshal([]byte(ev.ManifestJSON), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Sessions) != 1 || len(m.Sessions[0].Windows) != 2 {
+		t.Fatalf("latest snapshot has %d windows, want 2 (the new window must be captured despite the throttle)", len(m.Sessions[0].Windows))
+	}
+
+	// The throttle still buys something: the forced snapshot skips the
+	// expensive scrollback capture.
+	var linked int
+	if err := db.DB().QueryRowContext(ctx,
+		"SELECT count(*) FROM event_scrollbacks WHERE event_id=?", ev.ID).Scan(&linked); err != nil {
+		t.Fatal(err)
+	}
+	if linked != 0 {
+		t.Errorf("throttled snapshot linked %d scrollbacks, want 0", linked)
+	}
+
+	// A pure churn change (same entities, different command) stays throttled.
+	cc.panes[0].Command = "nvim"
+	if err := saver.Save(ctx, "churn"); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: 100})
+	if len(all) != 2 {
+		t.Errorf("got %d snapshots, want 2 (churn inside the throttle window must not save)", len(all))
 	}
 }
 
