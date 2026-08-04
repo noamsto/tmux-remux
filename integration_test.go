@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -166,7 +167,7 @@ func TestPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
 	}
 
 	plan := restore.BuildPaneRestore(lost, win, "init", true, restore.BuildOptions{DefaultShell: "/bin/sh"})
-	if err := restore.Apply(ctx, st, plan); err != nil {
+	if _, err := restore.Apply(ctx, st, plan); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if n := panesInWindow(t, st, win.Index); n != 2 {
@@ -246,7 +247,7 @@ func TestDecorationRestoreRoundtrip(t *testing.T) {
 	dst := testutil.StartServer(t)
 	t.Setenv("TMUX", dst.Socket+",0,0")
 	dstClient := tmux.NewClient("tmux")
-	if err := restore.Apply(ctx, dstClient, plan); err != nil {
+	if _, err := restore.Apply(ctx, dstClient, plan); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -256,5 +257,53 @@ func TestDecorationRestoreRoundtrip(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out); got != "colour141" {
 		t.Errorf("restored @crew_color = %q, want %q", got, "colour141")
+	}
+}
+
+// TestRestoreFirstWindowAtBaseIndex restores a session's first window against a
+// server with base-index 1, where the window tmux hands every new session lands
+// on the very index the restored window wants. Creating session and window
+// separately loses the window's startup command to "index in use".
+func TestRestoreFirstWindowAtBaseIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dst := testutil.StartServer(t)
+	if _, err := dst.Tmux("set-option", "-g", "base-index", "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	marker := filepath.Join(t.TempDir(), "ran")
+	plan := []restore.Action{
+		restore.CreateWindow{
+			Session:        "s1",
+			Index:          1,
+			Name:           "dispatcher",
+			Cwd:            "/tmp",
+			StartupCommand: "touch " + marker + "; exec /bin/sh",
+			NewSession:     true,
+		},
+	}
+
+	t.Setenv("TMUX", dst.Socket+",0,0")
+	failed, err := restore.Apply(context.Background(), tmux.NewClient("tmux"), plan)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("apply reported failed actions: %v", failed)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		out, _ := dst.Tmux("list-windows", "-t", "s1", "-F", "#{window_index} #{window_name}")
+		t.Fatalf("restored window never ran its startup command; s1 windows:\n%s", strings.TrimSpace(out))
 	}
 }
