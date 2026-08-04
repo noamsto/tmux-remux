@@ -277,7 +277,7 @@ func TestRestoreFirstWindowAtBaseIndex(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	plan := []restore.Action{
 		restore.CreateWindow{
-			Session:        "mono",
+			Session:        "s1",
 			Index:          1,
 			Name:           "dispatcher",
 			Cwd:            "/tmp",
@@ -303,7 +303,7 @@ func TestRestoreFirstWindowAtBaseIndex(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if _, err := os.Stat(marker); err != nil {
-		out, _ := dst.Tmux("list-windows", "-t", "mono", "-F", "#{window_index} #{window_name}")
-		t.Fatalf("restored window never ran its startup command; mono windows:\n%s", strings.TrimSpace(out))
+		out, _ := dst.Tmux("list-windows", "-t", "s1", "-F", "#{window_index} #{window_name}")
+		t.Fatalf("restored window never ran its startup command; s1 windows:\n%s", strings.TrimSpace(out))
 	}
 }

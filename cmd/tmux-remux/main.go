@@ -206,8 +206,8 @@ func (c RestoreCmd) Run() error {
 			ev.ID, age, stats.SessionsKept, stats.SessionsSkippedRunning,
 			stats.SessionsSkippedStale, stats.SessionsSkippedIdle,
 			stats.WindowsSkippedIdle, len(plan), len(failed))
-		for _, f := range failed {
-			log.Logf("restore: snapshot %d: action failed: %v", ev.ID, f)
+		for _, actionErr := range failed {
+			log.Logf("restore: snapshot %d: action failed: %v", ev.ID, actionErr)
 		}
 		// Launch feedback: make a filtered-to-nothing restore visible
 		// at the moment it happens. Best-effort — at server birth

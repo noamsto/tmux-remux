@@ -79,7 +79,7 @@ func createWindow(ctx context.Context, t Runner, v CreateWindow) error {
 					return err
 				}
 			}
-			reenableAutomaticRename(ctx, t, v, target)
+			reenableAutomaticRename(ctx, t, v.AutomaticRename, target)
 			return nil
 		}
 		if !isDuplicateSession(err) {
@@ -93,7 +93,7 @@ func createWindow(ctx context.Context, t Runner, v CreateWindow) error {
 	if _, err := t.Run(ctx, args); err != nil {
 		return err
 	}
-	reenableAutomaticRename(ctx, t, v, target)
+	reenableAutomaticRename(ctx, t, v.AutomaticRename, target)
 	return nil
 }
 
@@ -103,6 +103,8 @@ type createdWindow struct {
 	index int
 }
 
+// newSession creates v's session with v as its only window, reporting where
+// tmux actually put that window.
 func newSession(ctx context.Context, t Runner, v CreateWindow) (createdWindow, error) {
 	args := []string{"new-session", "-d", "-s", v.Session, "-n", v.Name, "-c", v.Cwd, "-P", "-F", "#{window_id} #{window_index}"}
 	if v.StartupCommand != "" {
@@ -132,8 +134,8 @@ func isDuplicateSession(err error) bool {
 // reenableAutomaticRename undoes the automatic-rename that `-n` turns off. For
 // windows that named themselves via automatic-rename-format, the live format
 // should take over instead of pinning the stale stored name.
-func reenableAutomaticRename(ctx context.Context, t Runner, v CreateWindow, target string) {
-	if !v.AutomaticRename {
+func reenableAutomaticRename(ctx context.Context, t Runner, on bool, target string) {
+	if !on {
 		return
 	}
 	_, _ = t.Run(ctx, []string{"set-window-option", "-t", target, "automatic-rename", "on"})
