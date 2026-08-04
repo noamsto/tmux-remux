@@ -197,14 +197,18 @@ func (c RestoreCmd) Run() error {
 
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 		plan, stats := restore.BuildPlan(m, f, running, opts)
-		if err := restore.Apply(ctx, t, plan); err != nil {
+		failed, err := restore.Apply(ctx, t, plan)
+		if err != nil {
 			log.Logf("restore: snapshot %d (age %s): apply failed: %v", ev.ID, age, err)
 			return err
 		}
-		log.Logf("restore: snapshot %d (age %s): %d sessions restored, skipped %d running / %d stale / %d idle (%d idle windows), %d actions",
+		log.Logf("restore: snapshot %d (age %s): %d sessions restored, skipped %d running / %d stale / %d idle (%d idle windows), %d actions, %d failed",
 			ev.ID, age, stats.SessionsKept, stats.SessionsSkippedRunning,
 			stats.SessionsSkippedStale, stats.SessionsSkippedIdle,
-			stats.WindowsSkippedIdle, len(plan))
+			stats.WindowsSkippedIdle, len(plan), len(failed))
+		for _, f := range failed {
+			log.Logf("restore: snapshot %d: action failed: %v", ev.ID, f)
+		}
 		// Launch feedback: make a filtered-to-nothing restore visible
 		// at the moment it happens. Best-effort — at server birth
 		// there may be no attached client to display to.
@@ -243,7 +247,7 @@ func (c UndoCmd) Run() error {
 		t := tmux.NewClient("tmux")
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 		plan, m := buildRestorePlan(ctx, t, target.Item, target.Prior, opts)
-		if err := restore.Apply(ctx, t, plan); err != nil {
+		if _, err := restore.Apply(ctx, t, plan); err != nil {
 			return err
 		}
 		focusRestored(ctx, t, m)
@@ -367,8 +371,8 @@ func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.Clos
 // stored index — almost always taken, since closing a window renumbers the
 // rest — and tmux fails new-window with "index in use", silently dropping the
 // restore. Colliding windows move to a free slot past the session's live max;
-// windows whose session isn't live are left alone, since CreateSession rebuilds
-// those from scratch with their indices free.
+// windows whose session isn't live are left alone, since Apply rebuilds those
+// sessions from scratch with their indices free.
 func reindexIntoLiveSessions(m *snapshot.Manifest, live []tmux.WindowRow) {
 	used := map[string]map[int]bool{}
 	for _, w := range live {
@@ -494,7 +498,7 @@ func (c PickCmd) Run() error {
 				return nil
 			}
 			plan, m := buildRestorePlan(ctx, t, item, prior, buildOpts)
-			if err := restore.Apply(ctx, t, plan); err != nil {
+			if _, err := restore.Apply(ctx, t, plan); err != nil {
 				return err
 			}
 			focusRestored(ctx, t, m)
@@ -503,7 +507,8 @@ func (c PickCmd) Run() error {
 
 		manifest := final.SelectedManifest()
 		plan, _ := restore.BuildPlan(manifest, final.Filter(), runningSet, buildOpts)
-		return restore.Apply(ctx, t, plan)
+		_, err = restore.Apply(ctx, t, plan)
+		return err
 	})
 }
 

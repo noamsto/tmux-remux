@@ -32,8 +32,7 @@ func TestBuildPlanForFreshServer(t *testing.T) {
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
 	want := []restore.Action{
-		restore.CreateSession{Name: "s1", Cwd: "/a"},
-		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh"},
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh", NewSession: true},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: ""},
 		restore.SetLayout{Window: "s1:1", Layout: "L"},
 	}
@@ -151,7 +150,7 @@ func TestBuildPlanSkipsRunningSessions(t *testing.T) {
 	f := filter.Filter{SkipRunningSessions: true}
 	plan, _ := restore.BuildPlan(m, f, map[string]bool{"s1": true}, restore.BuildOptions{})
 	for _, a := range plan {
-		if cs, ok := a.(restore.CreateSession); ok && cs.Name == "s1" {
+		if cw, ok := a.(restore.CreateWindow); ok && cw.Session == "s1" {
 			t.Error("running session should be skipped")
 		}
 	}

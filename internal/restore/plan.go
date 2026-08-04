@@ -15,25 +15,6 @@ type Action interface {
 	isAction()
 }
 
-// CreateSession creates a new tmux session. StartupCommand, when non-empty,
-// is passed as the trailing shell-command argument to tmux new-session.
-//
-// BuildPlan currently leaves StartupCommand empty: the implicit default
-// window that `tmux new-session` creates is left empty, and the subsequent
-// CreateWindow action carries the startup command for the first kept pane.
-// This means restored sessions end up with an extra empty window-0 — a
-// pre-existing issue scoped out of the fast-restore refactor (see spec
-// 2026-05-10-fast-restore-design.md §"Non-goals"). The field is kept so a
-// future fix can populate it (folding the first CreateWindow into the
-// session-create call) without changing the action shape.
-type CreateSession struct {
-	Name           string
-	Cwd            string
-	StartupCommand string
-}
-
-func (CreateSession) isAction() {}
-
 // CreateWindow creates a new tmux window inside a session. StartupCommand,
 // when non-empty, is passed as the trailing shell-command argument to
 // tmux new-window — the new window's first pane is born running it.
@@ -46,6 +27,10 @@ type CreateWindow struct {
 	// AutomaticRename re-enables automatic-rename on the window after creation,
 	// so the live name format takes over instead of the pinned stored name.
 	AutomaticRename bool
+	// NewSession marks the session's first restored window. Apply creates the
+	// session and this window in one new-session call, since tmux hands every
+	// new session a window that would otherwise squat on this one's index.
+	NewSession bool
 }
 
 func (CreateWindow) isAction() {}
@@ -175,10 +160,6 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				stats.WindowsSkippedIdle++
 				continue
 			}
-			if !sessionStarted {
-				plan = append(plan, CreateSession{Name: sess.Name, Cwd: firstPane.Cwd})
-				sessionStarted = true
-			}
 			plan = append(plan, CreateWindow{
 				Session:         sess.Name,
 				Index:           win.Index,
@@ -186,7 +167,9 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				Cwd:             firstPane.Cwd,
 				StartupCommand:  startupFor(*firstPane),
 				AutomaticRename: win.AutomaticRename,
+				NewSession:      !sessionStarted,
 			})
+			sessionStarted = true
 			if len(win.Decoration) > 0 {
 				names := make([]string, 0, len(win.Decoration))
 				for k := range win.Decoration {

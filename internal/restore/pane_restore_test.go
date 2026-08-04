@@ -57,8 +57,7 @@ func TestBuildPaneRestoreRecreatesGoneWindow(t *testing.T) {
 
 	plan := restore.BuildPaneRestore(lost, win, "s1", false, defaultOpts)
 	want := []restore.Action{
-		restore.CreateSession{Name: "s1", Cwd: "/a"},
-		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh"},
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh", NewSession: true},
 		restore.SplitPane{Target: "s1:2", Cwd: "/b", StartupCommand: ""},
 		restore.SetLayout{Window: "s1:2", Layout: "LAY"},
 	}

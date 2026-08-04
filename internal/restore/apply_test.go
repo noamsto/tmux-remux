@@ -2,6 +2,7 @@ package restore_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -9,31 +10,105 @@ import (
 	"github.com/noamsto/tmux-remux/internal/restore"
 )
 
+const newSessionFormat = "#{window_id} #{window_index}"
+
 type recordingTmux struct {
 	calls [][]string
+	// windowOut stands in for what `new-session -P -F` prints: the window id
+	// and the index tmux actually placed it at. Defaults to "@1 1".
+	windowOut     string
+	newSessionErr error
 }
 
 func (r *recordingTmux) Run(_ context.Context, args []string) (string, error) {
 	r.calls = append(r.calls, args)
-	return "", nil
+	if len(args) == 0 || args[0] != "new-session" {
+		return "", nil
+	}
+	if r.newSessionErr != nil {
+		return "", r.newSessionErr
+	}
+	if r.windowOut != "" {
+		return r.windowOut, nil
+	}
+	return "@1 1", nil
 }
 
 func TestApplyEmitsTmuxCallsWithoutStartup(t *testing.T) {
 	rt := &recordingTmux{}
 	plan := []restore.Action{
-		restore.CreateSession{Name: "s1", Cwd: "/a"},
-		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a"},
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", NewSession: true},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b"},
 		restore.SetLayout{Window: "s1:1", Layout: "L"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("unexpected action failures: %v", failed)
+	}
+	want := [][]string{
+		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
+		{"split-window", "-t", "s1:1", "-c", "/b"},
+		{"select-layout", "-t", "s1:1", "L"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestApplyCreatesSessionAndFirstWindowInOneCall(t *testing.T) {
+	rt := &recordingTmux{}
+	startup := "nvim; exec /bin/zsh"
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: startup, NewSession: true},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-session", "-d", "-s", "s1", "-c", "/a"},
-		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a"},
-		{"split-window", "-t", "s1:1", "-c", "/b"},
-		{"select-layout", "-t", "s1:1", "L"},
+		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat, startup},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestApplyMovesFirstWindowToItsRecordedIndex(t *testing.T) {
+	rt := &recordingTmux{windowOut: "@7 1"}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 3, Name: "main", Cwd: "/a", NewSession: true},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
+		{"move-window", "-s", "@7", "-t", "s1:3"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Restoring a single window into a session that outlived it (the undo path)
+// plans a NewSession window even though the session is already there.
+func TestApplyFallsBackToNewWindowWhenSessionExists(t *testing.T) {
+	rt := &recordingTmux{newSessionErr: errors.New("tmux new-session: exit status 1 (stderr: duplicate session: s1)")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "main", Cwd: "/a", NewSession: true},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("unexpected action failures: %v", failed)
+	}
+	want := [][]string{
+		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
+		{"new-window", "-t", "s1:2", "-n", "main", "-c", "/a"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -47,7 +122,7 @@ func TestApplyAppendsStartupCommandWhenPresent(t *testing.T) {
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: startup},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: "htop"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
@@ -65,7 +140,7 @@ func TestApplyReenablesAutomaticRename(t *testing.T) {
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", AutomaticRename: true},
 		restore.CreateWindow{Session: "s1", Index: 2, Name: "named", Cwd: "/a"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
@@ -91,15 +166,19 @@ func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 		},
 	}
 	plan := []restore.Action{
-		restore.CreateSession{Name: "s1", Cwd: "/a"},
 		restore.CreateWindow{Session: "s1", Index: 1, Cwd: "/a"},
+		restore.SplitPane{Target: "s1:1", Cwd: "/b"},
 		restore.SetLayout{Window: "s1:1", Layout: "L"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
 		t.Fatalf("Apply should swallow per-action errors, got %v", err)
 	}
 	if calls != 3 {
 		t.Errorf("expected 3 attempted calls (best-effort), got %d", calls)
+	}
+	if len(failed) != 1 {
+		t.Errorf("expected 1 reported failure, got %d: %v", len(failed), failed)
 	}
 }
 
@@ -108,7 +187,7 @@ func TestApplySetOptionRunsSetWindowOption(t *testing.T) {
 	plan := []restore.Action{
 		restore.SetOption{Target: "s:1", Name: "@crew_color", Value: "colour141"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
@@ -124,7 +203,7 @@ func TestApplySetOptionPaneRunsSetOption(t *testing.T) {
 	plan := []restore.Action{
 		restore.SetOption{Target: "s:1", Pane: true, Name: "@crew_color", Value: "colour141"},
 	}
-	if err := restore.Apply(context.Background(), rt, plan); err != nil {
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
