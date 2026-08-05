@@ -71,7 +71,7 @@ func TestRestorableCloseReportsUnrecoverableHead(t *testing.T) {
 	// be stepped over — restoring @9 here would look like undo doing nothing.
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))
 	pane := insertEvent(ctx, t, db, 300, "pane-died", paneMan)
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	db := seedStore(ctx, t)
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -172,5 +172,135 @@ func TestMatchParentWindow(t *testing.T) {
 				t.Errorf("matchParentWindow = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// seedTwoSessionStore snapshots two sessions so closes in either can resolve:
+// mono (window @9) and lazytmux (window @20).
+func seedTwoSessionStore(ctx context.Context, t *testing.T) *store.Store {
+	t.Helper()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{
+		{Name: "mono", Windows: []snapshot.Window{{
+			Index: 4, Name: "win", Layout: "L", ID: "@9",
+			Panes: []snapshot.Pane{{Index: 1, Cwd: "/m", Command: "fish", ID: "%9"}},
+		}}},
+		{Name: "lazytmux", Windows: []snapshot.Window{{
+			Index: 2, Name: "docs", Layout: "L", ID: "@20",
+			Panes: []snapshot.Pane{{Index: 1, Cwd: "/l", Command: "fish", ID: "%20"}},
+		}}},
+	}}
+	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+	return db
+}
+
+// namedCloseManifest builds a window close that carries its own session name,
+// the way a post-change hook records it.
+func namedCloseManifest(t *testing.T, closedID, session string) string {
+	t.Helper()
+	return string(mustJSON(t, closeevent.CloseManifest{WindowID: closedID, SessionName: session}))
+}
+
+func TestRestorableClosePrefersTheCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	mine := insertEvent(ctx, t, db, 200, "window-unlinked", namedCloseManifest(t, "@9", "mono"))
+	// Newer, but it belongs to another session — pressing u in mono must not
+	// reach across and resurrect it.
+	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if !target.OK || target.Event.ID != mine {
+		t.Fatalf("popped event %d ok=%v, want mono's event %d", target.Event.ID, target.OK, mine)
+	}
+	if target.FromSession != "" {
+		t.Errorf("FromSession = %q, want empty — this was not a cross-session fallback", target.FromSession)
+	}
+}
+
+func TestRestorableCloseFallsBackAcrossSessions(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	other := insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if !target.OK || target.Event.ID != other {
+		t.Fatalf("popped event %d ok=%v, want the fallback event %d", target.Event.ID, target.OK, other)
+	}
+	if target.FromSession != "lazytmux" {
+		t.Errorf("FromSession = %q, want \"lazytmux\" so the message can name it", target.FromSession)
+	}
+}
+
+func TestRestorableCloseDiscardsOnlyThisSessionsDeadRows(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	mine := insertEvent(ctx, t, db, 200, "window-unlinked", namedCloseManifest(t, "@9", "mono"))
+	// Unrecoverable and in mono: discard it, since it can never come back.
+	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
+	// Unrecoverable but in lazytmux: leave it for a press over there, so that
+	// session still gets its own "never made it into a snapshot" message.
+	insertEvent(ctx, t, db, 500, "window-unlinked", namedCloseManifest(t, "@88", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != dead {
+		t.Fatalf("Discarded = %+v, want just mono's dead event %d", target.Discarded, dead)
+	}
+	if !target.OK || target.Event.ID != mine {
+		t.Errorf("popped event %d, want %d behind the discarded row", target.Event.ID, mine)
+	}
+}
+
+// Discarding this session's dead rows while another session still holds a
+// restorable close must promise a next press, not claim the history is
+// exhausted — the next press falls back and restores that close.
+func TestRestorableCloseReportsMoreWhenOnlyAFallbackSurvives(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
+	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != dead {
+		t.Fatalf("Discarded = %+v, want just %d", target.Discarded, dead)
+	}
+	if target.OK {
+		t.Error("OK = true, want false — nothing in mono is restorable")
+	}
+	if !target.MoreAvailable {
+		t.Error("MoreAvailable = false, want true — lazytmux's close survives for the next press")
+	}
+	if got := discardSummary(target.Discarded, target.MoreAvailable); !strings.Contains(got, "prefix+u again") {
+		t.Errorf("summary = %q, want a hint to press again", got)
+	}
+}
+
+func TestDiscardSummaryNamesTheFallbackSession(t *testing.T) {
+	if got := undoMessage("lazytmux"); !strings.Contains(got, "lazytmux") {
+		t.Errorf("message = %q, want it to name the source session", got)
+	}
+	if got := undoMessage(""); got != "" {
+		t.Errorf("message = %q, want empty for a same-session undo", got)
 	}
 }

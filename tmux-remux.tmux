@@ -146,8 +146,8 @@ wire_plugin() {
 
   # bind-key's arguments are NOT re-parsed by tmux (they arrive pre-split from
   # this shell invocation), so only the inner '...' quoting is needed here.
-  tmux bind-key u   run-shell "'${bin}' undo --pop"
-  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close"
+  tmux bind-key u   run-shell "'${bin}' undo --pop --session='#{session_name}'"
+  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close --session='#{session_name}'"
   tmux bind-key R   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=snapshot"
   tmux bind-key C-s run-shell "'${bin}' save --reason=keybinding"
 }
