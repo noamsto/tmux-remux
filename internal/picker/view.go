@@ -33,24 +33,33 @@ func (m PickerModel) View() tea.View {
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
-	list := renderList(m, listWidth, bodyHeight)
-
 	var content string
 	switch {
-	case m.width < 80:
-		content = lipgloss.JoinVertical(lipgloss.Left, list, footer)
-	case m.mode == ModeClose:
-		// Close mode: list + tree (showing the diff-derived sub-manifest of
+	case m.mode == ModeClose && m.closeTree != nil && m.width < 80:
+		content = lipgloss.JoinVertical(lipgloss.Left, renderCloseTree(m, m.width, bodyHeight), footer)
+	case m.mode == ModeClose && m.closeTree != nil:
+		// Close mode: tree + sub-tree (showing the diff-derived sub-manifest of
 		// what was lost). No scrollback preview — close events don't carry
 		// pane scrollback.
+		closes := renderCloseTree(m, listWidth, bodyHeight)
+		tree := renderTree(m, m.width-listWidth, bodyHeight)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, closes, tree)
+		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
+	case m.width < 80:
+		list := renderList(m, listWidth, bodyHeight)
+		content = lipgloss.JoinVertical(lipgloss.Left, list, footer)
+	case m.mode == ModeClose:
+		list := renderList(m, listWidth, bodyHeight)
 		tree := renderTree(m, m.width-listWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	case previewWidth == 0:
+		list := renderList(m, listWidth, bodyHeight)
 		tree := renderTree(m, treeWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	default:
+		list := renderList(m, listWidth, bodyHeight)
 		tree := renderTree(m, treeWidth, bodyHeight)
 		preview := m.renderPreview(previewWidth)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree, preview)
@@ -146,14 +155,7 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 func renderList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height).MaxHeight(height)
 	if len(m.events) == 0 {
-		msg := "No snapshots yet — run `tmux-remux save`."
-		if m.mode == ModeClose {
-			msg = "No close events yet."
-			if m.hiddenCount > 0 {
-				msg = fmt.Sprintf("No recoverable closes (%d hidden).", m.hiddenCount)
-			}
-		}
-		return frame.Render(rowDim.Render(msg))
+		return frame.Render(rowDim.Render("No snapshots yet — run `tmux-remux save`."))
 	}
 	// Inner content width excludes border + padding; rows and the footer must be
 	// truncated to it, since lipgloss .Width() wraps overflow onto extra physical
@@ -181,19 +183,7 @@ func renderList(m PickerModel, width, height int) string {
 	for i := start; i < end; i++ {
 		ev := m.events[i]
 		ts := time.UnixMilli(ev.Ts).Format("01-02 15:04")
-		var line string
-		if m.mode == ModeClose {
-			// Show the diff-derived label (e.g., "lazytmux/main 🧠 (1p)").
-			// Recoverable events always carry a label; the Kind fallback is a
-			// defensive guard for an unpopulated context.
-			label := m.closeContexts[ev.ID].Label
-			if label == "" {
-				label = ev.Kind
-			}
-			line = fmt.Sprintf("%s  %s", ts, label)
-		} else {
-			line = fmt.Sprintf("#%d %s %s", ev.ID, ts, shortReason(ev.Reason))
-		}
+		line := fmt.Sprintf("#%d %s %s", ev.ID, ts, shortReason(ev.Reason))
 		dim := m.dimOlderThan > 0 && now.Sub(time.UnixMilli(ev.Ts)) > m.dimOlderThan
 		style := rowDefault
 		switch {
@@ -219,6 +209,115 @@ func renderList(m PickerModel, width, height int) string {
 		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
 	}
 	return frame.Render(b.String())
+}
+
+// renderCloseTree renders the grouped close hierarchy into the list pane.
+// One physical row per visible node: every row is truncated to the frame's
+// inner width — guide prefix included — because a lipgloss frame wraps
+// overflow instead of clipping it, which would desync scrollWindow.
+func renderCloseTree(m PickerModel, width, height int) string {
+	frame := listFrame.Width(width).Height(height).MaxHeight(height)
+	vis := m.CloseVisible()
+	if len(vis) == 0 {
+		msg := "No close events yet."
+		if m.hiddenCount > 0 {
+			msg = fmt.Sprintf("No recoverable closes (%d hidden).", m.hiddenCount)
+		}
+		return frame.Render(rowDim.Render(msg))
+	}
+
+	innerWidth := width - listFrame.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	rows := height - 2
+	if rows < 1 {
+		rows = 1
+	}
+	showFooter := m.hiddenCount > 0 && rows > 1
+	nodeRows := rows
+	if showFooter {
+		nodeRows--
+	}
+	start, end := scrollWindow(m.cursor, len(vis), nodeRows)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		b.WriteString(closeRow(vis[i], innerWidth, i == m.cursor))
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+	if showFooter {
+		for pad := end - start; pad < nodeRows; pad++ {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
+	}
+	return frame.Render(b.String())
+}
+
+// closeRow renders one tree row: guide prefix, expand marker, label, and a
+// right-aligned timestamp for event rows. State markers ("· live" / "· gone")
+// mark headers that carry nothing to restore.
+func closeRow(n *CloseNode, innerWidth int, active bool) string {
+	left := closeGuidePrefix(n)
+	switch {
+	case len(n.Children) > 0 && n.Expanded:
+		left += "▾ "
+	case len(n.Children) > 0:
+		left += "▸ "
+	}
+	left += n.Label
+	if n.State != "" {
+		left += " · " + n.State
+	}
+
+	right := ""
+	if n.Ts != 0 {
+		right = time.UnixMilli(n.Ts).Format("15:04")
+	}
+	// Reserve the timestamp plus one separating space, then pad the gap.
+	budget := innerWidth
+	if right != "" {
+		budget -= len(right) + 1
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	left = ansi.Truncate(left, budget, "…")
+	line := left
+	if right != "" {
+		if gap := innerWidth - lipgloss.Width(left) - len(right); gap > 0 {
+			line += strings.Repeat(" ", gap)
+		} else {
+			line += " "
+		}
+		line += right
+	}
+	line = ansi.Truncate(line, innerWidth, "…")
+
+	if active {
+		// One flat style: lipgloss v2 strips ESC bytes from pre-styled input,
+		// so nesting a role color inside rowActive's background can collapse to
+		// invisible. Same reason appendNodeRows renders the active row plain.
+		return rowActive.Width(innerWidth).Render(line)
+	}
+	style := nodePane
+	switch n.Kind {
+	case GroupThis, GroupOther:
+		style = previewHeader
+	case CSession:
+		style = nodeSession
+	case CWindow:
+		style = nodeWindow
+	}
+	if n.EventID == 0 {
+		style = style.Faint(true).Italic(true)
+	}
+	return style.Width(innerWidth).Render(line)
 }
 
 // hiddenPhrase renders the pluralized "N unrecoverable close(s)" fragment.

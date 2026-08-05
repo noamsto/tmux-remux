@@ -2,6 +2,7 @@ package picker
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -226,4 +227,38 @@ func FlattenClose(root *CloseNode) []*CloseNode {
 		walk(g)
 	}
 	return out
+}
+
+// closeGuidePrefix returns the box-drawing prefix for n: one "│  " or "   "
+// per ancestor below the group level, then the node's own branch glyph.
+func closeGuidePrefix(n *CloseNode) string {
+	if n.Parent == nil || IsCloseGroup(n) {
+		return ""
+	}
+	var segs []string
+	for a := n.Parent; a != nil && !IsCloseGroup(a); a = a.Parent {
+		if hasLaterSibling(a) {
+			segs = append(segs, "│  ")
+		} else {
+			segs = append(segs, "   ")
+		}
+	}
+	slices.Reverse(segs)
+	branch := "└─ "
+	if hasLaterSibling(n) {
+		branch = "├─ "
+	}
+	out := branch
+	for i := len(segs) - 1; i >= 0; i-- {
+		out = segs[i] + out
+	}
+	return out
+}
+
+func hasLaterSibling(n *CloseNode) bool {
+	if n.Parent == nil {
+		return false
+	}
+	sibs := n.Parent.Children
+	return len(sibs) > 0 && sibs[len(sibs)-1] != n
 }
