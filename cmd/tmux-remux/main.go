@@ -356,7 +356,8 @@ func resolveEvent(ctx context.Context, db *store.Store, ev store.Event) (*closee
 func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.ClosedItem, prior snapshot.Manifest, opts restore.BuildOptions) ([]restore.Action, snapshot.Manifest) {
 	m := item.SubManifest(prior.Host, prior.SavedAt)
 	if item.Pane != nil {
-		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, windowLive(ctx, t, item.Window.ID), opts), m
+		target := parentWindowTarget(ctx, t, item.SessionName, *item.Window)
+		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, target, opts), m
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
 	// A single restored window goes back to the index it was closed at.
@@ -382,18 +383,44 @@ func eventByID(evs []store.Event, id int64) store.Event {
 	return store.Event{}
 }
 
-// windowLive reports whether a window with the given id is currently open.
-func windowLive(ctx context.Context, t *tmux.Client, windowID string) bool {
-	windows, err := t.ListWindows(ctx)
+// parentWindowTarget resolves the live tmux target of a lost pane's parent
+// window, or "" when no live window matches. Returns a window id, which is
+// unambiguous for split-window -t.
+func parentWindowTarget(ctx context.Context, t *tmux.Client, session string, win snapshot.Window) string {
+	live, err := t.ListWindows(ctx)
 	if err != nil {
-		return false
+		return ""
 	}
-	for _, w := range windows {
-		if w.ID == windowID {
-			return true
+	return matchParentWindow(live, session, win)
+}
+
+// matchParentWindow picks the live window that is `win`, trying id, then name
+// within the session, then index within the session. The id is only stable
+// within one server lifetime and a window that was itself restored carries a
+// fresh one, so an id miss must not be read as "the window is gone" — that
+// would recreate a window that is sitting right there. Name and index are
+// scoped to the session so a same-named window elsewhere can never match.
+func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Window) string {
+	if win.ID != "" {
+		for _, w := range live {
+			if w.ID == win.ID {
+				return w.ID
+			}
 		}
 	}
-	return false
+	if name := snapshot.StripFormat(win.Name); name != "" {
+		for _, w := range live {
+			if w.Session == session && snapshot.StripFormat(w.Name) == name {
+				return w.ID
+			}
+		}
+	}
+	for _, w := range live {
+		if w.Session == session && w.Index == win.Index {
+			return w.ID
+		}
+	}
+	return ""
 }
 
 // PickCmd opens an interactive picker over events.

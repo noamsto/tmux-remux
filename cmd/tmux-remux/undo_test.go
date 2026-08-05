@@ -11,6 +11,7 @@ import (
 	"github.com/noamsto/tmux-remux/internal/closeevent"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // seedStore returns an open store with a single snapshot capturing one window
@@ -140,5 +141,35 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	}
 	if len(target.Discarded) != 1 || target.Discarded[0].ID != unrecoverable {
 		t.Errorf("Discarded = %+v, want just event %d", target.Discarded, unrecoverable)
+	}
+}
+
+// A window that was itself restored carries a fresh @id, so matching only on
+// the snapshot's id would report "not live" and recreate the window a second
+// time. Name and index are the fallbacks.
+func TestMatchParentWindow(t *testing.T) {
+	live := []tmux.WindowRow{
+		{Session: "mono", Index: 1, Name: "shell", ID: "@1"},
+		{Session: "mono", Index: 7, Name: "docs", ID: "@42"},
+		{Session: "other", Index: 3, Name: "docs", ID: "@50"},
+	}
+	tests := []struct {
+		name    string
+		session string
+		win     snapshot.Window
+		want    string
+	}{
+		{"id match wins", "mono", snapshot.Window{ID: "@42", Name: "renamed", Index: 99}, "@42"},
+		{"stale id falls back to name in session", "mono", snapshot.Window{ID: "@9", Name: "docs", Index: 99}, "@42"},
+		{"name miss falls back to index in session", "mono", snapshot.Window{ID: "@9", Name: "gone", Index: 7}, "@42"},
+		{"never crosses sessions", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 3}, ""},
+		{"no match is not live", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 88}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchParentWindow(live, tc.session, tc.win); got != tc.want {
+				t.Errorf("matchParentWindow = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

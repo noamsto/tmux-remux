@@ -208,27 +208,20 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 	return plan, stats
 }
 
-// BuildPaneRestore plans the restore of a single lost pane. When its parent
-// window is still live (windowLive), it splits the pane back into that window
-// (targeted by window id) and re-applies the saved layout — best-effort, since
-// the layout only lines up when the window's pane count matches the snapshot.
-// When the window is gone, it recreates the whole window from the snapshot via
-// BuildPlan. session is the pane's session; win is the snapshot of its parent
-// window (including the lost pane).
-func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session string, windowLive bool, opts BuildOptions) []Action {
-	if !windowLive {
+// BuildPaneRestore plans the recovery of one lost pane. liveTarget is the tmux
+// target of its parent window as resolved by the caller, or "" when that window
+// is gone — in which case the window is rebuilt from the snapshot and brings
+// its panes with it.
+func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarget string, opts BuildOptions) []Action {
+	if liveTarget == "" {
 		plan, _ := BuildPlan(snapshot.Manifest{
 			V:        1,
 			Sessions: []snapshot.Session{{Name: session, Windows: []snapshot.Window{win}}},
 		}, filter.Filter{}, nil, opts)
 		return plan
 	}
-	target := win.ID
-	if target == "" {
-		target = fmt.Sprintf("%s:%d", session, win.Index)
-	}
 	return []Action{
-		SplitPane{Target: target, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
-		SetLayout{Window: target, Layout: win.Layout},
+		SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
+		SetLayout{Window: liveTarget, Layout: win.Layout},
 	}
 }
