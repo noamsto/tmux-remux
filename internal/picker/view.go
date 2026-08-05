@@ -252,14 +252,14 @@ func scrollWindow(cursor, total, rows int) (int, int) {
 
 func renderTree(m PickerModel, width, height int) string {
 	frame := treeFrame.Width(width).Height(height).MaxHeight(height)
-	if m.cursor < 0 || m.cursor >= len(m.events) {
+	id := m.CurrentEventID()
+	if id == 0 {
 		return frame.Render("")
 	}
-	ev := m.events[m.cursor]
-	if err, bad := m.manifestErrors[ev.ID]; bad {
+	if err, bad := m.manifestErrors[id]; bad {
 		return frame.Render(footerWarn.Render("(invalid manifest)") + "\n" + skipReason.Render(err.Error()))
 	}
-	tree := m.trees[ev.ID]
+	tree := m.trees[id]
 	if tree == nil {
 		return frame.Render(rowDim.Render("(loading...)"))
 	}
@@ -276,7 +276,7 @@ func renderTree(m PickerModel, width, height int) string {
 	}
 
 	var b strings.Builder
-	header := fmt.Sprintf("Contents (#%d)", ev.ID)
+	header := fmt.Sprintf("Contents (#%d)", id)
 	b.WriteString(ansi.Truncate(previewHeader.Render(header), innerWidth, "…"))
 	b.WriteString("\n")
 

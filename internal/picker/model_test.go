@@ -280,3 +280,79 @@ func TestModel_CloseModeAllHiddenEmptyState(t *testing.T) {
 		t.Errorf("expected all-hidden empty state, got:\n%s", out)
 	}
 }
+
+// closeTreeModel builds a close-mode model over two sessions: mono (this
+// session) with window 2 holding a dead pane, and lazytmux with its own close.
+func closeTreeModel() picker.PickerModel {
+	evs := []store.Event{
+		{ID: 1, Ts: 300, Kind: "window-unlinked"},
+		{ID: 2, Ts: 200, Kind: "pane-died"},
+		{ID: 3, Ts: 100, Kind: "window-unlinked"},
+	}
+	ctxs := map[int64]picker.CloseContext{
+		1: closeCtx("mono", 2, "main", "window", 1),
+		2: closeCtx("mono", 2, "main", "pane", 0),
+		3: closeCtx("lazytmux", 3, "docs", "window", 1),
+	}
+	m := picker.NewPickerModel(picker.ModeClose, evs, map[string]bool{"mono": true}, nil)
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true}))
+	m.Bootstrap()
+	return m
+}
+
+func TestCloseTreeCursorStartsOnNewestSelectableClose(t *testing.T) {
+	m := closeTreeModel()
+	if got := m.CurrentEventID(); got != 1 {
+		t.Errorf("CurrentEventID = %d, want 1 (this session's newest close)", got)
+	}
+}
+
+func TestCloseTreeDownSkipsGroupHeaders(t *testing.T) {
+	m := closeTreeModel()
+	// From the window close, Down must land on the nested pane, not on a header.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	got := next.(picker.PickerModel)
+	if id := got.CurrentEventID(); id != 2 {
+		t.Errorf("after Down, CurrentEventID = %d, want the nested pane event 2", id)
+	}
+}
+
+func TestCloseTreeEnterOnHeaderDoesNotSelect(t *testing.T) {
+	m := closeTreeModel()
+	// Collapse this-session so the cursor sits on the group header itself.
+	vis := m.CloseVisible()
+	if len(vis) == 0 || !picker.IsCloseGroup(vis[0]) {
+		t.Fatalf("expected a group header first, got %+v", vis)
+	}
+	m.SetCursor(0)
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := after.(picker.PickerModel)
+	if got.SelectedID() != 0 {
+		t.Errorf("SelectedID = %d, want 0 — a header carries nothing to restore", got.SelectedID())
+	}
+	if got.FooterNote() == "" {
+		t.Error("expected a footer note explaining the header is not restorable")
+	}
+}
+
+func TestCloseTreeRightExpandsCollapsedGroup(t *testing.T) {
+	m := closeTreeModel()
+	before := len(m.CloseVisible())
+	// The other-sessions group starts collapsed; step onto it and expand.
+	vis := m.CloseVisible()
+	idx := -1
+	for i, n := range vis {
+		if n.Kind == picker.GroupOther {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatal("expected an other-sessions group header")
+	}
+	m.SetCursor(idx)
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if got := len(after.(picker.PickerModel).CloseVisible()); got <= before {
+		t.Errorf("visible rows = %d, want more than %d after expanding", got, before)
+	}
+}
