@@ -132,13 +132,19 @@ wire_plugin() {
   # — and undo can't restore a pane no snapshot ever saw.
   tmux set-hook -g after-split-window "run-shell -b \"'${bin}' save --reason=hook:after-split-window\""
 
-  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session}\""
+  # --session-name gets the same '...' treatment as `bin` above: session
+  # names may contain spaces too, and would otherwise word-split below.
+  # --session needs it too: #{hook_session} expands to a $-prefixed id like
+  # $38, which an unquoted sh -c reads as the positional parameter $3
+  # followed by a literal 8 — collapsing distinct session ids onto shared
+  # mangled values and confusing the cascade-close dedup in closeevent.Capture.
+  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session='#{hook_session}' --session-name='#{hook_session_name}'\""
   # prefix+x kills the pane without its program exiting, so pane-exited never
   # fires. after-kill-pane is a command hook and carries no hook_pane — the id
   # is recovered by diffing the survivors against the last snapshot.
   tmux set-hook -g after-kill-pane "run-shell -b \"'${bin}' capture-event pane-died\""
-  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session=#{hook_session}\""
-  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session=#{hook_session}\""
+  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session='#{hook_session}' --session-name='#{hook_session_name}'\""
+  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session='#{hook_session}' --session-name='#{hook_session_name}'\""
 
   if [ "$auto_restore" = "on" ]; then
     tmux run-shell -b "'${bin}' restore --auto"
@@ -146,8 +152,8 @@ wire_plugin() {
 
   # bind-key's arguments are NOT re-parsed by tmux (they arrive pre-split from
   # this shell invocation), so only the inner '...' quoting is needed here.
-  tmux bind-key u   run-shell "'${bin}' undo --pop"
-  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close"
+  tmux bind-key u   run-shell "'${bin}' undo --pop --session='#{session_name}'"
+  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close --session='#{session_name}'"
   tmux bind-key R   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=snapshot"
   tmux bind-key C-s run-shell "'${bin}' save --reason=keybinding"
 }

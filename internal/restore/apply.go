@@ -24,22 +24,33 @@ type Runner interface {
 // command itself — see restore.BuildStartupCommand.
 func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 	var failed []error
+	// failedWindows holds the "<session>:<index>" target of every CreateWindow
+	// that failed. Apply is best-effort, so without this a later SplitPane or
+	// SetLayout aimed at the same index would still run and land on whatever
+	// unrelated live window happens to sit there.
+	failedWindows := map[string]bool{}
 	for _, a := range plan {
 		var args []string
+		var target string
 		switch v := a.(type) {
 		case CreateWindow:
+			target = fmt.Sprintf("%s:%d", v.Session, v.Index)
 			if err := createWindow(ctx, t, v); err != nil {
 				failed = append(failed, err)
+				failedWindows[target] = true
 			}
 			continue
 		case SplitPane:
+			target = v.Target
 			args = []string{"split-window", "-t", v.Target, "-c", v.Cwd}
 			if v.StartupCommand != "" {
 				args = append(args, v.StartupCommand)
 			}
 		case SetLayout:
+			target = v.Window
 			args = []string{"select-layout", "-t", v.Window, v.Layout}
 		case SetOption:
+			target = v.Target
 			cmd := "set-window-option"
 			flags := "-q"
 			if v.Pane {
@@ -52,6 +63,9 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 			// failure), so we abort rather than silently skip — callers
 			// are expected to handle all Action variants.
 			return failed, fmt.Errorf("unknown action: %T", a)
+		}
+		if failedWindows[target] {
+			continue
 		}
 		if _, err := t.Run(ctx, args); err != nil {
 			failed = append(failed, err)
@@ -86,15 +100,36 @@ func createWindow(ctx context.Context, t Runner, v CreateWindow) error {
 			return err
 		}
 	}
-	args := []string{"new-window", "-t", target, "-n", v.Name, "-c", v.Cwd}
-	if v.StartupCommand != "" {
-		args = append(args, v.StartupCommand)
+	newWindowArgs := func(insertBefore bool) []string {
+		a := []string{"new-window"}
+		if insertBefore {
+			a = append(a, "-b")
+		}
+		a = append(a, "-t", target, "-n", v.Name, "-c", v.Cwd)
+		if v.StartupCommand != "" {
+			a = append(a, v.StartupCommand)
+		}
+		return a
 	}
-	if _, err := t.Run(ctx, args); err != nil {
-		return err
+	if _, err := t.Run(ctx, newWindowArgs(v.InsertBefore)); err != nil {
+		// A tmux without new-window -b rejects the command line itself. Drop
+		// the flag and let tmux place the window, rather than losing it.
+		if !v.InsertBefore || !isUsageError(err) {
+			return err
+		}
+		if _, err := t.Run(ctx, newWindowArgs(false)); err != nil {
+			return err
+		}
 	}
 	reenableAutomaticRename(ctx, t, v.AutomaticRename, target)
 	return nil
+}
+
+// isUsageError reports whether err is tmux rejecting the command line — an
+// unknown flag — rather than refusing the operation. tmux answers a bad flag
+// with "usage:" and the command synopsis.
+func isUsageError(err error) bool {
+	return strings.Contains(err.Error(), "usage:")
 }
 
 // createdWindow is the window tmux reports back from new-session -P.

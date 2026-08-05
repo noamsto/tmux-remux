@@ -3,6 +3,7 @@ package restore_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -18,10 +19,17 @@ type recordingTmux struct {
 	// and the index tmux actually placed it at. Defaults to "@1 1".
 	windowOut     string
 	newSessionErr error
+	// failFlag makes Run return failErr for any call containing that argument,
+	// which is how the -b fallback path is exercised.
+	failFlag string
+	failErr  error
 }
 
 func (r *recordingTmux) Run(_ context.Context, args []string) (string, error) {
 	r.calls = append(r.calls, args)
+	if r.failFlag != "" && slices.Contains(args, r.failFlag) {
+		return "", r.failErr
+	}
 	if len(args) == 0 || args[0] != "new-session" {
 		return "", nil
 	}
@@ -220,4 +228,100 @@ type failingTmux struct {
 
 func (f failingTmux) Run(_ context.Context, args []string) (string, error) {
 	return f.runFn(args)
+}
+
+func TestApplyInsertsWindowAtOriginalIndex(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 3, Name: "docs", Cwd: "/a", InsertBefore: true},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestApplyOmitsInsertBeforeByDefault(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 3, Name: "docs", Cwd: "/a"},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Old tmux has no -b on new-window. A usage error must degrade to the plain
+// call rather than losing the window.
+func TestApplyRetriesWithoutInsertBeforeOnUsageError(t *testing.T) {
+	rt := &recordingTmux{failFlag: "-b", failErr: errors.New("usage: new-window [-adkP]")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 3, Name: "docs", Cwd: "/a", InsertBefore: true},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("unexpected action failures: %v", failed)
+	}
+	want := [][]string{
+		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// A real refusal (not a usage error) must surface, not silently retry.
+func TestApplyDoesNotRetryOnRealFailure(t *testing.T) {
+	rt := &recordingTmux{failFlag: "-b", failErr: errors.New("create window failed: index 3 in use")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 3, Name: "docs", Cwd: "/a", InsertBefore: true},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want exactly one action failure", failed)
+	}
+	if len(rt.calls) != 1 {
+		t.Errorf("made %d calls, want 1 (no retry)", len(rt.calls))
+	}
+}
+
+// When a CreateWindow's index collides with a live window (e.g. renumber-windows
+// moved a survivor into the vacated slot), the plan's own SplitPane/SetLayout
+// for that same index must not run — they would otherwise land on that
+// unrelated live window instead of the one that failed to get created.
+func TestApplySkipsActionsTargetingAFailedCreateWindow(t *testing.T) {
+	rt := &recordingTmux{failFlag: "new-window", failErr: errors.New("create window failed: index 1 in use")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "docs", Cwd: "/a"},
+		restore.SplitPane{Target: "s1:1", Cwd: "/b"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want exactly one action failure (the CreateWindow)", failed)
+	}
+	if len(rt.calls) != 1 {
+		t.Errorf("calls = %v, want only the failed new-window call", rt.calls)
+	}
 }

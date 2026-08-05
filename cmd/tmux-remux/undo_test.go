@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/restore"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
@@ -71,7 +73,7 @@ func TestRestorableCloseReportsUnrecoverableHead(t *testing.T) {
 	// be stepped over — restoring @9 here would look like undo doing nothing.
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))
 	pane := insertEvent(ctx, t, db, 300, "pane-died", paneMan)
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -127,51 +129,12 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	}
 }
 
-func TestReindexIntoLiveSessions(t *testing.T) {
-	// One window (mono:4) restored into a session that's still live with its
-	// index already taken: closing the window renumbered the rest, so 4 now
-	// holds a different window. Pinning 4 would fail new-window with "index in
-	// use"; reindex must move it to a free slot past the live max (5 -> 6).
-	m := snapshot.Manifest{Sessions: []snapshot.Session{{
-		Name:    "mono",
-		Windows: []snapshot.Window{{Index: 4, Name: "win"}},
-	}}}
-	live := []tmux.WindowRow{
-		{Session: "mono", Index: 1},
-		{Session: "mono", Index: 4},
-		{Session: "mono", Index: 5},
-		{Session: "other", Index: 4},
-	}
-	reindexIntoLiveSessions(&m, live)
-	if got := m.Sessions[0].Windows[0].Index; got != 6 {
-		t.Errorf("collided index = %d, want 6 (past the live max)", got)
-	}
-}
-
-func TestReindexLeavesFreeIndexAndDeadSessionAlone(t *testing.T) {
-	m := snapshot.Manifest{Sessions: []snapshot.Session{
-		// Live session, free index -> unchanged.
-		{Name: "mono", Windows: []snapshot.Window{{Index: 2}}},
-		// Session not currently live (whole-session restore) -> unchanged, it
-		// gets created fresh by CreateSession.
-		{Name: "gone", Windows: []snapshot.Window{{Index: 4}}},
-	}}
-	live := []tmux.WindowRow{{Session: "mono", Index: 1}}
-	reindexIntoLiveSessions(&m, live)
-	if got := m.Sessions[0].Windows[0].Index; got != 2 {
-		t.Errorf("free index = %d, want 2 (unchanged)", got)
-	}
-	if got := m.Sessions[1].Windows[0].Index; got != 4 {
-		t.Errorf("dead-session index = %d, want 4 (unchanged)", got)
-	}
-}
-
 func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db)
+	target, err := restorableClose(ctx, db, "")
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -181,4 +144,286 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	if len(target.Discarded) != 1 || target.Discarded[0].ID != unrecoverable {
 		t.Errorf("Discarded = %+v, want just event %d", target.Discarded, unrecoverable)
 	}
+}
+
+// A window that was itself restored carries a fresh @id, so matching only on
+// the snapshot's id would report "not live" and recreate the window a second
+// time. Name and index are the fallbacks.
+func TestMatchParentWindow(t *testing.T) {
+	live := []tmux.WindowRow{
+		{Session: "mono", Index: 1, Name: "shell", ID: "@1"},
+		{Session: "mono", Index: 7, Name: "docs", ID: "@42"},
+		{Session: "other", Index: 3, Name: "docs", ID: "@50"},
+	}
+	tests := []struct {
+		name    string
+		session string
+		win     snapshot.Window
+		want    string
+	}{
+		{"id match wins", "mono", snapshot.Window{ID: "@42", Name: "renamed", Index: 99}, "@42"},
+		{"stale id falls back to name in session", "mono", snapshot.Window{ID: "@9", Name: "docs", Index: 99}, "@42"},
+		{"empty id skips id lookup and falls back to name in session", "mono", snapshot.Window{ID: "", Name: "docs", Index: 99}, "@42"},
+		// A live window merely sharing the index must not match: renumbering can
+		// shift an unrelated survivor into the exact slot a closed window
+		// vacated, and matching on index alone would inject a restore into it.
+		{"index-only match is rejected, not live", "mono", snapshot.Window{ID: "@9", Name: "gone", Index: 7}, ""},
+		{"never crosses sessions", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 3}, ""},
+		{"no match is not live", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 88}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchParentWindow(live, tc.session, tc.win); got != tc.want {
+				t.Errorf("matchParentWindow = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// seedTwoSessionStore snapshots two sessions so closes in either can resolve:
+// mono (window @9) and lazytmux (window @20).
+func seedTwoSessionStore(ctx context.Context, t *testing.T) *store.Store {
+	t.Helper()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{
+		{Name: "mono", Windows: []snapshot.Window{{
+			Index: 4, Name: "win", Layout: "L", ID: "@9",
+			Panes: []snapshot.Pane{{Index: 1, Cwd: "/m", Command: "fish", ID: "%9"}},
+		}}},
+		{Name: "lazytmux", Windows: []snapshot.Window{{
+			Index: 2, Name: "docs", Layout: "L", ID: "@20",
+			Panes: []snapshot.Pane{{Index: 1, Cwd: "/l", Command: "fish", ID: "%20"}},
+		}}},
+	}}
+	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+	return db
+}
+
+// namedCloseManifest builds a window close that carries its own session name,
+// the way a post-change hook records it.
+func namedCloseManifest(t *testing.T, closedID, session string) string {
+	t.Helper()
+	return string(mustJSON(t, closeevent.CloseManifest{WindowID: closedID, SessionName: session}))
+}
+
+func TestRestorableClosePrefersTheCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	mine := insertEvent(ctx, t, db, 200, "window-unlinked", namedCloseManifest(t, "@9", "mono"))
+	// Newer, but it belongs to another session — pressing u in mono must not
+	// reach across and resurrect it.
+	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if !target.OK || target.Event.ID != mine {
+		t.Fatalf("popped event %d ok=%v, want mono's event %d", target.Event.ID, target.OK, mine)
+	}
+	if target.FromSession != "" {
+		t.Errorf("FromSession = %q, want empty — this was not a cross-session fallback", target.FromSession)
+	}
+}
+
+func TestRestorableCloseFallsBackAcrossSessions(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	other := insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if !target.OK || target.Event.ID != other {
+		t.Fatalf("popped event %d ok=%v, want the fallback event %d", target.Event.ID, target.OK, other)
+	}
+	if target.FromSession != "lazytmux" {
+		t.Errorf("FromSession = %q, want \"lazytmux\" so the message can name it", target.FromSession)
+	}
+}
+
+func TestRestorableCloseDiscardsOnlyThisSessionsDeadRows(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	mine := insertEvent(ctx, t, db, 200, "window-unlinked", namedCloseManifest(t, "@9", "mono"))
+	// Unrecoverable and in mono: discard it, since it can never come back.
+	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
+	// Unrecoverable but in lazytmux: leave it for a press over there, so that
+	// session still gets its own "never made it into a snapshot" message.
+	insertEvent(ctx, t, db, 500, "window-unlinked", namedCloseManifest(t, "@88", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != dead {
+		t.Fatalf("Discarded = %+v, want just mono's dead event %d", target.Discarded, dead)
+	}
+	if !target.OK || target.Event.ID != mine {
+		t.Errorf("popped event %d, want %d behind the discarded row", target.Event.ID, mine)
+	}
+}
+
+// Discarding this session's dead rows while another session still holds a
+// restorable close must promise a next press, not claim the history is
+// exhausted — the next press falls back and restores that close.
+func TestRestorableCloseReportsMoreWhenOnlyAFallbackSurvives(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
+	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != dead {
+		t.Fatalf("Discarded = %+v, want just %d", target.Discarded, dead)
+	}
+	if target.OK {
+		t.Error("OK = true, want false — nothing in mono is restorable")
+	}
+	if !target.MoreAvailable {
+		t.Error("MoreAvailable = false, want true — lazytmux's close survives for the next press")
+	}
+	if got := discardSummary(target.Discarded, target.MoreAvailable); !strings.Contains(got, "prefix+u again") {
+		t.Errorf("summary = %q, want a hint to press again", got)
+	}
+}
+
+func TestDiscardSummaryNamesTheFallbackSession(t *testing.T) {
+	if got := undoMessage("lazytmux"); !strings.Contains(got, "lazytmux") {
+		t.Errorf("message = %q, want it to name the source session", got)
+	}
+	if got := undoMessage(""); got != "" {
+		t.Errorf("message = %q, want empty for a same-session undo", got)
+	}
+}
+
+// countCreateWindows returns the CreateWindow actions in plan, in order.
+func countCreateWindows(plan []restore.Action) []restore.CreateWindow {
+	var out []restore.CreateWindow
+	for _, a := range plan {
+		if cw, ok := a.(restore.CreateWindow); ok {
+			out = append(out, cw)
+		}
+	}
+	return out
+}
+
+// TestBuildRestorePlan_WindowCloseInsertsAtItsIndex guards Finding 1's
+// inverted guard: a window close's sub-manifest holds exactly one window, so
+// it must reclaim the index it was closed at via new-window -b — otherwise
+// renumber-windows almost always leaves that index occupied and the plain
+// new-window fallback fails with "index in use".
+func TestBuildRestorePlan_WindowCloseInsertsAtItsIndex(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t)
+	ev := store.Event{Ts: 200, Kind: "window-unlinked", ManifestJSON: closeWindowManifest(t, "@9")}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable window close")
+	}
+
+	plan, _ := buildRestorePlan(ctx, nil, item, prior, restore.BuildOptions{})
+
+	creates := countCreateWindows(plan)
+	if len(creates) != 1 {
+		t.Fatalf("CreateWindow actions = %d, want exactly 1", len(creates))
+	}
+	if !creates[0].InsertBefore {
+		t.Error("InsertBefore = false, want true — a window undo must reclaim its old index")
+	}
+}
+
+// TestBuildRestorePlan_SessionCloseNeverInserts covers the other half of
+// Finding 1: restoring a whole session recreates several windows in one
+// plan, and new-window -b on any but the first would shift the indexes that
+// later actions in the same plan target.
+func TestBuildRestorePlan_SessionCloseNeverInserts(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+		Name: "mono",
+		Windows: []snapshot.Window{
+			{Index: 0, Name: "shell", Layout: "L", ID: "@1", Panes: []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "fish", ID: "%1"}}},
+			{Index: 1, Name: "logs", Layout: "L", ID: "@2", Panes: []snapshot.Pane{{Index: 1, Cwd: "/b", Command: "fish", ID: "%2"}}},
+		},
+	}}}
+	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+
+	ev := store.Event{Ts: 200, Kind: "session-closed", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{}))}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable session close")
+	}
+
+	plan, _ := buildRestorePlan(ctx, nil, item, prior, restore.BuildOptions{})
+
+	creates := countCreateWindows(plan)
+	if len(creates) != 2 {
+		t.Fatalf("CreateWindow actions = %d, want 2", len(creates))
+	}
+	for i, cw := range creates {
+		if cw.InsertBefore {
+			t.Errorf("creates[%d].InsertBefore = true, want false on every window of a session close", i)
+		}
+	}
+}
+
+// TestBuildRestorePlan_PaneCloseNeverCreatesAWindow covers the third case: a
+// lost pane whose parent window is still live splits back into it and must
+// never go through the window-recreating path.
+func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t)
+	ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable pane close")
+	}
+
+	// Fake tmux stands in for a live server so the parent window (mono:4, @9)
+	// resolves as live, driving buildRestorePlan down the split-back-in path
+	// rather than the window-recreating one that would emit a CreateWindow.
+	live := strings.Join([]string{"mono", "4", "win", "L", "@9", "0"}, tmux.FieldSep)
+	plan, _ := buildRestorePlan(ctx, tmux.NewClient(fakeTmuxEmitting(t, live)), item, prior, restore.BuildOptions{})
+
+	if creates := countCreateWindows(plan); len(creates) != 0 {
+		t.Fatalf("plan = %+v, want no CreateWindow — the parent window is live", plan)
+	}
+}
+
+// fakeTmuxEmitting writes a stand-in tmux that prints `out` verbatim, so
+// ListWindows can be driven without a real server.
+//
+// Two portability constraints shape it, both of which silently produce a
+// working-looking fake whose output is wrong: the nix build sandbox has no
+// /usr/bin/env, so that shebang cannot exec there, and \x escapes in printf are
+// not portable across shells, so the \x1f field separators may not survive. The
+// separator bytes therefore ride a quoted heredoc, already embedded by the
+// caller via tmux.FieldSep.
+func fakeTmuxEmitting(t *testing.T, out string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-tmux")
+	script := "#!/bin/sh\ncat <<'REMUX_ROWS'\n" + out + "\nREMUX_ROWS\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

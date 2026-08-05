@@ -31,6 +31,12 @@ type CreateWindow struct {
 	// session and this window in one new-session call, since tmux hands every
 	// new session a window that would otherwise squat on this one's index.
 	NewSession bool
+	// InsertBefore emits new-window -b, which places the window at Index
+	// exactly: tmux inserts and shifts the survivors up when Index is taken,
+	// and places it directly when Index is free. Set only for single-entity
+	// restores (undo, close picker) — inserting mid-plan would shift windows
+	// that later actions in the same plan target by index.
+	InsertBefore bool
 }
 
 func (CreateWindow) isAction() {}
@@ -202,27 +208,31 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 	return plan, stats
 }
 
-// BuildPaneRestore plans the restore of a single lost pane. When its parent
-// window is still live (windowLive), it splits the pane back into that window
-// (targeted by window id) and re-applies the saved layout — best-effort, since
-// the layout only lines up when the window's pane count matches the snapshot.
-// When the window is gone, it recreates the whole window from the snapshot via
-// BuildPlan. session is the pane's session; win is the snapshot of its parent
-// window (including the lost pane).
-func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session string, windowLive bool, opts BuildOptions) []Action {
-	if !windowLive {
+// BuildPaneRestore plans the recovery of one lost pane. liveTarget is the tmux
+// target of its parent window as resolved by the caller, or "" when that window
+// is gone — in which case the window is rebuilt from the snapshot and brings
+// its panes with it.
+func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarget string, opts BuildOptions) []Action {
+	if liveTarget == "" {
 		plan, _ := BuildPlan(snapshot.Manifest{
 			V:        1,
 			Sessions: []snapshot.Session{{Name: session, Windows: []snapshot.Window{win}}},
 		}, filter.Filter{}, nil, opts)
+		// This plan rebuilds exactly one window, so inserting it at its recorded
+		// index cannot shift anything else the plan targets. Without -b,
+		// new-window collides with whatever renumber-windows moved into the
+		// vacated index, and the SplitPane/SetLayout that follow land on that
+		// unrelated window instead.
+		for i, a := range plan {
+			if cw, ok := a.(CreateWindow); ok {
+				cw.InsertBefore = true
+				plan[i] = cw
+			}
+		}
 		return plan
 	}
-	target := win.ID
-	if target == "" {
-		target = fmt.Sprintf("%s:%d", session, win.Index)
-	}
 	return []Action{
-		SplitPane{Target: target, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
-		SetLayout{Window: target, Layout: win.Layout},
+		SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
+		SetLayout{Window: liveTarget, Layout: win.Layout},
 	}
 }

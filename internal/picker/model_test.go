@@ -228,15 +228,19 @@ func TestModel_ViewHighlightsTreeCursor(t *testing.T) {
 func closeModel(t *testing.T, hidden int) picker.PickerModel {
 	t.Helper()
 	events := []store.Event{{ID: 1, Ts: time.Now().UnixMilli(), Kind: "window-unlinked"}}
-	m := picker.NewPickerModel(picker.ModeClose, events, nil, nil)
-	m.SetCloseContexts(map[int64]picker.CloseContext{
+	ctxs := map[int64]picker.CloseContext{
 		1: {
-			Label: "mono/win (1p)",
+			Label:     "mono/win (1p)",
+			Placement: picker.ClosePlacement{Session: "mono", WindowIndex: 4, WindowName: "win", Scope: "pane"},
 			SubManifest: snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
 				Name: "mono", Windows: []snapshot.Window{{Index: 4, Name: "win"}},
 			}}},
 		},
-	})
+	}
+	running := map[string]bool{"mono": true}
+	m := picker.NewPickerModel(picker.ModeClose, events, running, nil)
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(picker.BuildCloseTree(events, ctxs, "mono", running))
 	m.SetHiddenCount(hidden)
 	m.Bootstrap()
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -272,6 +276,7 @@ func TestModel_CloseModeNoHiddenLineWhenZero(t *testing.T) {
 
 func TestModel_CloseModeAllHiddenEmptyState(t *testing.T) {
 	m := picker.NewPickerModel(picker.ModeClose, nil, nil, nil)
+	m.SetCloseTree(picker.BuildCloseTree(nil, nil, "", nil))
 	m.SetHiddenCount(5)
 	m.Bootstrap()
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -279,4 +284,100 @@ func TestModel_CloseModeAllHiddenEmptyState(t *testing.T) {
 	if !strings.Contains(out, "No recoverable closes (5 hidden)") {
 		t.Errorf("expected all-hidden empty state, got:\n%s", out)
 	}
+}
+
+// closeTreeModel builds a close-mode model over two sessions: mono (this
+// session) with window 2 holding a dead pane, and lazytmux with its own close.
+func closeTreeModel() picker.PickerModel {
+	evs := []store.Event{
+		{ID: 1, Ts: 300, Kind: "window-unlinked"},
+		{ID: 2, Ts: 200, Kind: "pane-died"},
+		{ID: 3, Ts: 100, Kind: "window-unlinked"},
+	}
+	ctxs := map[int64]picker.CloseContext{
+		1: closeCtx("mono", 2, "main", "window", 1),
+		2: closeCtx("mono", 2, "main", "pane", 0),
+		3: closeCtx("lazytmux", 3, "docs", "window", 1),
+	}
+	m := picker.NewPickerModel(picker.ModeClose, evs, map[string]bool{"mono": true}, nil)
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true}))
+	m.Bootstrap()
+	return m
+}
+
+func TestCloseTreeCursorStartsOnNewestSelectableClose(t *testing.T) {
+	m := closeTreeModel()
+	if got := m.CurrentEventID(); got != 1 {
+		t.Errorf("CurrentEventID = %d, want 1 (this session's newest close)", got)
+	}
+}
+
+func TestCloseTreeDownSkipsGroupHeaders(t *testing.T) {
+	m := closeTreeModel()
+	// From the window close, Down must land on the nested pane, not on a header.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	got := next.(picker.PickerModel)
+	if id := got.CurrentEventID(); id != 2 {
+		t.Errorf("after Down, CurrentEventID = %d, want the nested pane event 2", id)
+	}
+}
+
+func TestCloseTreeEnterOnHeaderDoesNotSelect(t *testing.T) {
+	m := closeTreeModel()
+	// Collapse this-session so the cursor sits on the group header itself.
+	vis := m.CloseVisible()
+	if len(vis) == 0 || !picker.IsCloseGroup(vis[0]) {
+		t.Fatalf("expected a group header first, got %+v", vis)
+	}
+	m.SetCursor(0)
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := after.(picker.PickerModel)
+	if got.SelectedID() != 0 {
+		t.Errorf("SelectedID = %d, want 0 — a header carries nothing to restore", got.SelectedID())
+	}
+	if got.FooterNote() == "" {
+		t.Error("expected a footer note explaining the header is not restorable")
+	}
+}
+
+func TestCloseTreeRightExpandsCollapsedGroup(t *testing.T) {
+	m := closeTreeModel()
+	// The other-sessions group starts collapsed; step onto it and expand.
+	vis := m.CloseVisible()
+	idx := -1
+	for i, n := range vis {
+		if n.Kind == picker.GroupOther {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatal("expected an other-sessions group header")
+	}
+	m.SetCursor(idx)
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	newVis := after.(picker.PickerModel).CloseVisible()
+
+	// The lazytmux fixture nests a session header over one window close, and
+	// both come back expanded by default, so both rows should surface at once
+	// right after the group header.
+	revealed := newVis[idx+1:]
+	wantLabels := []string{"lazytmux", "3: docs (1p)"}
+	if len(revealed) != len(wantLabels) {
+		t.Fatalf("revealed rows = %v, want %v", revealedLabels(revealed), wantLabels)
+	}
+	for i, want := range wantLabels {
+		if got := revealed[i].Label; got != want {
+			t.Errorf("revealed[%d] = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// revealedLabels renders a []*CloseNode's labels for a failure message.
+func revealedLabels(nodes []*picker.CloseNode) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Label
+	}
+	return out
 }

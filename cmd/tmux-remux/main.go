@@ -4,9 +4,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 
@@ -223,7 +225,8 @@ func (c RestoreCmd) Run() error {
 
 // UndoCmd restores the most recent close event.
 type UndoCmd struct {
-	Pop bool `help:"restore most recent close event and remove it from history"`
+	Pop     bool   `help:"restore most recent close event and remove it from history"`
+	Session string `help:"session to prefer (#{session_name}); falls back to the attached client's"`
 }
 
 func (c UndoCmd) Run() error {
@@ -231,7 +234,8 @@ func (c UndoCmd) Run() error {
 		return fmt.Errorf("only --pop is supported in v0.1.0")
 	}
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
-		target, err := restorableClose(ctx, db)
+		t := tmux.NewClient("tmux")
+		target, err := restorableClose(ctx, db, currentSession(ctx, t, c.Session))
 		if err != nil {
 			return err
 		}
@@ -239,19 +243,31 @@ func (c UndoCmd) Run() error {
 			if err := deleteEvents(ctx, db, target.Discarded); err != nil {
 				return err
 			}
-			return fmt.Errorf("%s", discardSummary(target.Discarded, target.OK))
+			return fmt.Errorf("%s", discardSummary(target.Discarded, target.MoreAvailable))
 		}
 		if !target.OK {
 			return fmt.Errorf("nothing to undo — no recoverable close event")
 		}
-		t := tmux.NewClient("tmux")
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 		plan, m := buildRestorePlan(ctx, t, target.Item, target.Prior, opts)
-		if _, err := restore.Apply(ctx, t, plan); err != nil {
+		failed, err := restore.Apply(ctx, t, plan)
+		if err != nil {
 			return err
 		}
+		if len(failed) > 0 {
+			// A partial or total restore failure must not delete the close
+			// event — erasing history for a restore that didn't happen would
+			// make the window unrecoverable even on a second undo.
+			return fmt.Errorf("restore failed, close event kept for retry: %w", errors.Join(failed...))
+		}
 		focusRestored(ctx, t, m)
-		return deleteEvents(ctx, db, []store.Event{target.Event})
+		if err := deleteEvents(ctx, db, []store.Event{target.Event}); err != nil {
+			return err
+		}
+		if note := undoMessage(target.FromSession); note != "" {
+			_, _ = t.Run(ctx, []string{"display-message", note})
+		}
+		return nil
 	})
 }
 
@@ -271,34 +287,98 @@ type undoTarget struct {
 	// Recoverability only decays (snapshots get pruned, never added behind a
 	// timestamp), so these can never become restorable and undo drops them.
 	Discarded []store.Event
+	// FromSession names the session an event was borrowed from when the current
+	// session had nothing restorable. Empty for a same-session undo.
+	FromSession string
+	// MoreAvailable reports whether anything restorable survives behind the
+	// discarded run — in this session or, via the cross-session fallback, in
+	// another. Distinct from OK, which covers only this session.
+	MoreAvailable bool
 }
 
-// restorableClose finds the most recent close event that can actually be
-// restored: its lost entity resolves against a pre-close snapshot AND yields a
-// non-empty restore manifest. Unrecoverable events in front of it (entities born
-// and gone within one snapshot gap) are reported in Discarded rather than
-// skipped over silently — resurrecting an hours-old close when the user asked to
-// undo the one they just made looks like undo doing nothing. OK is false when
-// nothing in the scan window is recoverable.
-func restorableClose(ctx context.Context, db *store.Store) (undoTarget, error) {
+// restorableClose finds the close event to undo. It prefers the newest
+// restorable close owned by `session`, falling back to the newest anywhere when
+// that session has none — reaching across is better than refusing to restore
+// something the user can see is gone, as long as the message says where it came
+// from. An empty `session` means no session context and scans server-wide.
+//
+// Unrecoverable events are discarded only when they belong to `session`.
+// Discarding is garbage collection — a close no snapshot captured can never
+// become restorable — but scoping it keeps the message honest: consuming another
+// session's dead rows here would rob that session of its own explanation.
+func restorableClose(ctx context.Context, db *store.Store, session string) (undoTarget, error) {
 	evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: undoScanLimit})
 	if err != nil {
 		return undoTarget{}, err
 	}
 	var t undoTarget
+	var fallback *undoTarget
 	for _, ev := range evs {
 		item, prior, ok := resolveEvent(ctx, db, ev)
+		owner := eventOwner(ev, item)
+		mine := session == "" || owner == session
 		// Defense-in-depth on the sub-manifest: every item FindClosed returns
 		// now yields a non-empty one, but guard against a future resolver that
 		// can't build a restore plan rather than popping an un-restorable head.
 		if !ok || len(item.SubManifest(prior.Host, prior.SavedAt).Sessions) == 0 {
-			t.Discarded = append(t.Discarded, ev)
+			if mine {
+				t.Discarded = append(t.Discarded, ev)
+			}
 			continue
 		}
-		t.Event, t.Item, t.Prior, t.OK = ev, item, prior, true
+		if mine {
+			t.Event, t.Item, t.Prior, t.OK, t.MoreAvailable = ev, item, prior, true, true
+			return t, nil
+		}
+		if fallback == nil {
+			fallback = &undoTarget{Event: ev, Item: item, Prior: prior, OK: true, FromSession: owner}
+		}
+	}
+	// Nothing restorable in this session. Discarded rows are reported first —
+	// this press explains them and the next one restores — so a pending fallback
+	// only sets MoreAvailable here rather than being returned.
+	if len(t.Discarded) > 0 {
+		t.MoreAvailable = fallback != nil
 		return t, nil
 	}
+	if fallback != nil {
+		return *fallback, nil
+	}
 	return t, nil
+}
+
+// eventOwner reports which session a close event belonged to.
+func eventOwner(ev store.Event, item *closeevent.ClosedItem) string {
+	closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
+	if err != nil {
+		return closeevent.UnknownSession
+	}
+	return closeevent.OwnerSession(closeMan, item)
+}
+
+// undoMessage returns the note to print after a cross-session undo, or "" when
+// the restore came from the session the user is in.
+func undoMessage(fromSession string) string {
+	if fromSession == "" {
+		return ""
+	}
+	return fmt.Sprintf("restored from session %s — nothing was closed in this one", fromSession)
+}
+
+// currentSession resolves the session the user is acting from: the flag when the
+// keybinding passed one, else the attached client's session. A config that wires
+// tmux-remux by hand rather than through tmux-remux.tmux passes no flag, so the
+// client lookup is what keeps those installs session-aware. Empty means no
+// context, which scans server-wide.
+func currentSession(ctx context.Context, t *tmux.Client, flag string) string {
+	if flag != "" {
+		return flag
+	}
+	out, err := t.Run(ctx, []string{"display-message", "-p", "#{client_session}"})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 func deleteEvents(ctx context.Context, db *store.Store, evs []store.Event) error {
@@ -356,53 +436,25 @@ func resolveEvent(ctx context.Context, db *store.Store, ev store.Event) (*closee
 func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.ClosedItem, prior snapshot.Manifest, opts restore.BuildOptions) ([]restore.Action, snapshot.Manifest) {
 	m := item.SubManifest(prior.Host, prior.SavedAt)
 	if item.Pane != nil {
-		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, windowLive(ctx, t, item.Window.ID), opts), m
-	}
-	if live, err := t.ListWindows(ctx); err == nil {
-		reindexIntoLiveSessions(&m, live)
+		target := parentWindowTarget(ctx, t, item.SessionName, *item.Window)
+		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, target, opts), m
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+	// A window close's sub-manifest holds exactly one window, so -b puts it back
+	// at the index it was closed at, shifting whatever renumbering moved into
+	// that slot. A whole-session close must not: inserting mid-plan shifts
+	// windows that later actions target by index. Discriminate on item.Session,
+	// NOT on CreateWindow.NewSession — BuildPlan sets that on every session's
+	// first window, so it is true for the single-window case too.
+	if item.Session == nil {
+		for i, a := range plan {
+			if cw, ok := a.(restore.CreateWindow); ok {
+				cw.InsertBefore = true
+				plan[i] = cw
+			}
+		}
+	}
 	return plan, m
-}
-
-// reindexIntoLiveSessions reassigns window indices in m that are already
-// occupied in the live server. Restoring a single window into a session that's
-// still alive (the common undo / close-pick case) otherwise pins the window's
-// stored index — almost always taken, since closing a window renumbers the
-// rest — and tmux fails new-window with "index in use", silently dropping the
-// restore. Colliding windows move to a free slot past the session's live max;
-// windows whose session isn't live are left alone, since Apply rebuilds those
-// sessions from scratch with their indices free.
-func reindexIntoLiveSessions(m *snapshot.Manifest, live []tmux.WindowRow) {
-	used := map[string]map[int]bool{}
-	for _, w := range live {
-		if used[w.Session] == nil {
-			used[w.Session] = map[int]bool{}
-		}
-		used[w.Session][w.Index] = true
-	}
-	for si := range m.Sessions {
-		occ := used[m.Sessions[si].Name]
-		if occ == nil {
-			continue
-		}
-		for wi := range m.Sessions[si].Windows {
-			idx := m.Sessions[si].Windows[wi].Index
-			if !occ[idx] {
-				occ[idx] = true
-				continue
-			}
-			next := 0
-			for k := range occ {
-				if k > next {
-					next = k
-				}
-			}
-			next++
-			m.Sessions[si].Windows[wi].Index = next
-			occ[next] = true
-		}
-	}
 }
 
 // eventByID returns the event with the given id from evs, or a zero Event
@@ -416,23 +468,49 @@ func eventByID(evs []store.Event, id int64) store.Event {
 	return store.Event{}
 }
 
-// windowLive reports whether a window with the given id is currently open.
-func windowLive(ctx context.Context, t *tmux.Client, windowID string) bool {
-	windows, err := t.ListWindows(ctx)
+// parentWindowTarget resolves the live tmux target of a lost pane's parent
+// window, or "" when no live window matches. Returns a window id, which is
+// unambiguous for split-window -t.
+func parentWindowTarget(ctx context.Context, t *tmux.Client, session string, win snapshot.Window) string {
+	live, err := t.ListWindows(ctx)
 	if err != nil {
-		return false
+		return ""
 	}
-	for _, w := range windows {
-		if w.ID == windowID {
-			return true
+	return matchParentWindow(live, session, win)
+}
+
+// matchParentWindow picks the live window that is `win`, trying id then name
+// within the session. A window id is stable only within one server lifetime and
+// a restored window carries a fresh one, so an id miss must not be read as "the
+// window is gone" — that would recreate a window sitting right there. Name is
+// scoped to the session so a same-named window elsewhere can never match.
+//
+// There is deliberately no index fallback: renumber-windows shifts a survivor
+// into the exact index a closed window vacated, so an index match can resolve to
+// a live window that merely landed there, splitting the lost pane into it and
+// overwriting its layout.
+func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Window) string {
+	if win.ID != "" {
+		for _, w := range live {
+			if w.ID == win.ID {
+				return w.ID
+			}
 		}
 	}
-	return false
+	if name := snapshot.StripFormat(win.Name); name != "" {
+		for _, w := range live {
+			if w.Session == session && snapshot.StripFormat(w.Name) == name {
+				return w.ID
+			}
+		}
+	}
+	return ""
 }
 
 // PickCmd opens an interactive picker over events.
 type PickCmd struct {
-	Kind string `default:"snapshot" enum:"snapshot,close" help:"snapshot|close"`
+	Kind    string `default:"snapshot" enum:"snapshot,close" help:"snapshot|close"`
+	Session string `help:"session to group by (#{session_name}); falls back to the attached client's"`
 }
 
 func (c PickCmd) Run() error {
@@ -475,6 +553,7 @@ func (c PickCmd) Run() error {
 		if mode == picker.ModeClose {
 			m.SetCloseContexts(ctxs)
 			m.SetHiddenCount(hidden)
+			m.SetCloseTree(picker.BuildCloseTree(evs, ctxs, currentSession(ctx, t, c.Session), runningSet))
 		}
 		m.Bootstrap()
 
@@ -498,8 +577,12 @@ func (c PickCmd) Run() error {
 				return nil
 			}
 			plan, m := buildRestorePlan(ctx, t, item, prior, buildOpts)
-			if _, err := restore.Apply(ctx, t, plan); err != nil {
+			failed, err := restore.Apply(ctx, t, plan)
+			if err != nil {
 				return err
+			}
+			if len(failed) > 0 {
+				return fmt.Errorf("restore failed: %w", errors.Join(failed...))
 			}
 			focusRestored(ctx, t, m)
 			return nil
@@ -560,10 +643,33 @@ func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event)
 		}
 		out[ev.ID] = picker.CloseContext{
 			Label:       item.Describe(),
+			Placement:   placementFor(closeMan, item),
 			SubManifest: item.SubManifest(prior.Host, prior.SavedAt),
 		}
 	}
 	return out
+}
+
+// placementFor locates a resolved close in the tmux hierarchy for the picker's
+// tree. Scope is read off which field of the item is set — Pane before Window,
+// since a pane-died carries both.
+func placementFor(closeMan closeevent.CloseManifest, item *closeevent.ClosedItem) picker.ClosePlacement {
+	p := picker.ClosePlacement{Session: closeevent.OwnerSession(closeMan, item)}
+	if p.Session == closeevent.UnknownSession {
+		p.Session = ""
+	}
+	switch {
+	case item.Session != nil:
+		p.Scope = "session"
+	case item.Pane != nil:
+		p.Scope = "pane"
+		p.WindowIndex, p.WindowName = item.WindowIndex, item.Window.Name
+	case item.Window != nil:
+		p.Scope = "window"
+		p.WindowIndex, p.WindowName = item.WindowIndex, item.Window.Name
+		p.PaneCount = len(item.Window.Panes)
+	}
+	return p
 }
 
 // focusRestored selects the first restored session/window so the user
@@ -585,10 +691,11 @@ func focusRestored(ctx context.Context, t *tmux.Client, m snapshot.Manifest) {
 
 // CaptureEventCmd records a close event (called from tmux hooks).
 type CaptureEventCmd struct {
-	Kind    string `arg:"" help:"event kind"`
-	Session string `help:"tmux session id ($N)"`
-	Window  string `help:"tmux window id (@N)"`
-	Pane    string `help:"tmux pane id (%N)"`
+	Kind        string `arg:"" help:"event kind"`
+	Session     string `help:"tmux session id ($N)"`
+	SessionName string `name:"session-name" help:"tmux session name (#{hook_session_name})"`
+	Window      string `help:"tmux window id (@N)"`
+	Pane        string `help:"tmux pane id (%N)"`
 }
 
 func (c CaptureEventCmd) Run() error {
@@ -602,12 +709,13 @@ func (c CaptureEventCmd) Run() error {
 		post.Windows, _ = t.ListWindows(ctx)
 		post.Panes, _ = t.ListPanes(ctx)
 		_, err := closeevent.Capture(ctx, db, closeevent.Args{
-			Kind:      c.Kind,
-			SessionID: c.Session,
-			WindowID:  c.Window,
-			PaneID:    c.Pane,
-			Host:      hostname(),
-			Index:     post,
+			Kind:        c.Kind,
+			SessionID:   c.Session,
+			SessionName: c.SessionName,
+			WindowID:    c.Window,
+			PaneID:      c.Pane,
+			Host:        hostname(),
+			Index:       post,
 		})
 		return err
 	})

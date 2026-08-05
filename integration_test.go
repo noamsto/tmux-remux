@@ -166,7 +166,7 @@ func TestPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
 		t.Fatalf("after kill: %d panes, want 1", n)
 	}
 
-	plan := restore.BuildPaneRestore(lost, win, "init", true, restore.BuildOptions{DefaultShell: "/bin/sh"})
+	plan := restore.BuildPaneRestore(lost, win, "init", win.ID, restore.BuildOptions{DefaultShell: "/bin/sh"})
 	if _, err := restore.Apply(ctx, st, plan); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

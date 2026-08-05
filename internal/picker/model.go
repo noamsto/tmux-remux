@@ -71,6 +71,9 @@ type PickerModel struct {
 	// and the sub-manifest of what was lost. Populated by SetCloseContexts
 	// before Bootstrap. Keys are store.Event IDs. Empty in snapshot mode.
 	closeContexts map[int64]CloseContext
+	// closeTree is the grouped close hierarchy rendered in close mode. When
+	// set, m.cursor indexes FlattenClose(closeTree) rather than m.events.
+	closeTree *CloseNode
 	// hiddenCount is the number of unrecoverable close events the caller
 	// filtered out before constructing the model. Rendered as a footer line so
 	// the user knows the list is pruned. Close mode only.
@@ -83,6 +86,7 @@ type PickerModel struct {
 // is also what restore.BuildPlan operates on when Enter is pressed.
 type CloseContext struct {
 	Label       string
+	Placement   ClosePlacement
 	SubManifest snapshot.Manifest
 }
 
@@ -279,6 +283,58 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// recoverable row. Handlers that want to surface a fresh note set it
 	// after this clear.
 	m.footerNote = ""
+	// Close mode with a grouped tree: the cursor walks tree rows, so Up/Down
+	// skip headers and Left/Right collapse and expand them.
+	if m.mode == ModeClose && m.closeTree != nil {
+		vis := m.CloseVisible()
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if idx := m.nextCloseIdx(m.cursor, -1); idx >= 0 {
+				m.cursor = idx
+				(&m).ensureManifest()
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Down):
+			if idx := m.nextCloseIdx(m.cursor, +1); idx >= 0 {
+				m.cursor = idx
+				(&m).ensureManifest()
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Right):
+			if m.cursor >= 0 && m.cursor < len(vis) {
+				if n := vis[m.cursor]; len(n.Children) > 0 {
+					n.Expanded = true
+				}
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Left):
+			if m.cursor >= 0 && m.cursor < len(vis) {
+				// Collapse the row itself when it is an open parent, otherwise
+				// collapse its parent and step onto it.
+				n := vis[m.cursor]
+				if n.Expanded && len(n.Children) > 0 {
+					n.Expanded = false
+					return m, nil
+				}
+				if p := n.Parent; p != nil && p.Parent != nil {
+					p.Expanded = false
+					m.cursor = closeIndexOf(m.CloseVisible(), p)
+					(&m).ensureManifest()
+				}
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			if m.cursor < 0 || m.cursor >= len(vis) {
+				return m, nil
+			}
+			if id := vis[m.cursor].EventID; id != 0 {
+				m.selectedID = id
+				return m, tea.Quit
+			}
+			m.footerNote = "(group — nothing to restore here)"
+			return m, nil
+		}
+	}
 	// Preview scroll: Alt+J/K / PgUp/PgDn. Available whenever the picker is in
 	// snapshot mode — scroll up to read past output without leaving the cursor
 	// pane.
@@ -447,16 +503,20 @@ func (m *PickerModel) redecorate() {
 // after construction; the cobra wiring does this so View has data on first
 // render. Idempotent.
 func (m *PickerModel) Bootstrap() {
+	if m.mode == ModeClose && m.closeTree != nil {
+		m.cursor = m.firstCloseTarget()
+	}
 	m.ensureManifest()
 }
 
 // CurrentCounts returns FilterDecorate's most recent output for the cursor's
 // event. Used by the footer and by tests.
 func (m PickerModel) CurrentCounts() Counts {
-	if m.cursor < 0 || m.cursor >= len(m.events) {
+	id := m.CurrentEventID()
+	if id == 0 {
 		return Counts{}
 	}
-	tree := m.trees[m.events[m.cursor].ID]
+	tree := m.trees[id]
 	if tree == nil {
 		return Counts{}
 	}
@@ -508,6 +568,82 @@ func (m *PickerModel) SetCloseContexts(ctx map[int64]CloseContext) {
 // filtered out. Rendered as a footer line in the list pane. Close mode only.
 func (m *PickerModel) SetHiddenCount(n int) {
 	m.hiddenCount = n
+}
+
+// SetCloseTree attaches the grouped close hierarchy. Call between
+// NewPickerModel and Bootstrap. Close mode only.
+//
+// Expansion state is entirely BuildCloseTree's decision — including the
+// default for everything nested below the two group headers — so this just
+// stores the result.
+func (m *PickerModel) SetCloseTree(root *CloseNode) {
+	m.closeTree = root
+}
+
+// SetCursor moves the cursor. Exported for tests; production code moves the
+// cursor through key handling.
+func (m *PickerModel) SetCursor(i int) { m.cursor = i }
+
+// CloseVisible returns the currently visible close-tree rows.
+func (m PickerModel) CloseVisible() []*CloseNode { return FlattenClose(m.closeTree) }
+
+// CurrentEventID returns the event id under the cursor, or 0 when the cursor is
+// on a grouping header or there is nothing to point at.
+func (m PickerModel) CurrentEventID() int64 {
+	if m.closeTree == nil {
+		if m.cursor < 0 || m.cursor >= len(m.events) {
+			return 0
+		}
+		return m.events[m.cursor].ID
+	}
+	vis := m.CloseVisible()
+	if m.cursor < 0 || m.cursor >= len(vis) {
+		return 0
+	}
+	return vis[m.cursor].EventID
+}
+
+// isCloseNavTarget reports whether the cursor may land on n: an event row
+// (restorable) or a collapsible header (so it can be opened).
+func isCloseNavTarget(n *CloseNode) bool {
+	return n.EventID != 0 || len(n.Children) > 0
+}
+
+// nextCloseIdx walks from start in dir (+1/-1) to the next navigable row, or
+// -1 when there is none that way.
+func (m PickerModel) nextCloseIdx(start, dir int) int {
+	vis := m.CloseVisible()
+	for i := start + dir; i >= 0 && i < len(vis); i += dir {
+		if isCloseNavTarget(vis[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+// firstCloseTarget returns the first selectable event row — the newest close,
+// since the tree sorts newest-first — skipping the leading group header. This
+// deliberately differs from isCloseNavTarget: Up/Down may stop on a header to
+// collapse or expand it, but the initial cursor should land on something
+// restorable, not on the header that always occupies row 0. Falls back to 0
+// when the tree has no selectable row at all.
+func (m PickerModel) firstCloseTarget() int {
+	for i, n := range m.CloseVisible() {
+		if n.EventID != 0 {
+			return i
+		}
+	}
+	return 0
+}
+
+// closeIndexOf returns the position of target in vis, or 0 when absent.
+func closeIndexOf(vis []*CloseNode, target *CloseNode) int {
+	for i, n := range vis {
+		if n == target {
+			return i
+		}
+	}
+	return 0
 }
 
 // CloseContextFor returns the cached close context for the given event ID,
@@ -572,14 +708,14 @@ func (m PickerModel) focusedPaneSHA() string {
 // caching the result. No-op on cache hit. Records parse errors in
 // m.manifestErrors so View can render "(invalid manifest)".
 func (m *PickerModel) ensureManifest() {
-	if m.cursor < 0 || m.cursor >= len(m.events) {
+	id := m.CurrentEventID()
+	if id == 0 {
 		return
 	}
-	ev := m.events[m.cursor]
-	if _, ok := m.manifests[ev.ID]; ok {
+	if _, ok := m.manifests[id]; ok {
 		return
 	}
-	if _, bad := m.manifestErrors[ev.ID]; bad {
+	if _, bad := m.manifestErrors[id]; bad {
 		return
 	}
 	var man snapshot.Manifest
@@ -587,23 +723,24 @@ func (m *PickerModel) ensureManifest() {
 		// Close events store their post-close index, not a snapshot manifest.
 		// Use the diff-derived sub-manifest (set via SetCloseContexts) so the
 		// tree pane shows what was lost rather than an empty event.
-		man = m.closeContexts[ev.ID].SubManifest
+		man = m.closeContexts[id].SubManifest
 		if len(man.Sessions) == 0 {
-			m.manifestErrors[ev.ID] = fmt.Errorf("close event has no recoverable entity")
+			m.manifestErrors[id] = fmt.Errorf("close event has no recoverable entity")
 			return
 		}
 	} else {
+		ev := m.events[m.cursor]
 		var err error
 		man, err = parseEventManifest(ev)
 		if err != nil {
-			m.manifestErrors[ev.ID] = err
+			m.manifestErrors[id] = err
 			return
 		}
 	}
-	m.manifests[ev.ID] = man
+	m.manifests[id] = man
 	tree := BuildTree(man)
 	FilterDecorate(tree, m.filter, m.runningSet)
-	m.trees[ev.ID] = tree
+	m.trees[id] = tree
 }
 
 func parseEventManifest(ev store.Event) (snapshot.Manifest, error) {
