@@ -573,31 +573,11 @@ func (m *PickerModel) SetHiddenCount(n int) {
 // SetCloseTree attaches the grouped close hierarchy. Call between
 // NewPickerModel and Bootstrap. Close mode only.
 //
-// BuildCloseTree only decides the two top-level groups' own expanded state
-// (this-session open, other-sessions closed); everything it nests below them
-// — window and session headers, and the panes closed inside them — comes back
-// collapsed by zero value. A close event and the detail nested under it (say,
-// the pane that died inside a window that later got closed) are meant to be
-// visible together from the start, so expand everything below the groups
-// here. The groups themselves keep BuildCloseTree's choice.
+// Expansion state is entirely BuildCloseTree's decision — including the
+// default for everything nested below the two group headers — so this just
+// stores the result.
 func (m *PickerModel) SetCloseTree(root *CloseNode) {
 	m.closeTree = root
-	if root == nil {
-		return
-	}
-	for _, group := range root.Children {
-		for _, child := range group.Children {
-			expandCloseSubtree(child)
-		}
-	}
-}
-
-// expandCloseSubtree opens n and everything beneath it.
-func expandCloseSubtree(n *CloseNode) {
-	n.Expanded = true
-	for _, c := range n.Children {
-		expandCloseSubtree(c)
-	}
 }
 
 // SetCursor moves the cursor. Exported for tests; production code moves the

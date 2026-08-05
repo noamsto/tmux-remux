@@ -205,6 +205,32 @@ func TestBuildCloseTree_NoSessionContextPutsEverythingInOther(t *testing.T) {
 	}
 }
 
+func TestBuildCloseTree_NodesBelowGroupsStartExpanded(t *testing.T) {
+	evs := []store.Event{
+		{ID: 1, Ts: 300, Kind: "window-unlinked"},
+		{ID: 2, Ts: 200, Kind: "pane-died"},
+	}
+	ctxs := map[int64]picker.CloseContext{
+		1: closeCtx("lazytmux", 2, "main", "window", 1),
+		2: closeCtx("lazytmux", 2, "main", "pane", 0),
+	}
+
+	root := picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true, "lazytmux": true})
+
+	group := root.Children[0]
+	if group.Kind != picker.GroupOther || group.Expanded {
+		t.Fatalf("other-sessions group = %+v, want it present and collapsed", group)
+	}
+	sess := group.Children[0]
+	if !sess.Expanded {
+		t.Error("session node below the group must start expanded")
+	}
+	win := sess.Children[0]
+	if !win.Expanded {
+		t.Error("window node below the session must start expanded")
+	}
+}
+
 func TestBuildCloseTree_SkipsUnrecoverableEvents(t *testing.T) {
 	evs := []store.Event{{ID: 1, Ts: 100, Kind: "window-unlinked"}}
 	// No entry in ctxs at all: the event never resolved to an entity.

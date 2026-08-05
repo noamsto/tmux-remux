@@ -136,9 +136,24 @@ func BuildCloseTree(evs []store.Event, ctxs map[int64]CloseContext, current stri
 			continue
 		}
 		sortCloseTree(g)
+		// A close event and the detail nested under it (say, the pane that died
+		// inside a window that later got closed) are meant to be visible together
+		// from the start, so everything below the group header starts expanded.
+		// The group header itself keeps the expansion state set above.
+		for _, child := range g.Children {
+			expandCloseSubtree(child)
+		}
 		root.Children = append(root.Children, g)
 	}
 	return root
+}
+
+// expandCloseSubtree opens n and everything beneath it.
+func expandCloseSubtree(n *CloseNode) {
+	n.Expanded = true
+	for _, c := range n.Children {
+		expandCloseSubtree(c)
+	}
 }
 
 // sessionNode returns the cached session node for name, creating it under

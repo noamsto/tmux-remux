@@ -338,7 +338,6 @@ func TestCloseTreeEnterOnHeaderDoesNotSelect(t *testing.T) {
 
 func TestCloseTreeRightExpandsCollapsedGroup(t *testing.T) {
 	m := closeTreeModel()
-	before := len(m.CloseVisible())
 	// The other-sessions group starts collapsed; step onto it and expand.
 	vis := m.CloseVisible()
 	idx := -1
@@ -352,7 +351,28 @@ func TestCloseTreeRightExpandsCollapsedGroup(t *testing.T) {
 	}
 	m.SetCursor(idx)
 	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	if got := len(after.(picker.PickerModel).CloseVisible()); got <= before {
-		t.Errorf("visible rows = %d, want more than %d after expanding", got, before)
+	newVis := after.(picker.PickerModel).CloseVisible()
+
+	// The lazytmux fixture nests a session header over one window close, and
+	// both come back expanded by default, so both rows should surface at once
+	// right after the group header.
+	revealed := newVis[idx+1:]
+	wantLabels := []string{"lazytmux", "3: docs (1p)"}
+	if len(revealed) != len(wantLabels) {
+		t.Fatalf("revealed rows = %v, want %v", revealedLabels(revealed), wantLabels)
 	}
+	for i, want := range wantLabels {
+		if got := revealed[i].Label; got != want {
+			t.Errorf("revealed[%d] = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// revealedLabels renders a []*CloseNode's labels for a failure message.
+func revealedLabels(nodes []*picker.CloseNode) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Label
+	}
+	return out
 }
