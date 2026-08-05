@@ -358,51 +358,17 @@ func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.Clos
 	if item.Pane != nil {
 		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, windowLive(ctx, t, item.Window.ID), opts), m
 	}
-	if live, err := t.ListWindows(ctx); err == nil {
-		reindexIntoLiveSessions(&m, live)
-	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
+	// A single restored window goes back to the index it was closed at.
+	// new-window -b shifts whatever renumbering moved into that slot, so the
+	// window lands where the user remembers it rather than past the live max.
+	for i, a := range plan {
+		if cw, ok := a.(restore.CreateWindow); ok && !cw.NewSession {
+			cw.InsertBefore = true
+			plan[i] = cw
+		}
+	}
 	return plan, m
-}
-
-// reindexIntoLiveSessions reassigns window indices in m that are already
-// occupied in the live server. Restoring a single window into a session that's
-// still alive (the common undo / close-pick case) otherwise pins the window's
-// stored index — almost always taken, since closing a window renumbers the
-// rest — and tmux fails new-window with "index in use", silently dropping the
-// restore. Colliding windows move to a free slot past the session's live max;
-// windows whose session isn't live are left alone, since Apply rebuilds those
-// sessions from scratch with their indices free.
-func reindexIntoLiveSessions(m *snapshot.Manifest, live []tmux.WindowRow) {
-	used := map[string]map[int]bool{}
-	for _, w := range live {
-		if used[w.Session] == nil {
-			used[w.Session] = map[int]bool{}
-		}
-		used[w.Session][w.Index] = true
-	}
-	for si := range m.Sessions {
-		occ := used[m.Sessions[si].Name]
-		if occ == nil {
-			continue
-		}
-		for wi := range m.Sessions[si].Windows {
-			idx := m.Sessions[si].Windows[wi].Index
-			if !occ[idx] {
-				occ[idx] = true
-				continue
-			}
-			next := 0
-			for k := range occ {
-				if k > next {
-					next = k
-				}
-			}
-			next++
-			m.Sessions[si].Windows[wi].Index = next
-			occ[next] = true
-		}
-	}
 }
 
 // eventByID returns the event with the given id from evs, or a zero Event

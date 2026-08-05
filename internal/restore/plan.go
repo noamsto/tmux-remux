@@ -31,6 +31,12 @@ type CreateWindow struct {
 	// session and this window in one new-session call, since tmux hands every
 	// new session a window that would otherwise squat on this one's index.
 	NewSession bool
+	// InsertBefore emits new-window -b, which places the window at Index
+	// exactly: tmux inserts and shifts the survivors up when Index is taken,
+	// and places it directly when Index is free. Set only for single-entity
+	// restores (undo, close picker) — inserting mid-plan would shift windows
+	// that later actions in the same plan target by index.
+	InsertBefore bool
 }
 
 func (CreateWindow) isAction() {}

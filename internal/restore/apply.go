@@ -86,15 +86,36 @@ func createWindow(ctx context.Context, t Runner, v CreateWindow) error {
 			return err
 		}
 	}
-	args := []string{"new-window", "-t", target, "-n", v.Name, "-c", v.Cwd}
-	if v.StartupCommand != "" {
-		args = append(args, v.StartupCommand)
+	newWindowArgs := func(insertBefore bool) []string {
+		a := []string{"new-window"}
+		if insertBefore {
+			a = append(a, "-b")
+		}
+		a = append(a, "-t", target, "-n", v.Name, "-c", v.Cwd)
+		if v.StartupCommand != "" {
+			a = append(a, v.StartupCommand)
+		}
+		return a
 	}
-	if _, err := t.Run(ctx, args); err != nil {
-		return err
+	if _, err := t.Run(ctx, newWindowArgs(v.InsertBefore)); err != nil {
+		// A tmux without new-window -b rejects the command line itself. Drop
+		// the flag and let tmux place the window, rather than losing it.
+		if !v.InsertBefore || !isUsageError(err) {
+			return err
+		}
+		if _, err := t.Run(ctx, newWindowArgs(false)); err != nil {
+			return err
+		}
 	}
 	reenableAutomaticRename(ctx, t, v.AutomaticRename, target)
 	return nil
+}
+
+// isUsageError reports whether err is tmux rejecting the command line — an
+// unknown flag — rather than refusing the operation. tmux answers a bad flag
+// with "usage:" and the command synopsis.
+func isUsageError(err error) bool {
+	return strings.Contains(err.Error(), "usage:")
 }
 
 // createdWindow is the window tmux reports back from new-session -P.
