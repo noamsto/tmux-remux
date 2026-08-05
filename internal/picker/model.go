@@ -83,6 +83,7 @@ type PickerModel struct {
 // is also what restore.BuildPlan operates on when Enter is pressed.
 type CloseContext struct {
 	Label       string
+	Placement   ClosePlacement
 	SubManifest snapshot.Manifest
 }
 

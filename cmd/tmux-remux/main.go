@@ -553,10 +553,33 @@ func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event)
 		}
 		out[ev.ID] = picker.CloseContext{
 			Label:       item.Describe(),
+			Placement:   placementFor(closeMan, item),
 			SubManifest: item.SubManifest(prior.Host, prior.SavedAt),
 		}
 	}
 	return out
+}
+
+// placementFor locates a resolved close in the tmux hierarchy for the picker's
+// tree. Scope is read off which field of the item is set — Pane before Window,
+// since a pane-died carries both.
+func placementFor(closeMan closeevent.CloseManifest, item *closeevent.ClosedItem) picker.ClosePlacement {
+	p := picker.ClosePlacement{Session: closeevent.OwnerSession(closeMan, item)}
+	if p.Session == closeevent.UnknownSession {
+		p.Session = ""
+	}
+	switch {
+	case item.Session != nil:
+		p.Scope = "session"
+	case item.Pane != nil:
+		p.Scope = "pane"
+		p.WindowIndex, p.WindowName = item.WindowIndex, item.Window.Name
+	case item.Window != nil:
+		p.Scope = "window"
+		p.WindowIndex, p.WindowName = item.WindowIndex, item.Window.Name
+		p.PaneCount = len(item.Window.Panes)
+	}
+	return p
 }
 
 // focusRestored selects the first restored session/window so the user
