@@ -209,15 +209,24 @@ func TestBuildCloseTree_NodesBelowGroupsStartExpanded(t *testing.T) {
 	evs := []store.Event{
 		{ID: 1, Ts: 300, Kind: "window-unlinked"},
 		{ID: 2, Ts: 200, Kind: "pane-died"},
+		// A close of mono's own keeps the this-session group non-empty, so the
+		// other-sessions group's own default (collapsed) is what's under test
+		// here — an empty this-session group auto-expands it instead (see
+		// TestBuildCloseTree_OtherSessionsExpandsWhenThisSessionEmpty).
+		{ID: 3, Ts: 50, Kind: "window-unlinked"},
 	}
 	ctxs := map[int64]picker.CloseContext{
 		1: closeCtx("lazytmux", 2, "main", "window", 1),
 		2: closeCtx("lazytmux", 2, "main", "pane", 0),
+		3: closeCtx("mono", 9, "shell", "window", 1),
 	}
 
 	root := picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true, "lazytmux": true})
 
-	group := root.Children[0]
+	if len(root.Children) != 2 {
+		t.Fatalf("root children = %v, want both groups", childLabels(root))
+	}
+	group := root.Children[1]
 	if group.Kind != picker.GroupOther || group.Expanded {
 		t.Fatalf("other-sessions group = %+v, want it present and collapsed", group)
 	}
@@ -228,6 +237,59 @@ func TestBuildCloseTree_NodesBelowGroupsStartExpanded(t *testing.T) {
 	win := sess.Children[0]
 	if !win.Expanded {
 		t.Error("window node below the session must start expanded")
+	}
+}
+
+// TestBuildCloseTree_OtherSessionsExpandsWhenThisSessionEmpty covers Finding
+// 4: when the current session has no closes of its own — also true for any
+// caller that passes no session context — the picker must not open on a
+// single collapsed "other sessions" row with nothing else visible.
+func TestBuildCloseTree_OtherSessionsExpandsWhenThisSessionEmpty(t *testing.T) {
+	evs := []store.Event{{ID: 1, Ts: 100, Kind: "window-unlinked"}}
+	ctxs := map[int64]picker.CloseContext{1: closeCtx("lazytmux", 2, "main", "window", 1)}
+
+	root := picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true, "lazytmux": true})
+
+	if len(root.Children) != 1 || root.Children[0].Kind != picker.GroupOther {
+		t.Fatalf("root children = %v, want only the other-sessions group", childLabels(root))
+	}
+	if !root.Children[0].Expanded {
+		t.Error("other-sessions group must start expanded when this-session has nothing")
+	}
+}
+
+// TestBuildCloseTree_TwoWindowClosesOnTheSameKeyStaySeparate covers Finding
+// 2: renumber-windows plus automatic-rename can give two DIFFERENT closed
+// windows the same (session, index, name) key — e.g. window 3 "fish" closes,
+// a survivor renumbers into 3 and is also named "fish", then it closes too.
+// Both must stay selectable rows with their own event ids, not collapse onto
+// one (which would make the newer close unreachable, since evs run
+// newest-first and the older one would otherwise win the merge).
+func TestBuildCloseTree_TwoWindowClosesOnTheSameKeyStaySeparate(t *testing.T) {
+	evs := []store.Event{
+		{ID: 2, Ts: 300, Kind: "window-unlinked"}, // newer, processed first
+		{ID: 1, Ts: 100, Kind: "window-unlinked"}, // older
+	}
+	ctxs := map[int64]picker.CloseContext{
+		1: closeCtx("mono", 3, "fish", "window", 1),
+		2: closeCtx("mono", 3, "fish", "window", 1),
+	}
+
+	root := picker.BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true})
+
+	group := root.Children[0]
+	if len(group.Children) != 2 {
+		t.Fatalf("group children = %v, want two distinct window rows", childLabels(group))
+	}
+	got := map[int64]bool{}
+	for _, w := range group.Children {
+		if w.Kind != picker.CWindow {
+			t.Errorf("child %+v, want CWindow", w)
+		}
+		got[w.EventID] = true
+	}
+	if !got[1] || !got[2] {
+		t.Errorf("event ids = %v, want both 1 and 2 selectable", got)
 	}
 }
 

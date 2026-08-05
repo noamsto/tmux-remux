@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/restore"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
@@ -162,7 +164,10 @@ func TestMatchParentWindow(t *testing.T) {
 		{"id match wins", "mono", snapshot.Window{ID: "@42", Name: "renamed", Index: 99}, "@42"},
 		{"stale id falls back to name in session", "mono", snapshot.Window{ID: "@9", Name: "docs", Index: 99}, "@42"},
 		{"empty id skips id lookup and falls back to name in session", "mono", snapshot.Window{ID: "", Name: "docs", Index: 99}, "@42"},
-		{"name miss falls back to index in session", "mono", snapshot.Window{ID: "@9", Name: "gone", Index: 7}, "@42"},
+		// A live window merely sharing the index must not match: renumbering can
+		// shift an unrelated survivor into the exact slot a closed window
+		// vacated, and matching on index alone would inject a restore into it.
+		{"index-only match is rejected, not live", "mono", snapshot.Window{ID: "@9", Name: "gone", Index: 7}, ""},
 		{"never crosses sessions", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 3}, ""},
 		{"no match is not live", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 88}, ""},
 	}
@@ -303,4 +308,115 @@ func TestDiscardSummaryNamesTheFallbackSession(t *testing.T) {
 	if got := undoMessage(""); got != "" {
 		t.Errorf("message = %q, want empty for a same-session undo", got)
 	}
+}
+
+// countCreateWindows returns the CreateWindow actions in plan, in order.
+func countCreateWindows(plan []restore.Action) []restore.CreateWindow {
+	var out []restore.CreateWindow
+	for _, a := range plan {
+		if cw, ok := a.(restore.CreateWindow); ok {
+			out = append(out, cw)
+		}
+	}
+	return out
+}
+
+// TestBuildRestorePlan_WindowCloseInsertsAtItsIndex guards Finding 1's
+// inverted guard: a window close's sub-manifest holds exactly one window, so
+// it must reclaim the index it was closed at via new-window -b — otherwise
+// renumber-windows almost always leaves that index occupied and the plain
+// new-window fallback fails with "index in use".
+func TestBuildRestorePlan_WindowCloseInsertsAtItsIndex(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t)
+	ev := store.Event{Ts: 200, Kind: "window-unlinked", ManifestJSON: closeWindowManifest(t, "@9")}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable window close")
+	}
+
+	plan, _ := buildRestorePlan(ctx, nil, item, prior, restore.BuildOptions{})
+
+	creates := countCreateWindows(plan)
+	if len(creates) != 1 {
+		t.Fatalf("CreateWindow actions = %d, want exactly 1", len(creates))
+	}
+	if !creates[0].InsertBefore {
+		t.Error("InsertBefore = false, want true — a window undo must reclaim its old index")
+	}
+}
+
+// TestBuildRestorePlan_SessionCloseNeverInserts covers the other half of
+// Finding 1: restoring a whole session recreates several windows in one
+// plan, and new-window -b on any but the first would shift the indexes that
+// later actions in the same plan target.
+func TestBuildRestorePlan_SessionCloseNeverInserts(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+		Name: "mono",
+		Windows: []snapshot.Window{
+			{Index: 0, Name: "shell", Layout: "L", ID: "@1", Panes: []snapshot.Pane{{Index: 1, Cwd: "/a", Command: "fish", ID: "%1"}}},
+			{Index: 1, Name: "logs", Layout: "L", ID: "@2", Panes: []snapshot.Pane{{Index: 1, Cwd: "/b", Command: "fish", ID: "%2"}}},
+		},
+	}}}
+	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+
+	ev := store.Event{Ts: 200, Kind: "session-closed", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{}))}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable session close")
+	}
+
+	plan, _ := buildRestorePlan(ctx, nil, item, prior, restore.BuildOptions{})
+
+	creates := countCreateWindows(plan)
+	if len(creates) != 2 {
+		t.Fatalf("CreateWindow actions = %d, want 2", len(creates))
+	}
+	for i, cw := range creates {
+		if cw.InsertBefore {
+			t.Errorf("creates[%d].InsertBefore = true, want false on every window of a session close", i)
+		}
+	}
+}
+
+// TestBuildRestorePlan_PaneCloseNeverCreatesAWindow covers the third case: a
+// lost pane whose parent window is still live splits back into it and must
+// never go through the window-recreating path.
+func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t)
+	ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))}
+	item, prior, ok := resolveEvent(ctx, db, ev)
+	if !ok {
+		t.Fatal("resolveEvent: expected a recoverable pane close")
+	}
+
+	// Fake tmux stands in for a live server so the parent window (mono:4, @9)
+	// resolves as live, driving buildRestorePlan down the split-back-in path
+	// rather than the window-recreating one that would emit a CreateWindow.
+	fake := writeFakeTmux(t, `printf 'mono\x1f4\x1fwin\x1fL\x1f@9\x1f0\n'`)
+	plan, _ := buildRestorePlan(ctx, tmux.NewClient(fake), item, prior, restore.BuildOptions{})
+
+	if creates := countCreateWindows(plan); len(creates) != 0 {
+		t.Fatalf("plan = %+v, want no CreateWindow — the parent window is live", plan)
+	}
+}
+
+// writeFakeTmux writes a tiny stand-in tmux binary so ListWindows can be
+// driven deterministically without a real server.
+func writeFakeTmux(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-tmux")
+	script := "#!/usr/bin/env bash\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

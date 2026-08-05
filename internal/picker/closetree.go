@@ -2,7 +2,6 @@ package picker
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 
@@ -94,7 +93,16 @@ func BuildCloseTree(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		mine := current != "" && name == current && p.Scope != "session"
 
 		if p.Scope == "session" {
-			n := sessionNode(sessions, otherGroup, name, live)
+			// Never overwrite an existing event-bearing node: a second
+			// session-closed sharing this name (the session was recreated and
+			// closed again) would otherwise erase the first close's Ts/EventID
+			// and make it unreachable from the picker.
+			n, ok := sessions[name]
+			if !ok || n.EventID != 0 {
+				n = &CloseNode{Kind: CSession, Label: name, Parent: otherGroup}
+				otherGroup.Children = append(otherGroup.Children, n)
+				sessions[name] = n
+			}
 			n.Ts, n.EventID, n.State = ev.Ts, ev.ID, ""
 			continue
 		}
@@ -105,7 +113,12 @@ func BuildCloseTree(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		}
 		wkey := name + "\x1f" + strconv.Itoa(p.WindowIndex) + "\x1f" + p.WindowName
 		w, ok := windows[wkey]
-		if !ok {
+		// Only merge into the cached node when it's still a pure header (no
+		// event of its own yet) — a pane close may fill one in, but two closes
+		// that both own the window scope must never collapse onto one row, or
+		// the older one (processed first, since evs run newest-first) wins and
+		// the newer close becomes unreachable.
+		if !ok || (p.Scope == "window" && w.EventID != 0) {
 			// A pure header window: it exists because a pane died inside it and
 			// no close event for the window itself was recorded, so the window
 			// is still there whenever its session is.
@@ -130,6 +143,15 @@ func BuildCloseTree(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		w.Children = append(w.Children, &CloseNode{
 			Kind: CPane, Label: cc.Label, Ts: ev.Ts, EventID: ev.ID, Parent: w,
 		})
+	}
+
+	// This session has nothing of its own to show — also true whenever the
+	// caller passes no session context at all — so the picker would otherwise
+	// open on a single collapsed "other sessions" row with a blank preview.
+	// Open it by default and let firstCloseTarget land the cursor on its
+	// newest close instead.
+	if len(thisGroup.Children) == 0 {
+		otherGroup.Expanded = true
 	}
 
 	for _, g := range []*CloseNode{thisGroup, otherGroup} {
@@ -235,22 +257,21 @@ func closeGuidePrefix(n *CloseNode) string {
 	if n.Parent == nil || IsCloseGroup(n) {
 		return ""
 	}
-	var segs []string
-	for a := n.Parent; a != nil && !IsCloseGroup(a); a = a.Parent {
-		if hasLaterSibling(a) {
-			segs = append(segs, "│  ")
-		} else {
-			segs = append(segs, "   ")
-		}
-	}
-	slices.Reverse(segs)
 	branch := "└─ "
 	if hasLaterSibling(n) {
 		branch = "├─ "
 	}
 	out := branch
-	for i := len(segs) - 1; i >= 0; i-- {
-		out = segs[i] + out
+	// Walk closest ancestor to farthest, prepending each so the farthest one
+	// ends up leftmost — each prepend pushes everything already accumulated
+	// further right, which undoes the closest-first walk order without a
+	// separate reverse pass.
+	for a := n.Parent; a != nil && !IsCloseGroup(a); a = a.Parent {
+		seg := "   "
+		if hasLaterSibling(a) {
+			seg = "│  "
+		}
+		out = seg + out
 	}
 	return out
 }

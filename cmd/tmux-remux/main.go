@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -249,8 +250,15 @@ func (c UndoCmd) Run() error {
 		}
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 		plan, m := buildRestorePlan(ctx, t, target.Item, target.Prior, opts)
-		if _, err := restore.Apply(ctx, t, plan); err != nil {
+		failed, err := restore.Apply(ctx, t, plan)
+		if err != nil {
 			return err
+		}
+		if len(failed) > 0 {
+			// A partial or total restore failure must not delete the close
+			// event — erasing history for a restore that didn't happen would
+			// make the window unrecoverable even on a second undo.
+			return fmt.Errorf("restore failed, close event kept for retry: %w", errors.Join(failed...))
 		}
 		focusRestored(ctx, t, m)
 		if err := deleteEvents(ctx, db, []store.Event{target.Event}); err != nil {
@@ -336,7 +344,6 @@ func restorableClose(ctx context.Context, db *store.Store, session string) (undo
 		return t, nil
 	}
 	if fallback != nil {
-		fallback.MoreAvailable = true
 		return *fallback, nil
 	}
 	return t, nil
@@ -435,13 +442,20 @@ func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.Clos
 		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, target, opts), m
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
-	// A single restored window goes back to the index it was closed at.
-	// new-window -b shifts whatever renumbering moved into that slot, so the
-	// window lands where the user remembers it rather than past the live max.
-	for i, a := range plan {
-		if cw, ok := a.(restore.CreateWindow); ok && !cw.NewSession {
-			cw.InsertBefore = true
-			plan[i] = cw
+	// A window close's sub-manifest holds exactly one window, so restoring it
+	// should go back to the index it was closed at: new-window -b shifts
+	// whatever renumbering moved into that slot, so the window lands where the
+	// user remembers it rather than past the live max. A whole-session close
+	// must NOT do this — inserting mid-plan would shift windows that later
+	// actions in the same plan target by index. item.Session is the discriminator
+	// (not NewSession, which BuildPlan sets on every session's first window
+	// regardless of how many windows are being restored).
+	if item.Session == nil {
+		for i, a := range plan {
+			if cw, ok := a.(restore.CreateWindow); ok {
+				cw.InsertBefore = true
+				plan[i] = cw
+			}
 		}
 	}
 	return plan, m
@@ -470,11 +484,18 @@ func parentWindowTarget(ctx context.Context, t *tmux.Client, session string, win
 }
 
 // matchParentWindow picks the live window that is `win`, trying id, then name
-// within the session, then index within the session. The id is only stable
-// within one server lifetime and a window that was itself restored carries a
-// fresh one, so an id miss must not be read as "the window is gone" — that
-// would recreate a window that is sitting right there. Name and index are
-// scoped to the session so a same-named window elsewhere can never match.
+// within the session. The id is only stable within one server lifetime and a
+// window that was itself restored carries a fresh one, so an id miss must not
+// be read as "the window is gone" — that would recreate a window that is
+// sitting right there. Name is scoped to the session so a same-named window
+// elsewhere can never match.
+//
+// There is deliberately no index fallback: renumber-windows shifts a survivor
+// into the exact index a closed window vacated, so matching on index alone can
+// resolve to a live window that merely landed there — a false match splits a
+// lost pane into an unrelated window and overwrites its layout. A name/id miss
+// instead falls through to recreating the window from the snapshot, which is
+// a degraded but never destructive outcome.
 func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Window) string {
 	if win.ID != "" {
 		for _, w := range live {
@@ -488,11 +509,6 @@ func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Windo
 			if w.Session == session && snapshot.StripFormat(w.Name) == name {
 				return w.ID
 			}
-		}
-	}
-	for _, w := range live {
-		if w.Session == session && w.Index == win.Index {
-			return w.ID
 		}
 	}
 	return ""
@@ -568,8 +584,12 @@ func (c PickCmd) Run() error {
 				return nil
 			}
 			plan, m := buildRestorePlan(ctx, t, item, prior, buildOpts)
-			if _, err := restore.Apply(ctx, t, plan); err != nil {
+			failed, err := restore.Apply(ctx, t, plan)
+			if err != nil {
 				return err
+			}
+			if len(failed) > 0 {
+				return fmt.Errorf("restore failed: %w", errors.Join(failed...))
 			}
 			focusRestored(ctx, t, m)
 			return nil

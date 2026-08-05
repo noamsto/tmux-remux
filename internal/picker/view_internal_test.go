@@ -18,17 +18,11 @@ import (
 // instead, since renderList's row format no longer reads a close-specific label.
 func TestRenderList_NeverOverflowsFrame(t *testing.T) {
 	applyTheme(NewTheme())
-	long := "reviewtest-session-with-a-fairly-long-path/main 🧠 (2p)"
 	m := PickerModel{
-		mode:         ModeClose,
 		dimOlderThan: 24 * time.Hour,
 		events: []store.Event{
 			{ID: 1, Ts: time.Now().UnixMilli(), Kind: "window-unlinked"},
 			{ID: 2, Ts: time.Now().UnixMilli(), Kind: "pane-died"},
-		},
-		closeContexts: map[int64]CloseContext{
-			1: {Label: long, SubManifest: oneSession()},
-			2: {Label: "pane: fish in mono/2", SubManifest: oneSession()},
 		},
 		hiddenCount: 14,
 	}
@@ -43,10 +37,6 @@ func TestRenderList_NeverOverflowsFrame(t *testing.T) {
 			}
 		}
 	}
-}
-
-func oneSession() snapshot.Manifest {
-	return snapshot.Manifest{Sessions: []snapshot.Session{{Name: "s"}}}
 }
 
 // closeTreeFixture builds the tree used by the rendering tests: mono (current)

@@ -102,6 +102,13 @@ func (m PickerModel) renderFooter(width int) string {
 		counter,
 		hint(m.keys.Enter),
 	}
+	if m.mode == ModeClose {
+		// The close tree has no other affordance advertising that a
+		// collapsed header can be opened — without this hint prefix+U can
+		// open on a single "▸ other sessions" row with no clue how to see
+		// inside it.
+		parts = append(parts, hint(m.keys.Right))
+	}
 	if m.width >= 120 && m.mode == ModeSnapshot {
 		parts = append(parts, hint(m.keys.Tab))
 		parts = append(parts, hint(m.keys.PreviewUp))
