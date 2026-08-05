@@ -96,12 +96,20 @@ Resolution chain for an event's owning session, first hit wins:
 1. `CloseManifest.SessionName` — present on events recorded after this change.
 2. `ClosedItem.SessionName` — the snapshot diff, for older recoverable events
    and for every `after-kill-pane` event.
-3. Live `session_id` → name lookup via `tmux list-sessions`.
-4. Unattributed: the event sorts into `other sessions` under an
+3. Unattributed: the event sorts into `other sessions` under an
    `(unknown session)` header.
 
-Old events keep working through steps 2–4; no migration is required, and the
+Old events keep working through steps 2–3; no migration is required, and the
 events table schema is unchanged (the name rides inside `manifest_json`).
+
+A fourth step — mapping the stored `session_id` to a live session name via
+`tmux list-sessions` — was considered and rejected. tmux session ids restart at
+`$0` with every server, so a `$3` recorded by a dead server can collide with a
+different live session's `$3` and attribute a close to the wrong session. It
+would also require adding `#{session_id}` to `sessionFormat` and changing
+`ParseSessions`. The only events it could help are pre-change unrecoverable
+ones, which the picker already hides behind its unrecoverable counter — a
+misattribution risk bought for nearly nothing.
 
 ## Component 2: grouping — `internal/picker/closetree.go`
 
@@ -291,7 +299,7 @@ Failures degrade to less information, never to a wrong restore.
 | --- | --- |
 | Session name unresolvable for an event | Event groups under `(unknown session)` in `other sessions`; still selectable |
 | No session context at all (`--session` absent, `client_session` empty) | Single `other sessions` group; `undo --pop` behaves exactly as today |
-| `tmux list-sessions` fails | Chain step 3 is skipped; steps 1, 2 and 4 still apply. (`PickCmd` already aborts on a hard `ListSessions` error before the picker opens) |
+| `tmux list-sessions` fails | `PickCmd` already aborts on a hard `ListSessions` error before the picker opens; session attribution itself never consults the live server |
 | `new-window -b` rejected as unknown flag | Retry without `-b`; window lands where tmux picks |
 | Parent window unresolvable by id, name, or index | Treated as not live: the window is recreated, as today |
 | `Enter` on a header node | Footer note, no restore |
