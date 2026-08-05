@@ -2060,6 +2060,34 @@ func TestRestorableCloseDiscardsOnlyThisSessionsDeadRows(t *testing.T) {
 	}
 }
 
+// Discarding this session's dead rows while another session still holds a
+// restorable close must promise a next press, not claim the history is
+// exhausted — the next press falls back and restores that close.
+func TestRestorableCloseReportsMoreWhenOnlyAFallbackSurvives(t *testing.T) {
+	ctx := context.Background()
+	db := seedTwoSessionStore(ctx, t)
+
+	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
+	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
+
+	target, err := restorableClose(ctx, db, "mono")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) != 1 || target.Discarded[0].ID != dead {
+		t.Fatalf("Discarded = %+v, want just %d", target.Discarded, dead)
+	}
+	if target.OK {
+		t.Error("OK = true, want false — nothing in mono is restorable")
+	}
+	if !target.MoreAvailable {
+		t.Error("MoreAvailable = false, want true — lazytmux's close survives for the next press")
+	}
+	if got := discardSummary(target.Discarded, target.MoreAvailable); !strings.Contains(got, "prefix+u again") {
+		t.Errorf("summary = %q, want a hint to press again", got)
+	}
+}
+
 func TestDiscardSummaryNamesTheFallbackSession(t *testing.T) {
 	if got := undoMessage("lazytmux"); !strings.Contains(got, "lazytmux") {
 		t.Errorf("message = %q, want it to name the source session", got)
@@ -2084,6 +2112,12 @@ In `cmd/tmux-remux/main.go`, add `FromSession` to `undoTarget`:
 	// FromSession names the session an event was borrowed from when the current
 	// session had nothing restorable. Empty for a same-session undo.
 	FromSession string
+	// MoreAvailable reports whether anything restorable survives behind the
+	// discarded run — in this session or, via the cross-session fallback, in
+	// another. It drives the "press again" half of the discard message, which
+	// would otherwise claim nothing older is recoverable while a fallback close
+	// is sitting there waiting for the next press.
+	MoreAvailable bool
 ```
 
 and replace `restorableClose`:
@@ -2120,16 +2154,22 @@ func restorableClose(ctx context.Context, db *store.Store, session string) (undo
 			continue
 		}
 		if mine {
-			t.Event, t.Item, t.Prior, t.OK = ev, item, prior, true
+			t.Event, t.Item, t.Prior, t.OK, t.MoreAvailable = ev, item, prior, true, true
 			return t, nil
 		}
 		if fallback == nil {
 			fallback = &undoTarget{Event: ev, Item: item, Prior: prior, OK: true, FromSession: owner}
 		}
 	}
-	// Nothing in this session: borrow the newest restorable close from another.
-	if fallback != nil && len(t.Discarded) == 0 {
-		fallback.Discarded = t.Discarded
+	// Nothing restorable in this session. Discarded rows are reported first —
+	// this press explains them and the next one restores — so a pending fallback
+	// only sets MoreAvailable here rather than being returned.
+	if len(t.Discarded) > 0 {
+		t.MoreAvailable = fallback != nil
+		return t, nil
+	}
+	if fallback != nil {
+		fallback.MoreAvailable = true
 		return *fallback, nil
 	}
 	return t, nil
@@ -2208,7 +2248,7 @@ In `UndoCmd.Run`, resolve the session and report a cross-session restore:
 			if err := deleteEvents(ctx, db, target.Discarded); err != nil {
 				return err
 			}
-			return fmt.Errorf("%s", discardSummary(target.Discarded, target.OK))
+			return fmt.Errorf("%s", discardSummary(target.Discarded, target.MoreAvailable))
 		}
 		if !target.OK {
 			return fmt.Errorf("nothing to undo — no recoverable close event")
