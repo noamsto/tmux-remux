@@ -795,6 +795,7 @@ Refs #61"
   - `picker.CloseContext.Placement ClosePlacement`
   - `picker.BuildCloseTree(evs []store.Event, ctxs map[int64]CloseContext, current string, live map[string]bool) *CloseNode`
   - `picker.IsCloseGroup(n *CloseNode) bool`
+  - `picker.FlattenClose(root *CloseNode) []*CloseNode`
 
   Tasks 6 and 7 consume all of these.
 
@@ -1052,7 +1053,6 @@ package picker
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 
@@ -1263,41 +1263,13 @@ func FlattenClose(root *CloseNode) []*CloseNode {
 	}
 	return out
 }
-
-// closeGuidePrefix returns the box-drawing prefix for n: one "│  " or "   "
-// per ancestor below the group level, then the node's own branch glyph.
-func closeGuidePrefix(n *CloseNode) string {
-	if n.Parent == nil || IsCloseGroup(n) {
-		return ""
-	}
-	var segs []string
-	for a := n.Parent; a != nil && !IsCloseGroup(a); a = a.Parent {
-		if hasLaterSibling(a) {
-			segs = append(segs, "│  ")
-		} else {
-			segs = append(segs, "   ")
-		}
-	}
-	slices.Reverse(segs)
-	branch := "└─ "
-	if hasLaterSibling(n) {
-		branch = "├─ "
-	}
-	out := branch
-	for i := len(segs) - 1; i >= 0; i-- {
-		out = segs[i] + out
-	}
-	return out
-}
-
-func hasLaterSibling(n *CloseNode) bool {
-	if n.Parent == nil {
-		return false
-	}
-	sibs := n.Parent.Children
-	return len(sibs) > 0 && sibs[len(sibs)-1] != n
-}
 ```
+
+The guide-prefix helpers (`closeGuidePrefix`, `hasLaterSibling`) deliberately do
+NOT belong to this task — see Task 7 Step 0. They are unexported and their only
+caller is Task 7's row renderer, so adding them here would ship uncalled code
+that the `unused` linter rejects, and suppressing it with `//nolint` is not
+allowed in this repo.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
