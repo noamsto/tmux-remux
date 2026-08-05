@@ -67,9 +67,9 @@ func TestBuildPaneRestoreSplitsIntoResolvedTarget(t *testing.T) {
 }
 
 func TestBuildPaneRestoreRecreatesWindowWhenNoLiveTarget(t *testing.T) {
-	lost := snapshot.Pane{Index: 2, Cwd: "/b"}
 	win := snapshot.Window{Index: 3, Name: "docs", Layout: "L", ID: "@9",
-		Panes: []snapshot.Pane{{Index: 1, Cwd: "/a"}}}
+		Panes: []snapshot.Pane{{Index: 1, Cwd: "/a"}, {Index: 2, Cwd: "/b"}}}
+	lost := win.Panes[1]
 
 	plan := restore.BuildPaneRestore(lost, win, "mono", "", restore.BuildOptions{})
 
@@ -82,5 +82,19 @@ func TestBuildPaneRestoreRecreatesWindowWhenNoLiveTarget(t *testing.T) {
 	}
 	if cw.Session != "mono" || cw.Index != 3 {
 		t.Errorf("CreateWindow = %+v, want session mono index 3", cw)
+	}
+
+	// The recreated window must bring the lost pane back too, not just its
+	// surviving sibling — BuildPlan emits it as a SplitPane onto the new window.
+	want := restore.SplitPane{Target: "mono:3", Cwd: lost.Cwd}
+	found := false
+	for _, a := range plan {
+		if sp, ok := a.(restore.SplitPane); ok && sp == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("plan = %+v, want it to contain the lost pane's restore action %+v", plan, want)
 	}
 }

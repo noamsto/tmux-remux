@@ -161,6 +161,7 @@ func TestMatchParentWindow(t *testing.T) {
 	}{
 		{"id match wins", "mono", snapshot.Window{ID: "@42", Name: "renamed", Index: 99}, "@42"},
 		{"stale id falls back to name in session", "mono", snapshot.Window{ID: "@9", Name: "docs", Index: 99}, "@42"},
+		{"empty id skips id lookup and falls back to name in session", "mono", snapshot.Window{ID: "", Name: "docs", Index: 99}, "@42"},
 		{"name miss falls back to index in session", "mono", snapshot.Window{ID: "@9", Name: "gone", Index: 7}, "@42"},
 		{"never crosses sessions", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 3}, ""},
 		{"no match is not live", "mono", snapshot.Window{ID: "@9", Name: "nothing", Index: 88}, ""},
