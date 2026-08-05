@@ -1690,11 +1690,58 @@ Refs #61"
 
 **Files:**
 - Modify: `internal/picker/view.go` — add `renderCloseTree`, route close mode to it, drop the close branch of `renderList`
+- Modify: `internal/picker/closetree.go` — add `closeGuidePrefix` and `hasLaterSibling` (see Step 0)
 - Test: `internal/picker/view_internal_test.go`
 
 **Interfaces:**
-- Consumes: `CloseVisible`, `closeGuidePrefix`, `IsCloseGroup`, `CloseNode` (Tasks 5–6).
-- Produces: nothing consumed by later tasks.
+- Consumes: `CloseVisible`, `IsCloseGroup`, `CloseNode` (Tasks 5–6).
+- Produces: `closeGuidePrefix(n *CloseNode) string` and `hasLaterSibling(n *CloseNode) bool`, both unexported and used only by this task's renderer.
+
+- [ ] **Step 0: Add the guide-prefix helpers**
+
+These live in `internal/picker/closetree.go` but belong to this task, not Task 5:
+they are unexported and their only caller is `closeRow` below, so adding them
+earlier would have meant shipping uncalled code past the `unused` linter behind a
+`//nolint` — an escape hatch this repo does not allow. Add them now, with their
+caller and their test arriving in the same commit.
+
+```go
+// closeGuidePrefix returns the box-drawing prefix for n: one "│  " or "   "
+// per ancestor below the group level, then the node's own branch glyph.
+func closeGuidePrefix(n *CloseNode) string {
+	if n.Parent == nil || IsCloseGroup(n) {
+		return ""
+	}
+	var segs []string
+	for a := n.Parent; a != nil && !IsCloseGroup(a); a = a.Parent {
+		if hasLaterSibling(a) {
+			segs = append(segs, "│  ")
+		} else {
+			segs = append(segs, "   ")
+		}
+	}
+	slices.Reverse(segs)
+	branch := "└─ "
+	if hasLaterSibling(n) {
+		branch = "├─ "
+	}
+	out := branch
+	for i := len(segs) - 1; i >= 0; i-- {
+		out = segs[i] + out
+	}
+	return out
+}
+
+func hasLaterSibling(n *CloseNode) bool {
+	if n.Parent == nil {
+		return false
+	}
+	sibs := n.Parent.Children
+	return len(sibs) > 0 && sibs[len(sibs)-1] != n
+}
+```
+
+Add `"slices"` to `closetree.go`'s import block if Task 5's cleanup removed it.
 
 - [ ] **Step 1: Write the failing test**
 
