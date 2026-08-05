@@ -585,10 +585,11 @@ func focusRestored(ctx context.Context, t *tmux.Client, m snapshot.Manifest) {
 
 // CaptureEventCmd records a close event (called from tmux hooks).
 type CaptureEventCmd struct {
-	Kind    string `arg:"" help:"event kind"`
-	Session string `help:"tmux session id ($N)"`
-	Window  string `help:"tmux window id (@N)"`
-	Pane    string `help:"tmux pane id (%N)"`
+	Kind        string `arg:"" help:"event kind"`
+	Session     string `help:"tmux session id ($N)"`
+	SessionName string `name:"session-name" help:"tmux session name (#{hook_session_name})"`
+	Window      string `help:"tmux window id (@N)"`
+	Pane        string `help:"tmux pane id (%N)"`
 }
 
 func (c CaptureEventCmd) Run() error {
@@ -602,12 +603,13 @@ func (c CaptureEventCmd) Run() error {
 		post.Windows, _ = t.ListWindows(ctx)
 		post.Panes, _ = t.ListPanes(ctx)
 		_, err := closeevent.Capture(ctx, db, closeevent.Args{
-			Kind:      c.Kind,
-			SessionID: c.Session,
-			WindowID:  c.Window,
-			PaneID:    c.Pane,
-			Host:      hostname(),
-			Index:     post,
+			Kind:        c.Kind,
+			SessionID:   c.Session,
+			SessionName: c.SessionName,
+			WindowID:    c.Window,
+			PaneID:      c.Pane,
+			Host:        hostname(),
+			Index:       post,
 		})
 		return err
 	})

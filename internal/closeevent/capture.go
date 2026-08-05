@@ -15,11 +15,12 @@ const dedupWindow = 2000 * time.Millisecond
 
 // Args bundles the parameters of a tmux close hook.
 type Args struct {
-	Kind      string // "pane-died" | "window-unlinked" | "session-closed"
-	SessionID string
-	WindowID  string
-	PaneID    string
-	Host      string
+	Kind        string // "pane-died" | "window-unlinked" | "session-closed"
+	SessionID   string
+	SessionName string
+	WindowID    string
+	PaneID      string
+	Host        string
 	// Index is the live tmux structure queried AFTER the close (the closed
 	// entity is already gone when the hook fires). Empty when the server is
 	// unreachable — i.e. the last session closed and nothing survived.
@@ -82,10 +83,11 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 	}
 
 	wrapped, err := json.Marshal(CloseManifest{
-		SessionID: a.SessionID,
-		WindowID:  a.WindowID,
-		PaneID:    a.PaneID,
-		Index:     a.Index,
+		SessionID:   a.SessionID,
+		SessionName: a.SessionName,
+		WindowID:    a.WindowID,
+		PaneID:      a.PaneID,
+		Index:       a.Index,
 	})
 	if err != nil {
 		return 0, err

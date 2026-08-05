@@ -132,13 +132,13 @@ wire_plugin() {
   # — and undo can't restore a pane no snapshot ever saw.
   tmux set-hook -g after-split-window "run-shell -b \"'${bin}' save --reason=hook:after-split-window\""
 
-  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session}\""
+  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session=#{hook_session} --session-name=#{hook_session_name}\""
   # prefix+x kills the pane without its program exiting, so pane-exited never
   # fires. after-kill-pane is a command hook and carries no hook_pane — the id
   # is recovered by diffing the survivors against the last snapshot.
   tmux set-hook -g after-kill-pane "run-shell -b \"'${bin}' capture-event pane-died\""
-  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session=#{hook_session}\""
-  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session=#{hook_session}\""
+  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session=#{hook_session} --session-name=#{hook_session_name}\""
+  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session=#{hook_session} --session-name=#{hook_session_name}\""
 
   if [ "$auto_restore" = "on" ]; then
     tmux run-shell -b "'${bin}' restore --auto"

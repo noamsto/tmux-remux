@@ -239,3 +239,43 @@ func TestCaptureDropsIDLessPaneWhenAmbiguous(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureStoresSessionName(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", WindowID: "@5", SessionID: "$1",
+		SessionName: "lazytmux", Host: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if len(all) != 1 {
+		t.Fatalf("expected one event, got %d", len(all))
+	}
+	cm, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.SessionName != "lazytmux" {
+		t.Errorf("SessionName = %q, want %q", cm.SessionName, "lazytmux")
+	}
+}
+
+// A pre-change event has no stored name; parsing must leave it empty rather
+// than fail, so the snapshot-diff fallback can take over.
+func TestParseManifestWithoutSessionNameLeavesItEmpty(t *testing.T) {
+	cm, err := closeevent.ParseManifest(`{"session_id":"$1","window_id":"@5"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cm.SessionName != "" {
+		t.Errorf("SessionName = %q, want empty", cm.SessionName)
+	}
+}

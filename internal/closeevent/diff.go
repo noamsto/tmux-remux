@@ -16,10 +16,15 @@ import (
 // where `index` is the live-index of tmux's structure AFTER the close has
 // happened (whatever survived).
 type CloseManifest struct {
-	SessionID string    `json:"session_id"`
-	WindowID  string    `json:"window_id"`
-	PaneID    string    `json:"pane_id"`
-	Index     IndexPost `json:"index"`
+	SessionID string `json:"session_id"`
+	// SessionName is the session the closed entity belonged to, captured from
+	// #{hook_session_name} at hook time. Empty on events recorded before it was
+	// stored, and on after-kill-pane events (a command hook gets no hook_*
+	// formats) — both fall back to the snapshot diff for attribution.
+	SessionName string    `json:"session_name,omitempty"`
+	WindowID    string    `json:"window_id"`
+	PaneID      string    `json:"pane_id"`
+	Index       IndexPost `json:"index"`
 }
 
 // IndexPost holds tmux's list-windows and list-panes output queried right
