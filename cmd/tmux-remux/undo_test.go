@@ -401,20 +401,27 @@ func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
 	// Fake tmux stands in for a live server so the parent window (mono:4, @9)
 	// resolves as live, driving buildRestorePlan down the split-back-in path
 	// rather than the window-recreating one that would emit a CreateWindow.
-	fake := writeFakeTmux(t, `printf 'mono\x1f4\x1fwin\x1fL\x1f@9\x1f0\n'`)
-	plan, _ := buildRestorePlan(ctx, tmux.NewClient(fake), item, prior, restore.BuildOptions{})
+	live := strings.Join([]string{"mono", "4", "win", "L", "@9", "0"}, tmux.FieldSep)
+	plan, _ := buildRestorePlan(ctx, tmux.NewClient(fakeTmuxEmitting(t, live)), item, prior, restore.BuildOptions{})
 
 	if creates := countCreateWindows(plan); len(creates) != 0 {
 		t.Fatalf("plan = %+v, want no CreateWindow — the parent window is live", plan)
 	}
 }
 
-// writeFakeTmux writes a tiny stand-in tmux binary so ListWindows can be
-// driven deterministically without a real server.
-func writeFakeTmux(t *testing.T, body string) string {
+// fakeTmuxEmitting writes a stand-in tmux that prints `out` verbatim, so
+// ListWindows can be driven without a real server.
+//
+// Two portability constraints shape it, both of which silently produce a
+// working-looking fake whose output is wrong: the nix build sandbox has no
+// /usr/bin/env, so that shebang cannot exec there, and \x escapes in printf are
+// not portable across shells, so the \x1f field separators may not survive. The
+// separator bytes therefore ride a quoted heredoc, already embedded by the
+// caller via tmux.FieldSep.
+func fakeTmuxEmitting(t *testing.T, out string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-tmux")
-	script := "#!/usr/bin/env bash\n" + body + "\n"
+	script := "#!/bin/sh\ncat <<'REMUX_ROWS'\n" + out + "\nREMUX_ROWS\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

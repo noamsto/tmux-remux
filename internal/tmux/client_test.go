@@ -178,12 +178,15 @@ func TestSetPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
 	}
 }
 
-// writeFakeTmux drops a tiny bash script in t.TempDir whose body is `body`
+// writeFakeTmux drops a tiny shell script in t.TempDir whose body is `body`
 // and returns its path so tests can use it as the Client binary.
+//
+// The shebang is /bin/sh, not /usr/bin/env: the nix build sandbox has no
+// /usr/bin/env, so that form cannot exec there. Keep bodies POSIX.
 func writeFakeTmux(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-tmux")
-	script := "#!/usr/bin/env bash\n" + body + "\n"
+	script := "#!/bin/sh\n" + body + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
