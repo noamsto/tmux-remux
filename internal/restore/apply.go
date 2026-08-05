@@ -25,10 +25,9 @@ type Runner interface {
 func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 	var failed []error
 	// failedWindows holds the "<session>:<index>" target of every CreateWindow
-	// that failed. Without this, a later action that targets the same index
-	// (SplitPane, SetLayout) would run anyway and land on whatever unrelated
-	// live window happens to sit there — the exact bleed-into-a-stranger
-	// outcome the failed create was supposed to prevent.
+	// that failed. Apply is best-effort, so without this a later SplitPane or
+	// SetLayout aimed at the same index would still run and land on whatever
+	// unrelated live window happens to sit there.
 	failedWindows := map[string]bool{}
 	for _, a := range plan {
 		var args []string

@@ -292,9 +292,7 @@ type undoTarget struct {
 	FromSession string
 	// MoreAvailable reports whether anything restorable survives behind the
 	// discarded run — in this session or, via the cross-session fallback, in
-	// another. It drives the "press again" half of the discard message, which
-	// would otherwise claim nothing older is recoverable while a fallback close
-	// is sitting there waiting for the next press.
+	// another. Distinct from OK, which covers only this session.
 	MoreAvailable bool
 }
 
@@ -368,10 +366,10 @@ func undoMessage(fromSession string) string {
 }
 
 // currentSession resolves the session the user is acting from: the flag when the
-// keybinding passed one, else the attached client's session. Installs that wire
-// tmux-remux from their own config rather than tmux-remux.tmux will not pass the
-// flag, so the client lookup is the path that keeps them session-aware. Empty
-// means no context, which scans server-wide.
+// keybinding passed one, else the attached client's session. A config that wires
+// tmux-remux by hand rather than through tmux-remux.tmux passes no flag, so the
+// client lookup is what keeps those installs session-aware. Empty means no
+// context, which scans server-wide.
 func currentSession(ctx context.Context, t *tmux.Client, flag string) string {
 	if flag != "" {
 		return flag
@@ -442,14 +440,12 @@ func buildRestorePlan(ctx context.Context, t *tmux.Client, item *closeevent.Clos
 		return restore.BuildPaneRestore(*item.Pane, *item.Window, item.SessionName, target, opts), m
 	}
 	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, opts)
-	// A window close's sub-manifest holds exactly one window, so restoring it
-	// should go back to the index it was closed at: new-window -b shifts
-	// whatever renumbering moved into that slot, so the window lands where the
-	// user remembers it rather than past the live max. A whole-session close
-	// must NOT do this — inserting mid-plan would shift windows that later
-	// actions in the same plan target by index. item.Session is the discriminator
-	// (not NewSession, which BuildPlan sets on every session's first window
-	// regardless of how many windows are being restored).
+	// A window close's sub-manifest holds exactly one window, so -b puts it back
+	// at the index it was closed at, shifting whatever renumbering moved into
+	// that slot. A whole-session close must not: inserting mid-plan shifts
+	// windows that later actions target by index. Discriminate on item.Session,
+	// NOT on CreateWindow.NewSession — BuildPlan sets that on every session's
+	// first window, so it is true for the single-window case too.
 	if item.Session == nil {
 		for i, a := range plan {
 			if cw, ok := a.(restore.CreateWindow); ok {
@@ -483,20 +479,16 @@ func parentWindowTarget(ctx context.Context, t *tmux.Client, session string, win
 	return matchParentWindow(live, session, win)
 }
 
-// matchParentWindow picks the live window that is `win`, trying id, then name
-// within the session. The id is only stable within one server lifetime and a
-// window that was itself restored carries a fresh one, so an id miss must not
-// be read as "the window is gone" — that would recreate a window that is
-// sitting right there. Name is scoped to the session so a same-named window
-// elsewhere can never match.
+// matchParentWindow picks the live window that is `win`, trying id then name
+// within the session. A window id is stable only within one server lifetime and
+// a restored window carries a fresh one, so an id miss must not be read as "the
+// window is gone" — that would recreate a window sitting right there. Name is
+// scoped to the session so a same-named window elsewhere can never match.
 //
 // There is deliberately no index fallback: renumber-windows shifts a survivor
-// into the exact index a closed window vacated, so matching on index alone can
-// resolve to a live window that merely landed there — a false match splits a
-// lost pane into an unrelated window and overwrites its layout. A name/id miss
-// instead falls through to recreating the window from the snapshot: BuildPaneRestore
-// reclaims the original index with new-window -b, so the recreate targets the
-// window it just created rather than repeating the same false match by index.
+// into the exact index a closed window vacated, so an index match can resolve to
+// a live window that merely landed there, splitting the lost pane into it and
+// overwriting its layout.
 func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Window) string {
 	if win.ID != "" {
 		for _, w := range live {

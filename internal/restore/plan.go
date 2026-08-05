@@ -219,11 +219,10 @@ func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarg
 			Sessions: []snapshot.Session{{Name: session, Windows: []snapshot.Window{win}}},
 		}, filter.Filter{}, nil, opts)
 		// This plan rebuilds exactly one window, so inserting it at its recorded
-		// index can't shift anything else the plan targets by index — unlike
-		// BuildPlan's other callers, which replay a whole snapshot and must not
-		// set this. Without it, new-window collides with whatever renumber-windows
-		// moved into the vacated index and the plan's SplitPane/SetLayout that
-		// follow then land on that unrelated window instead.
+		// index cannot shift anything else the plan targets. Without -b,
+		// new-window collides with whatever renumber-windows moved into the
+		// vacated index, and the SplitPane/SetLayout that follow land on that
+		// unrelated window instead.
 		for i, a := range plan {
 			if cw, ok := a.(CreateWindow); ok {
 				cw.InsertBefore = true
