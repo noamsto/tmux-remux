@@ -494,8 +494,9 @@ func parentWindowTarget(ctx context.Context, t *tmux.Client, session string, win
 // into the exact index a closed window vacated, so matching on index alone can
 // resolve to a live window that merely landed there — a false match splits a
 // lost pane into an unrelated window and overwrites its layout. A name/id miss
-// instead falls through to recreating the window from the snapshot, which is
-// a degraded but never destructive outcome.
+// instead falls through to recreating the window from the snapshot: BuildPaneRestore
+// reclaims the original index with new-window -b, so the recreate targets the
+// window it just created rather than repeating the same false match by index.
 func matchParentWindow(live []tmux.WindowRow, session string, win snapshot.Window) string {
 	if win.ID != "" {
 		for _, w := range live {

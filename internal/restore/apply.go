@@ -24,22 +24,34 @@ type Runner interface {
 // command itself — see restore.BuildStartupCommand.
 func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 	var failed []error
+	// failedWindows holds the "<session>:<index>" target of every CreateWindow
+	// that failed. Without this, a later action that targets the same index
+	// (SplitPane, SetLayout) would run anyway and land on whatever unrelated
+	// live window happens to sit there — the exact bleed-into-a-stranger
+	// outcome the failed create was supposed to prevent.
+	failedWindows := map[string]bool{}
 	for _, a := range plan {
 		var args []string
+		var target string
 		switch v := a.(type) {
 		case CreateWindow:
+			target = fmt.Sprintf("%s:%d", v.Session, v.Index)
 			if err := createWindow(ctx, t, v); err != nil {
 				failed = append(failed, err)
+				failedWindows[target] = true
 			}
 			continue
 		case SplitPane:
+			target = v.Target
 			args = []string{"split-window", "-t", v.Target, "-c", v.Cwd}
 			if v.StartupCommand != "" {
 				args = append(args, v.StartupCommand)
 			}
 		case SetLayout:
+			target = v.Window
 			args = []string{"select-layout", "-t", v.Window, v.Layout}
 		case SetOption:
+			target = v.Target
 			cmd := "set-window-option"
 			flags := "-q"
 			if v.Pane {
@@ -52,6 +64,9 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 			// failure), so we abort rather than silently skip — callers
 			// are expected to handle all Action variants.
 			return failed, fmt.Errorf("unknown action: %T", a)
+		}
+		if failedWindows[target] {
+			continue
 		}
 		if _, err := t.Run(ctx, args); err != nil {
 			failed = append(failed, err)

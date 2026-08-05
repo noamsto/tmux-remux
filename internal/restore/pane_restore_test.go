@@ -39,7 +39,7 @@ func TestBuildPaneRestoreRecreatesGoneWindow(t *testing.T) {
 
 	plan := restore.BuildPaneRestore(lost, win, "s1", "", defaultOpts)
 	want := []restore.Action{
-		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh", NewSession: true},
+		restore.CreateWindow{Session: "s1", Index: 2, Name: "w", Cwd: "/a", StartupCommand: "nvim; exec /bin/zsh", NewSession: true, InsertBefore: true},
 		restore.SplitPane{Target: "s1:2", Cwd: "/b", StartupCommand: ""},
 		restore.SetLayout{Window: "s1:2", Layout: "LAY"},
 	}
@@ -82,6 +82,12 @@ func TestBuildPaneRestoreRecreatesWindowWhenNoLiveTarget(t *testing.T) {
 	}
 	if cw.Session != "mono" || cw.Index != 3 {
 		t.Errorf("CreateWindow = %+v, want session mono index 3", cw)
+	}
+	// Without InsertBefore, new-window collides with whatever renumber-windows
+	// moved into index 3 and the plan's split/layout below then land on that
+	// unrelated live window instead of the one just created.
+	if !cw.InsertBefore {
+		t.Error("CreateWindow.InsertBefore = false, want true — a recreated window must reclaim its original index")
 	}
 
 	// The recreated window must bring the lost pane back too, not just its

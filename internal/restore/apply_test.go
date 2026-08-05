@@ -302,3 +302,26 @@ func TestApplyDoesNotRetryOnRealFailure(t *testing.T) {
 		t.Errorf("made %d calls, want 1 (no retry)", len(rt.calls))
 	}
 }
+
+// When a CreateWindow's index collides with a live window (e.g. renumber-windows
+// moved a survivor into the vacated slot), the plan's own SplitPane/SetLayout
+// for that same index must not run — they would otherwise land on that
+// unrelated live window instead of the one that failed to get created.
+func TestApplySkipsActionsTargetingAFailedCreateWindow(t *testing.T) {
+	rt := &recordingTmux{failFlag: "new-window", failErr: errors.New("create window failed: index 1 in use")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "docs", Cwd: "/a"},
+		restore.SplitPane{Target: "s1:1", Cwd: "/b"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want exactly one action failure (the CreateWindow)", failed)
+	}
+	if len(rt.calls) != 1 {
+		t.Errorf("calls = %v, want only the failed new-window call", rt.calls)
+	}
+}
