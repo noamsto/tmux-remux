@@ -65,3 +65,71 @@ func TestRenderQuotesBinaryWithSpaces(t *testing.T) {
 		t.Errorf("path with a space was not quoted:\n%s", got)
 	}
 }
+
+// render38 is the fragment examples/tmux.conf is generated from.
+func render38() string {
+	return triggers.Render(triggers.Params{
+		Bin:         "tmux-remux",
+		Version:     tmux.Version{Major: 3, Minor: 8},
+		AutoRestore: true,
+	})
+}
+
+// examples/tmux.conf is the 3.8 render, checked in so people can read it.
+func TestExamplesConfIsTheRender(t *testing.T) {
+	checkGolden(t, filepath.Join("..", "..", "examples", "tmux.conf"), render38())
+}
+
+func TestRender38UsesTargetSessionForPaneExited(t *testing.T) {
+	paneExited := lineContaining(t, render38(), "set-hook -g pane-exited")
+	if strings.Contains(paneExited, "hook_session") {
+		t.Errorf("3.8 pane-exited still reads hook_session (always empty there):\n%s", paneExited)
+	}
+	for _, want := range []string{"#{session_id}", "#{session_name}", "#{hook_pane}", "#{hook_window}"} {
+		if !strings.Contains(paneExited, want) {
+			t.Errorf("3.8 pane-exited missing %s:\n%s", want, paneExited)
+		}
+	}
+}
+
+func TestRender38EmitsMonitorSaveTick(t *testing.T) {
+	got := render38()
+	for _, want := range []string{
+		`set -g @remux_save_tick '%M'`,
+		`set-hook -g -B '@remux-save:session:#{T:@remux_save_tick}'`,
+		"save --reason=timer",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("3.8 render missing %q", want)
+		}
+	}
+}
+
+func TestRenderLegacyHasNoMonitor(t *testing.T) {
+	got := triggers.Render(triggers.Params{
+		Bin:         "tmux-remux",
+		Version:     tmux.Version{Major: 3, Minor: 7},
+		AutoRestore: true,
+	})
+	if strings.Contains(got, "set-hook -g -B") {
+		t.Error("pre-3.8 render emitted a monitor hook, which that tmux cannot parse")
+	}
+	if strings.Contains(got, "--reason=timer") {
+		t.Error("pre-3.8 render emitted a timer save; that tmux needs the external timer")
+	}
+}
+
+// lineContaining returns the single line of s containing sub.
+func lineContaining(t *testing.T, s, sub string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, sub) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one line containing %q, got %d", sub, len(found))
+	}
+	return found[0]
+}
