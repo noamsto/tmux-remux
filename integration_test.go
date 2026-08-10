@@ -446,3 +446,86 @@ func TestTriggersWindowCloseCarriesSession(t *testing.T) {
 		t.Errorf("window-unlinked SessionName = %q, want \"work\"", m.SessionName)
 	}
 }
+
+// prefix+x runs `kill-pane`, and no tmux release gives that command hook the
+// pane it killed, so closeevent.resolveKilledPane recovers the id by diffing
+// survivors against the last snapshot. Guards that path against deletion —
+// issue #62 proposed removing it on the theory that 3.8 payloads made it
+// redundant; they do not.
+func TestTriggersKillPaneResolvesViaSurvivorDiff(t *testing.T) {
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	wireTriggers(t, srv, bin)
+
+	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "/bin/sh"); err != nil {
+		t.Fatalf("split-window: %v\n%s", err, out)
+	}
+	panes, err := srv.Tmux("list-panes", "-t", "work", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("list-panes: %v\n%s", err, panes)
+	}
+	ids := strings.Fields(panes)
+	if len(ids) != 2 {
+		t.Fatalf("want 2 panes, got %v", ids)
+	}
+	victim := ids[1]
+
+	if out, err := srv.Tmux("run-shell", bin+" save --reason=test"); err != nil {
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+	// -t names the victim, but the hook is after-kill-pane, which sees no pane
+	// id regardless — exactly the prefix+x situation.
+	if out, err := srv.Tmux("kill-pane", "-t", victim); err != nil {
+		t.Fatalf("kill-pane: %v\n%s", err, out)
+	}
+
+	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+		return m.PaneID == victim
+	})
+	if m.WindowID == "" {
+		t.Error("survivor diff resolved the pane but not its window")
+	}
+}
+
+// The monitor hook watches #{T:@remux_save_tick}, whose format string lives in
+// an option precisely so a test can drive it at second granularity instead of
+// waiting a minute.
+func TestTriggersMonitorSaveTick(t *testing.T) {
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	if v := wireTriggers(t, srv, bin); !v.AtLeast(3, 8) {
+		t.Skipf("monitor hooks need tmux 3.8, have %s", v)
+	}
+
+	if out, err := srv.Tmux("set", "-g", "@remux_save_tick", "%S"); err != nil {
+		t.Fatalf("set @remux_save_tick: %v\n%s", err, out)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(250 * time.Millisecond)
+		db, err := store.Open(context.Background(), dbPath)
+		if err != nil {
+			continue
+		}
+		snaps, err := db.ListEvents(context.Background(), store.ListOpts{
+			Kinds: []string{"snapshot"},
+			Limit: 20,
+		})
+		_ = db.Close()
+		if err != nil {
+			continue
+		}
+		for _, ev := range snaps {
+			if ev.Reason == "timer" {
+				return
+			}
+		}
+	}
+	t.Fatal("no snapshot with reason=timer within 10s — the monitor hook did not fire")
+}
