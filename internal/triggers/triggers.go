@@ -32,10 +32,13 @@ var bareBin = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // quoteBin makes bin survive as one shell word inside a hook command string.
 // tmux config quoting has no backslash escape, so a literal quote is spliced
-// with '\'' — which closes the hook's own single-quoted argument, emits a
-// quote, and reopens it. Paths needing no quoting are left bare so the
-// generated examples/tmux.conf stays readable.
-
+// with:
+//
+//	'\''
+//
+// which closes the hook's own single-quoted argument, emits a quote, and
+// reopens it. Paths needing no quoting are left bare so the generated
+// examples/tmux.conf stays readable.
 func quoteBin(bin string) string {
 	if bareBin.MatchString(bin) {
 		return bin
