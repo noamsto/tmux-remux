@@ -80,14 +80,26 @@ func TestExamplesConfIsTheRender(t *testing.T) {
 	checkGolden(t, filepath.Join("..", "..", "examples", "tmux.conf"), render38())
 }
 
-func TestRender38UsesTargetSessionForPaneExited(t *testing.T) {
-	paneExited := lineContaining(t, render38(), "set-hook -g pane-exited")
-	if strings.Contains(paneExited, "hook_session") {
-		t.Errorf("3.8 pane-exited still reads hook_session (always empty there):\n%s", paneExited)
-	}
-	for _, want := range []string{"#{session_id}", "#{session_name}", "#{hook_pane}", "#{hook_window}"} {
-		if !strings.Contains(paneExited, want) {
-			t.Errorf("3.8 pane-exited missing %s:\n%s", want, paneExited)
+// pane-exited carries no session in its payload on any tmux measured (3.7b and
+// next-3.8 both expand #{hook_session} empty there), so both branches must read
+// the event target instead.
+func TestRenderUsesTargetSessionForPaneExited(t *testing.T) {
+	for _, v := range []tmux.Version{{Major: 3, Minor: 7}, {Major: 3, Minor: 8}} {
+		got := triggers.Render(triggers.Params{Bin: "tmux-remux", Version: v, AutoRestore: true})
+		paneExited := lineContaining(t, got, "set-hook -g pane-exited")
+		if strings.Contains(paneExited, "hook_session") {
+			t.Errorf("tmux %s pane-exited reads hook_session (always empty there):\n%s", v, paneExited)
+		}
+		for _, want := range []string{"#{session_id}", "#{session_name}", "#{hook_pane}", "#{hook_window}"} {
+			if !strings.Contains(paneExited, want) {
+				t.Errorf("tmux %s pane-exited missing %s:\n%s", v, want, paneExited)
+			}
+		}
+		// window-unlinked keeps hook_*: its payload does carry the session,
+		// and on session-closed the target points at an unrelated live session.
+		unlinked := lineContaining(t, got, "set-hook -g window-unlinked")
+		if !strings.Contains(unlinked, "#{hook_session}") {
+			t.Errorf("tmux %s window-unlinked lost hook_session:\n%s", v, unlinked)
 		}
 	}
 }

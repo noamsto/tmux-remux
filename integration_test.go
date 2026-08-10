@@ -14,12 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/noamsto/tmux-remux/internal/closeevent"
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/restore"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/triggers"
 	"github.com/noamsto/tmux-remux/testutil"
 )
 
@@ -305,5 +307,142 @@ func TestRestoreFirstWindowAtBaseIndex(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		out, _ := dst.Tmux("list-windows", "-t", "s1", "-F", "#{window_index} #{window_name}")
 		t.Fatalf("restored window never ran its startup command; s1 windows:\n%s", strings.TrimSpace(out))
+	}
+}
+
+// buildRemux compiles the CLI into t.TempDir() and returns its path. Hooks need
+// a real binary; the other integration tests call packages directly.
+func buildRemux(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "tmux-remux")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/tmux-remux")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// wireTriggers renders the fragment for the running tmux and sources it into
+// srv. Storage lands under XDG_DATA_HOME, which the caller must have pointed at
+// a temp dir before the server started.
+func wireTriggers(t *testing.T, srv *testutil.Server, bin string) tmux.Version {
+	t.Helper()
+	v, err := tmux.NewClient("tmux").Version(context.Background())
+	if err != nil {
+		t.Fatalf("detect tmux version: %v", err)
+	}
+	frag := triggers.Render(triggers.Params{Bin: bin, Version: v, AutoRestore: false})
+	path := filepath.Join(t.TempDir(), "triggers.conf")
+	if err := os.WriteFile(path, []byte(frag), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := srv.Tmux("source-file", path); err != nil {
+		t.Fatalf("source-file: %v\n%s", err, out)
+	}
+	return v
+}
+
+// waitForEvent polls the store for up to 5s for an event of kind whose manifest
+// satisfies match, and returns it.
+func waitForEvent(t *testing.T, dbPath, kind string, match func(closeevent.CloseManifest) bool) closeevent.CloseManifest {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var seen []string
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		db, err := store.Open(context.Background(), dbPath)
+		if err != nil {
+			continue // hook may not have created the DB yet
+		}
+		evs, err := db.ListEvents(context.Background(), store.ListOpts{Kinds: []string{kind}, Limit: 20})
+		_ = db.Close()
+		if err != nil {
+			continue
+		}
+		seen = seen[:0]
+		for _, ev := range evs {
+			var m closeevent.CloseManifest
+			if json.Unmarshal([]byte(ev.ManifestJSON), &m) != nil {
+				continue
+			}
+			seen = append(seen, ev.ManifestJSON)
+			if match(m) {
+				return m
+			}
+		}
+	}
+	t.Fatalf("no %s event matched within 5s; saw: %v", kind, seen)
+	return closeevent.CloseManifest{}
+}
+
+// remuxEnv points storage at a temp dir and returns the resulting DB path. Must
+// run before the tmux server starts so the server (and its hook jobs) inherit it.
+func remuxEnv(t *testing.T) string {
+	t.Helper()
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	t.Setenv("XDG_RUNTIME_DIR", dataHome)
+	return filepath.Join(dataHome, "tmux-remux", "state.db")
+}
+
+func TestTriggersCloseEventsCarrySession(t *testing.T) {
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	wireTriggers(t, srv, bin)
+
+	// A snapshot has to exist before the close, or capture-event has nothing to
+	// diff against.
+	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("run-shell", bin+" save --reason=test"); err != nil {
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+
+	// A pane whose program exits fires pane-exited — the hook whose session
+	// attribution broke on tmux 3.8.
+	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "sh", "-c", "exit 0"); err != nil {
+		t.Fatalf("split-window: %v\n%s", err, out)
+	}
+
+	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+		return m.PaneID != ""
+	})
+	if m.SessionID == "" {
+		t.Error("pane-died event has no session id — the hook passed --session empty")
+	}
+	if m.SessionName != "work" {
+		t.Errorf("pane-died SessionName = %q, want \"work\"", m.SessionName)
+	}
+}
+
+func TestTriggersWindowCloseCarriesSession(t *testing.T) {
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	wireTriggers(t, srv, bin)
+
+	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("new-window", "-d", "-t", "work", "-n", "doomed", "/bin/sh"); err != nil {
+		t.Fatalf("new-window: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("run-shell", bin+" save --reason=test"); err != nil {
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("kill-window", "-t", "work:doomed"); err != nil {
+		t.Fatalf("kill-window: %v\n%s", err, out)
+	}
+
+	m := waitForEvent(t, dbPath, "window-unlinked", func(m closeevent.CloseManifest) bool {
+		return m.WindowID != ""
+	})
+	if m.SessionID == "" {
+		t.Error("window-unlinked event has no session id")
+	}
+	if m.SessionName != "work" {
+		t.Errorf("window-unlinked SessionName = %q, want \"work\"", m.SessionName)
 	}
 }
