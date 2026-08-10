@@ -120,14 +120,11 @@ wire_plugin() {
   local auto_restore
   auto_restore="$(tmux_option_or_default "@tmux_remux_auto_restore" "on")"
 
-  # Every hook, bind and option lives in internal/triggers and is rendered by
-  # the binary itself, so there is exactly one copy of each string, gated on the
-  # tmux version it detects. --bin is omitted deliberately: the binary defaults
-  # it to its own path, which is the one resolve_binary just found.
+  # internal/triggers renders every hook, bind and option, gated on the tmux
+  # version it detects. --bin is omitted deliberately: the binary defaults it to
+  # its own path, which is the one resolve_binary just found.
   #
-  # A binary older than this plugin script has no `triggers` subcommand. Say so
-  # rather than falling back to a hand-copied set of hooks here — that second
-  # copy is what this arrangement exists to delete.
+  # A binary older than this plugin script has no `triggers` subcommand.
   if ! "$bin" triggers --auto-restore="$auto_restore" | tmux source-file -; then
     tmux display-message "tmux-remux: binary too old for this plugin version — update it or unpin @tmux_remux_version"
   fi

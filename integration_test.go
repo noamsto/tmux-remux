@@ -400,8 +400,7 @@ func TestTriggersCloseEventsCarrySession(t *testing.T) {
 		t.Fatalf("save: %v\n%s", err, out)
 	}
 
-	// A pane whose program exits fires pane-exited — the hook whose session
-	// attribution broke on tmux 3.8.
+	// A pane whose program exits is what fires pane-exited.
 	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "sh", "-c", "exit 0"); err != nil {
 		t.Fatalf("split-window: %v\n%s", err, out)
 	}
@@ -449,9 +448,7 @@ func TestTriggersWindowCloseCarriesSession(t *testing.T) {
 
 // prefix+x runs `kill-pane`, and no tmux release gives that command hook the
 // pane it killed, so closeevent.resolveKilledPane recovers the id by diffing
-// survivors against the last snapshot. Guards that path against deletion —
-// issue #62 proposed removing it on the theory that 3.8 payloads made it
-// redundant; they do not.
+// survivors against the last snapshot.
 func TestTriggersKillPaneResolvesViaSurvivorDiff(t *testing.T) {
 	dbPath := remuxEnv(t)
 	bin := buildRemux(t)

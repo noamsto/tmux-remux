@@ -77,17 +77,15 @@ set-hook -g session-closed     'run-shell -b "@BIN@ capture-event session-closed
 
 `
 
-// closeHooks captures close events. It is version-independent.
+// closeHooks captures close events on every supported tmux.
 //
-// pane-exited reads the session from the event *target*, not from hook_*. Its
-// payload sets pane, window and exit status but no session, so #{hook_session}
-// and #{hook_session_name} expand empty — measured on both 3.7b and next-3.8,
-// so this is the event's shape rather than a 3.8 regression. #{session_id} and
-// #{session_name} resolve correctly because the target comes from the pane.
+// pane-exited's payload sets pane, window and exit status but no session, so
+// #{hook_session} and #{hook_session_name} expand empty there — measured on
+// 3.7b and next-3.8 alike. It reads the event target instead.
 //
-// window-unlinked and session-closed keep hook_* instead: their payloads do
-// carry the session, and on session-closed the target does not — the session is
-// already dead, so the target falls back to an unrelated live one.
+// window-unlinked and session-closed keep hook_*: their payloads do carry the
+// session, and on session-closed the target does not — the session is already
+// dead, so the target falls back to an unrelated live one.
 const closeHooks = `# Capture close events for undo
 # Hook pane-exited (pane-died only fires with remain-on-exit); kind stays "pane-died" for the diff
 # pane-exited carries no session in its payload on any tmux tested, so --session
