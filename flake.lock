@@ -90,7 +90,25 @@
       "inputs": {
         "flake-parts": "flake-parts",
         "git-hooks-nix": "git-hooks-nix",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "tmux-upstream": "tmux-upstream"
+      }
+    },
+    "tmux-upstream": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1785864192,
+        "narHash": "sha256-I8Mt2QVErCDuEpg453mH6Jqc9TM4nYok/68GpUpM1NQ=",
+        "owner": "tmux",
+        "repo": "tmux",
+        "rev": "d5afb67a81d8a30379e0d4186ec4b968244393bf",
+        "type": "github"
+      },
+      "original": {
+        "owner": "tmux",
+        "repo": "tmux",
+        "rev": "d5afb67a81d8a30379e0d4186ec4b968244393bf",
+        "type": "github"
       }
     }
   },
