@@ -81,13 +81,32 @@ step.
 
 ## Quick start
 
-Copy [`examples/tmux.conf`](examples/tmux.conf) into your `~/.tmux.conf` (or `source` it). It wires:
+Wire tmux-remux into a running server with one line:
 
-- 6 tmux hooks for save + close-event capture
+```sh
+tmux-remux triggers | tmux source-file -
+```
+
+To make it permanent, append the output to your config once:
+
+```sh
+tmux-remux triggers --bin="$(command -v tmux-remux)" >> ~/.config/tmux/tmux.conf
+```
+
+Either way you get:
+
+- 8 tmux hooks for save + close-event capture
 - `prefix + u` (undo pop), `prefix + U` (close-event picker popup), `prefix + R` (snapshot picker popup), `prefix + Ctrl-s` (save now)
 - `run-shell -b 'tmux-remux restore --auto'` for auto-restore on tmux start
 
-Then schedule the periodic save timer for your platform.
+[`examples/tmux.conf`](examples/tmux.conf) is that same fragment, checked in so you can read it before running it. It is **generated** — a test asserts it matches `tmux-remux triggers --tmux-version=3.8`, so edit `internal/triggers` rather than the file.
+
+### tmux version differences
+
+`triggers` detects tmux via `tmux -V` and renders accordingly. Override with `--tmux-version=3.8` when generating a config for a different machine.
+
+- **tmux 3.8+** — periodic saves run inside the server via a monitor hook (`set-hook -B`), so **no external timer is needed** and you can skip the rest of this section. The watched format lives in `@remux_save_tick` (default `'%M'`, i.e. once a minute).
+- **tmux < 3.8** — no monitor hooks, so periodic saves need an external timer. Set one up below.
 
 ### Linux (systemd)
 
@@ -147,6 +166,7 @@ That's it. `tmux-remux save --reason=manual` to test, `tmux-remux list` to see w
 | `tmux-remux gc` | Reap orphan scrollback files (refcount = 0) |
 | `tmux-remux relaunch-stamp` | Stamp `@remux_relaunch` from an agent start hook so restore reopens the session (internal; wired via the Claude plugin or `install-hook`) |
 | `tmux-remux install-hook codex` | Wire Codex's `SessionStart` hook (`~/.codex/config.toml`) to `relaunch-stamp` |
+| `tmux-remux triggers` | Print the tmux.conf fragment that wires tmux-remux, rendered for the detected tmux version (used by `tmux-remux.tmux`) |
 | `tmux-remux version` | Print version |
 
 ### `pick`
