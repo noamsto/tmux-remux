@@ -26,6 +26,7 @@ import (
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/internal/triggers"
 )
 
 // Version is the released version. Bumped on tagged releases.
@@ -51,6 +52,7 @@ type CLI struct {
 	CatScrollback CatScrollbackCmd `cmd:"" name:"cat-scrollback" hidden:"" help:"Stream stored scrollback to stdout (internal helper)"`
 	RelaunchStamp RelaunchStampCmd `cmd:"" name:"relaunch-stamp" hidden:"" help:"Stamp @remux_relaunch from an agent start hook (internal helper)"`
 	InstallHook   InstallHookCmd   `cmd:"" name:"install-hook" help:"Wire an agent start hook for resume-on-restore"`
+	Triggers      TriggersCmd      `cmd:"" help:"Print the tmux.conf fragment that wires tmux-remux (used by tmux-remux.tmux)"`
 }
 
 func main() {
@@ -98,6 +100,48 @@ type VersionCmd struct{}
 
 func (VersionCmd) Run() error {
 	fmt.Println(Version)
+	return nil
+}
+
+// TriggersCmd prints the tmux.conf fragment that wires tmux-remux into tmux.
+// tmux-remux.tmux pipes it into `tmux source-file -`; examples/tmux.conf is a
+// checked-in copy of the tmux 3.8 output.
+type TriggersCmd struct {
+	Bin         string `help:"tmux-remux path the hooks invoke (default: this binary)"`
+	TmuxVersion string `name:"tmux-version" help:"target tmux version, e.g. 3.8 (default: detected via tmux -V)"`
+	AutoRestore string `name:"auto-restore" default:"on" enum:"on,off" help:"emit the restore --auto line"`
+}
+
+func (c TriggersCmd) Run() error {
+	bin := c.Bin
+	if bin == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		bin = exe
+	}
+
+	// A guessed version would be worse than none: a 3.8 fragment sourced by a
+	// 3.7 tmux fails on set-hook -B partway through, leaving hooks half-wired.
+	var (
+		v   tmux.Version
+		err error
+	)
+	if c.TmuxVersion != "" {
+		v, err = tmux.ParseVersion(c.TmuxVersion)
+	} else {
+		v, err = tmux.NewClient("tmux").Version(context.Background())
+	}
+	if err != nil {
+		return err
+	}
+
+	fmt.Print(triggers.Render(triggers.Params{
+		Bin:         bin,
+		Version:     v,
+		AutoRestore: c.AutoRestore == "on",
+	}))
 	return nil
 }
 

@@ -120,42 +120,14 @@ wire_plugin() {
   local auto_restore
   auto_restore="$(tmux_option_or_default "@tmux_remux_auto_restore" "on")"
 
-  # `bin` is quoted with an inner '...' so a path containing spaces still
-  # survives the shell that finally runs the command: for hooks, tmux's own
-  # parser strips the outer "..." when the hook fires and hands run-shell the
-  # inner '${bin}' literally, which /bin/sh -c then re-parses as one word.
-  tmux set-hook -g session-created "run-shell -b \"'${bin}' save --reason=hook:session-created\""
-  tmux set-hook -g window-linked   "run-shell -b \"'${bin}' save --reason=hook:window-linked\""
-  tmux set-hook -g client-detached "run-shell -b \"'${bin}' save --reason=hook:client-detached\""
-  # tmux has no pane-created hook, so a new pane would otherwise wait for the
-  # next window/session event or the save timer before any snapshot recorded it
-  # — and undo can't restore a pane no snapshot ever saw.
-  tmux set-hook -g after-split-window "run-shell -b \"'${bin}' save --reason=hook:after-split-window\""
-
-  # --session-name gets the same '...' treatment as `bin` above: session
-  # names may contain spaces too, and would otherwise word-split below.
-  # --session needs it too: #{hook_session} expands to a $-prefixed id like
-  # $38, which an unquoted sh -c reads as the positional parameter $3
-  # followed by a literal 8 — collapsing distinct session ids onto shared
-  # mangled values and confusing the cascade-close dedup in closeevent.Capture.
-  tmux set-hook -g pane-exited     "run-shell -b \"'${bin}' capture-event pane-died --pane=#{hook_pane} --window=#{hook_window} --session='#{hook_session}' --session-name='#{hook_session_name}'\""
-  # prefix+x kills the pane without its program exiting, so pane-exited never
-  # fires. after-kill-pane is a command hook and carries no hook_pane — the id
-  # is recovered by diffing the survivors against the last snapshot.
-  tmux set-hook -g after-kill-pane "run-shell -b \"'${bin}' capture-event pane-died\""
-  tmux set-hook -g window-unlinked "run-shell -b \"'${bin}' capture-event window-unlinked --window=#{hook_window} --session='#{hook_session}' --session-name='#{hook_session_name}'\""
-  tmux set-hook -g session-closed  "run-shell -b \"'${bin}' capture-event session-closed --session='#{hook_session}' --session-name='#{hook_session_name}'\""
-
-  if [ "$auto_restore" = "on" ]; then
-    tmux run-shell -b "'${bin}' restore --auto"
+  # internal/triggers renders every hook, bind and option, gated on the tmux
+  # version it detects. --bin is omitted deliberately: the binary defaults it to
+  # its own path, which is the one resolve_binary just found.
+  #
+  # A binary older than this plugin script has no `triggers` subcommand.
+  if ! "$bin" triggers --auto-restore="$auto_restore" | tmux source-file -; then
+    tmux display-message "tmux-remux: binary too old for this plugin version — update it or unpin @tmux_remux_version"
   fi
-
-  # bind-key's arguments are NOT re-parsed by tmux (they arrive pre-split from
-  # this shell invocation), so only the inner '...' quoting is needed here.
-  tmux bind-key u   run-shell "'${bin}' undo --pop --session='#{session_name}'"
-  tmux bind-key U   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=close --session='#{session_name}'"
-  tmux bind-key R   display-popup -E -w 90% -h 85% "'${bin}' pick --kind=snapshot"
-  tmux bind-key C-s run-shell "'${bin}' save --reason=keybinding"
 }
 
 main() {
