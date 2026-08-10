@@ -1,6 +1,7 @@
 package tmux_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/noamsto/tmux-remux/internal/tmux"
@@ -54,5 +55,26 @@ func TestVersionAtLeast(t *testing.T) {
 		if got := c.v.AtLeast(c.major, c.minor); got != c.want {
 			t.Errorf("%v.AtLeast(%d, %d) = %v, want %v", c.v, c.major, c.minor, got, c.want)
 		}
+	}
+}
+
+func TestClientVersion(t *testing.T) {
+	fake := writeFakeTmux(t, `echo "tmux next-3.8"`)
+	c := tmux.NewClient(fake)
+	got, err := c.Version(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := tmux.Version{Major: 3, Minor: 8}
+	if got != want {
+		t.Errorf("Version() = %v, want %v", got, want)
+	}
+}
+
+func TestClientVersionPropagatesRunError(t *testing.T) {
+	fake := writeFakeTmux(t, `exit 1`)
+	c := tmux.NewClient(fake)
+	if _, err := c.Version(context.Background()); err == nil {
+		t.Error("expected error when tmux -V fails")
 	}
 }
