@@ -21,3 +21,4 @@ coverage.txt
 
 # Worktrees
 /.worktrees/
+demo/bin/

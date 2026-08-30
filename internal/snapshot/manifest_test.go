@@ -65,3 +65,15 @@ func TestFingerprintIgnoresDecoration(t *testing.T) {
 		t.Error("Fingerprint changed when only Decoration differs")
 	}
 }
+
+func TestStructureFingerprintChangesOnRelaunch(t *testing.T) {
+	base := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{
+		ID: "@1", Index: 1, Panes: []snapshot.Pane{{ID: "%1", Index: 1}},
+	}}}}}
+	stamped := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{
+		ID: "@1", Index: 1, Panes: []snapshot.Pane{{ID: "%1", Index: 1, Relaunch: "claude --resume abc"}},
+	}}}}}
+	if base.StructureFingerprint() == stamped.StructureFingerprint() {
+		t.Error("StructureFingerprint must change when @remux_relaunch is stamped, or the throttle drops the stamp")
+	}
+}
