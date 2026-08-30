@@ -4,6 +4,8 @@ Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](http
 
 > **Status:** v0.4.0. Pre-release. Personal tool — used and shaped by my workflow. Bug reports welcome; feature requests will be answered with "PR welcome."
 
+![Kill the pane an agent is working in, undo it, and the agent resumes](demo/undo.gif)
+
 ## What it does
 
 - **Periodic save** — snapshots every tmux session, window, pane (cwd, command, layout, scrollback) every 60s and on every structural change.

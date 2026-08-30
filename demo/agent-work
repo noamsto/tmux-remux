@@ -1,0 +1,14 @@
+#!/usr/bin/env fish
+# Fake agent for the demo: visibly mid-task, and survives a relaunch by
+# picking up where the counter left off.
+set -l i 1
+if test -f /tmp/agent-work.step
+    set i (cat /tmp/agent-work.step)
+    echo "▶ resumed at step $i"
+end
+while true
+    echo "step $i: reading files… editing… running tests…"
+    echo $i > /tmp/agent-work.step
+    set i (math $i + 1)
+    sleep 1
+end

@@ -98,9 +98,12 @@ func (m Manifest) Fingerprint() string {
 
 // StructureFingerprint returns a sha256 hex over the identity of every session,
 // window, and pane — which entities exist, ignoring what they are doing (cwd,
-// command, layout, scrollback). It changes only when something was created or
-// destroyed, which is the one class of change a save must never drop: an entity
-// that never reaches a snapshot can never be restored once it closes.
+// command, layout, scrollback). It changes when something is created or
+// destroyed, and when a pane's @remux_relaunch stamp changes: both are the
+// class of change a save must never drop. An entity that never reaches a
+// snapshot can never be restored once it closes, and a relaunch stamped after
+// the last snapshot (an agent start hook fires seconds into a fresh pane)
+// would restore as a bare shell.
 func (m Manifest) StructureFingerprint() string {
 	var ids []string
 	for _, s := range m.Sessions {
@@ -108,7 +111,7 @@ func (m Manifest) StructureFingerprint() string {
 		for _, w := range s.Windows {
 			ids = append(ids, fmt.Sprintf("w\x1f%s\x1f%d", w.ID, w.Index))
 			for _, p := range w.Panes {
-				ids = append(ids, fmt.Sprintf("p\x1f%s\x1f%d", p.ID, p.Index))
+				ids = append(ids, fmt.Sprintf("p\x1f%s\x1f%d\x1f%s", p.ID, p.Index, p.Relaunch))
 			}
 		}
 	}
