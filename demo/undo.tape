@@ -13,35 +13,37 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Set Padding 12
 
-# All setup runs against a detached server so nothing races the attach or
-# depends on typed keystrokes: isolated data dir (clean history, no host
-# sessions), stock C-b prefix, split, relaunch stamp (what an agent start
-# hook does), snapshot, agent running. The recording opens on the scene.
+# demo/setup.fish builds the whole scene against a detached server (isolated
+# data dir and socket, split, relaunch stamp, snapshot, agent running), waits
+# until the agent is live, and exec-attaches. Hidden: the gif opens attached.
 Hide
-Type "set -x XDG_DATA_HOME /tmp/remux-demo; rm -rf /tmp/remux-demo /tmp/agent-work.step; tmux -L vhs kill-server 2>/dev/null; clear"
+Type "./demo/setup.fish"
 Enter
-Sleep 1s
-Type "tmux -L vhs new -d -s demo -c $PWD; tmux -L vhs set -g prefix C-b"
-Enter
-Sleep 3s
-Type "tmux -L vhs split-window -h -t demo -c $PWD; tmux -L vhs set -p -t demo @remux_relaunch $PWD/demo/agent-work"
-Enter
-Sleep 500ms
-Type "tmux -L vhs run-shell $PWD/demo/bin/tmux-remux' save'; tmux -L vhs send-keys -t demo ./demo/agent-work Enter; clear"
-Enter
-Sleep 2.5s
+Sleep 8s
 Show
+Sleep 2.5s
 
-Type "tmux -L vhs attach -t demo"
+# Oops. The pane-border caption is the keycast: VHS has no built-in one, a
+# display-message dies at the next keypress, status-right is overridden by
+# status-format themes, and typing into the attached client would echo into
+# the agent pane — so it's set via the (hidden) command prompt.
+Hide
+Ctrl+b
+Type ":set -g pane-border-status top; set -g pane-border-format '#[align=centre,bold] prefix + x — kill pane '"
 Enter
-Sleep 3s
-
-# Oops.
+Show
+Sleep 800ms
 Ctrl+b
 Type "x"
 Sleep 2.5s
 
 # Undo.
+Hide
+Ctrl+b
+Type ":set -g pane-border-format '#[align=centre,bold] prefix + u — undo '"
+Enter
+Show
+Sleep 800ms
 Ctrl+b
 Type "u"
 Sleep 4.5s
@@ -50,3 +52,4 @@ Hide
 Ctrl+b
 Type ":kill-server"
 Enter
+Sleep 1s
