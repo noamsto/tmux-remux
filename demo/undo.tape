@@ -41,7 +41,7 @@ Sleep 3s
 Ctrl+b
 Sleep 400ms
 Type "u"
-Sleep 5s
+Sleep 6s
 
 Hide
 Ctrl+b
