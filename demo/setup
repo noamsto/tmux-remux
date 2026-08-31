@@ -42,20 +42,27 @@ tm set -g prefix C-b
 # The real plugin wiring, so the recording exercises the binary just built.
 "$BIN" triggers --auto-restore=off | tm source-file -
 
-# Key-press overlay, painted so the caption reads as a badge instead of blending
-# into the statusline it covers.
-tm set -g message-style "bg=#{@thm_peach},fg=#{@thm_bg},bold"
+# Key-press badge, pinned to the bottom row as a borderless popup. A tmux
+# message is not an option: it can only render on a status line, and those all
+# sit wherever status-position puts them — the top, where the host theme's
+# statusline belongs. -y is deliberately past the last row so tmux clamps it to
+# the bottom whatever the client height. The host theme's colours are resolved
+# here, so -s gets literal values and never has to expand a format.
+PEACH="$(tm show -gqv @thm_peach)"
+THMBG="$(tm show -gqv @thm_bg)"
+badge="display-popup -B -s 'bg=$PEACH,fg=$THMBG' -w 30 -h 1 -x C -y 999 -E"
 
-# display-message rather than a status row of the demo's own: the host's
-# window-reflow automation owns the status line count and generates lines 1-3,
-# and a third row set behind its back does not survive to render.
-#
 # prefix+x is stock tmux's `confirm-before kill-pane`; the demo kills outright so
 # the recording doesn't hinge on a typed "y". Each sequence is one argument: a
 # bare `;` would separate commands for the outer tmux invocation instead, firing
 # kill-pane on the spot.
-tm bind x 'display-message -d 2000 "  C-b x   →   kill-pane  " ; kill-pane'
-tm bind u "display-message -d 2800 \"  C-b u   →   remux undo  \" ; run-shell \"$BIN undo --pop --session='#{session_name}'\""
+#
+# The action is deferred behind the badge rather than firing with it, so the
+# recording shows the key, then the key taking effect. -b keeps the sleep off
+# the server's command queue; #{pane_id} pins the pane that was active at the
+# press, since the sleep outlives the key's own target.
+tm bind x "$badge \"echo '  C-b x  →  kill-pane' ; sleep 1.5\" ; run-shell -b \"sleep 1.2 ; tmux kill-pane -t '#{pane_id}'\""
+tm bind u "$badge \"echo '  C-b u  →  remux undo' ; sleep 1.5\" ; run-shell -b \"sleep 1.2 ; $BIN undo --pop --session='#{session_name}'\""
 
 # The agent runs as the pane's command rather than keys typed into a shell:
 # send-keys races the shell's startup and the keystrokes get dropped.
