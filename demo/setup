@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#
+# Builds the scene demo/undo.tape opens on, against a detached throwaway tmux
+# server. The host tmux.conf loads, so the recording carries the real theme,
+# statusline and fish panes; only the parts that would make the demo lie about
+# which binary runs are replaced — the host's own remux wiring points at an
+# installed tmux-remux, not the one under test.
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+BIN="$PWD/demo/bin/tmux-remux"
+if [ ! -x "$BIN" ]; then
+  printf 'demo/setup: build it first: go build -o demo/bin/tmux-remux ./cmd/tmux-remux\n' >&2
+  exit 1
+fi
+
+tm() { tmux -L vhs "$@"; }
+
+# Every tmux call here is explicitly -L vhs, but tmux-remux itself picks its
+# server up from $TMUX: inherited from an outer tmux, it would snapshot the
+# host's server instead and undo would find nothing to restore.
+unset TMUX
+
+# Isolated so the demo neither reads nor writes the real snapshot store.
+export XDG_DATA_HOME=/tmp/remux-demo
+rm -rf /tmp/remux-demo /tmp/agent-work.step
+tm kill-server 2>/dev/null || true
+# kill-server returns before the server is gone; starting the new one against a
+# socket that is still draining fails with "server exited unexpectedly".
+for _ in $(seq 50); do
+  tm list-sessions >/dev/null 2>&1 || break
+  sleep 0.1
+done
+
+# $SHELL is bash here, so fish has to be asked for by name.
+FISH="$(command -v fish)"
+tm new-session -d -s demo -c "$PWD" "$FISH"
+tm set -g default-shell "$FISH"
+tm set -g prefix C-b
+
+# The real plugin wiring, so the recording exercises the binary just built.
+"$BIN" triggers --auto-restore=off | tm source-file -
+
+# Key-press overlay, painted so the caption reads as a badge instead of blending
+# into the statusline it covers.
+tm set -g message-style "bg=#{@thm_peach},fg=#{@thm_bg},bold"
+
+# display-message rather than a status row of the demo's own: the host's
+# window-reflow automation owns the status line count and generates lines 1-3,
+# and a third row set behind its back does not survive to render.
+#
+# prefix+x is stock tmux's `confirm-before kill-pane`; the demo kills outright so
+# the recording doesn't hinge on a typed "y". Each sequence is one argument: a
+# bare `;` would separate commands for the outer tmux invocation instead, firing
+# kill-pane on the spot.
+tm bind x 'display-message -d 2000 "  C-b x   →   kill-pane  " ; kill-pane'
+tm bind u "display-message -d 2800 \"  C-b u   →   remux undo  \" ; run-shell \"$BIN undo --pop --session='#{session_name}'\""
+
+# The agent runs as the pane's command rather than keys typed into a shell:
+# send-keys races the shell's startup and the keystrokes get dropped.
+tm split-window -h -t demo -c "$PWD" "$PWD/demo/agent-work"
+# after-split-window saves in the background, and that save can land after an
+# immediate explicit one — leaving a newest snapshot that predates the stamp,
+# which undo would then restore a pane without the agent from.
+sleep 2
+tm set -p -t demo @remux_relaunch "$PWD/demo/agent-work"
+tm run-shell "$BIN save"

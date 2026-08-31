@@ -13,38 +13,35 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Set Padding 12
 
-# All setup runs against a detached server so nothing races the attach or
-# depends on typed keystrokes: isolated data dir (clean history, no host
-# sessions), stock C-b prefix, split, relaunch stamp (what an agent start
-# hook does), snapshot, agent running. The recording opens on the scene.
+# demo/setup builds the whole scene on a detached throwaway server, so nothing
+# visible depends on typed setup keystrokes. Autosuggestion goes off before
+# anything else is typed: fish paints the rest of a matching history entry as
+# soon as a command starts typing, and the setup commands land in history.
 Hide
-Type "set -x XDG_DATA_HOME /tmp/remux-demo; rm -rf /tmp/remux-demo /tmp/agent-work.step; tmux -L vhs kill-server 2>/dev/null; clear"
-Enter
-Sleep 1s
-Type "tmux -L vhs new -d -s demo -c $PWD; tmux -L vhs set -g prefix C-b"
-Enter
-Sleep 3s
-Type "tmux -L vhs split-window -h -t demo -c $PWD; tmux -L vhs set -p -t demo @remux_relaunch $PWD/demo/agent-work"
+Type "set -g fish_autosuggestion_enabled 0"
 Enter
 Sleep 500ms
-Type "tmux -L vhs run-shell $PWD/demo/bin/tmux-remux' save'; tmux -L vhs send-keys -t demo ./demo/agent-work Enter; clear"
+Type "./demo/setup; clear"
 Enter
-Sleep 2.5s
+Sleep 10s
 Show
 
 Type "tmux -L vhs attach -t demo"
 Enter
 Sleep 3s
 
-# Oops.
+# Oops. The beat after the prefix keeps the two-step press legible; the bind
+# itself then names the key it fired over the status line.
 Ctrl+b
+Sleep 400ms
 Type "x"
-Sleep 2.5s
+Sleep 3s
 
 # Undo.
 Ctrl+b
+Sleep 400ms
 Type "u"
-Sleep 4.5s
+Sleep 5s
 
 Hide
 Ctrl+b
