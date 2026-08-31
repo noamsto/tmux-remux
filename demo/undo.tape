@@ -13,25 +13,24 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
 Set Padding 12
 
-# demo/setup builds the whole scene on a detached throwaway server, so nothing
-# visible depends on typed setup keystrokes. Autosuggestion goes off before
-# anything else is typed: fish paints the rest of a matching history entry as
-# soon as a command starts typing, and the setup commands land in history.
+# demo/setup builds the scene on a detached throwaway server, and the attach is
+# hidden with it: the command is socket plumbing that says nothing about
+# tmux-remux, and at typing speed it flashes past unreadably anyway. The
+# recording opens on the scene itself, already attached.
 Hide
-Type "set -g fish_autosuggestion_enabled 0"
+Type "./demo/setup"
 Enter
-Sleep 500ms
-Type "./demo/setup; clear"
-Enter
-Sleep 10s
-Show
-
-Type "tmux -L vhs attach -t demo"
+Sleep 7s
+Type "clear; tmux -L vhs attach -t demo"
 Enter
 Sleep 3s
+Show
+
+# An agent mid-task in the lower pane. A beat to read it before anything moves.
+Sleep 1500ms
 
 # Oops. The beat after the prefix keeps the two-step press legible; the bind
-# itself then names the key it fired over the status line.
+# itself then names the key it fired, as a badge along the bottom.
 Ctrl+b
 Sleep 400ms
 Type "x"

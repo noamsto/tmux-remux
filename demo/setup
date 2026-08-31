@@ -35,7 +35,11 @@ done
 
 # $SHELL is bash here, so fish has to be asked for by name.
 FISH="$(command -v fish)"
-tm new-session -d -s demo -c "$PWD" "$FISH"
+# Sized to the terminal undo.tape records at (95x26, less the theme's two status
+# rows). A detached server otherwise defaults to 80x24 and the attach resizes it,
+# which makes fish redraw its prompt and leaves the earlier, wider renderings
+# behind as truncated junk lines.
+tm new-session -d -x 95 -y 24 -s demo -c "$PWD" "$FISH"
 tm set -g default-shell "$FISH"
 tm set -g prefix C-b
 
@@ -66,7 +70,12 @@ tm bind u "$badge \"echo '  C-b u  →  remux undo' ; sleep 1.5\" ; run-shell -b
 
 # The agent runs as the pane's command rather than keys typed into a shell:
 # send-keys races the shell's startup and the keystrokes get dropped.
-tm split-window -h -t demo -c "$PWD" "$PWD/demo/agent-work"
+# Panes stacked rather than side by side: killing the agent's pane and restoring
+# it then changes the survivor's height, never its width, so fish never re-wraps
+# and reprints its prompt. Side by side, the 47-column survivor widened to 95 on
+# the kill and back again on the undo, leaving three truncated copies of the
+# prompt stacked up by the end of the recording.
+tm split-window -v -t demo -c "$PWD" "$PWD/demo/agent-work"
 # after-split-window saves in the background, and that save can land after an
 # immediate explicit one — leaving a newest snapshot that predates the stamp,
 # which undo would then restore a pane without the agent from.
