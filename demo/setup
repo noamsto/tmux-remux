@@ -15,6 +15,21 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
+# Defaults suit undo.tape; pick.tape records wider, because the picker only
+# lays out its scrollback preview at 120 columns or more and it opens in a
+# popup sized to 90% of the client.
+COLS=95
+ROWS=24
+HISTORY=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --cols) COLS="$2"; shift 2 ;;
+    --rows) ROWS="$2"; shift 2 ;;
+    --history) HISTORY=1; shift ;;
+    *) printf 'demo/setup: unknown argument: %s\n' "$1" >&2; exit 1 ;;
+  esac
+done
+
 tm() { tmux -L vhs "$@"; }
 
 # Every tmux call here is explicitly -L vhs, but tmux-remux itself picks its
@@ -35,11 +50,11 @@ done
 
 # $SHELL is bash here, so fish has to be asked for by name.
 FISH="$(command -v fish)"
-# Sized to the terminal undo.tape records at (95x26, less the theme's two status
-# rows). A detached server otherwise defaults to 80x24 and the attach resizes it,
-# which makes fish redraw its prompt and leaves the earlier, wider renderings
-# behind as truncated junk lines.
-tm new-session -d -x 95 -y 24 -s demo -c "$PWD" "$FISH"
+# Sized to the terminal the tape records at, less the theme's two status rows. A
+# detached server otherwise defaults to 80x24 and the attach resizes it, which
+# makes fish redraw its prompt and leaves the earlier, wider renderings behind as
+# truncated junk lines.
+tm new-session -d -x "$COLS" -y "$ROWS" -s demo -c "$PWD" "$FISH"
 tm set -g default-shell "$FISH"
 tm set -g prefix C-b
 
@@ -82,3 +97,16 @@ tm split-window -v -t demo -c "$PWD" "$PWD/demo/agent-work"
 sleep 2
 tm set -p -t demo @remux_relaunch "$PWD/demo/agent-work"
 tm run-shell "$BIN save"
+
+# pick.tape previews a pane's scrollback, and a save inside MinSaveInterval (30s)
+# is deliberately downgraded to a scrollback-free snapshot — the preview would
+# then read "(no scrollback captured for this pane)". A save that changes nothing
+# returns before it stamps last_save_ts, so waiting the throttle out and then
+# making one structural change leaves the newest snapshot, the one the picker
+# opens on, carrying scrollback for every pane. The agent has been logging the
+# whole time, so that scrollback is worth looking at.
+if [ "$HISTORY" = 1 ]; then
+  sleep 32
+  tm split-window -h -t demo -c "$PWD" "$PWD/demo/agent-work"
+  sleep 3
+fi
