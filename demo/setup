@@ -115,7 +115,13 @@ tm run-shell "$BIN save"
 # opens on, carrying scrollback for every pane. The agent has been logging the
 # whole time, so that scrollback is worth looking at.
 if [ "$HISTORY" = 1 ]; then
+  # The agent's pane is still active from the base scene above.
+  agent="$(tm display -p -t demo '#{pane_id}')"
   sleep 32
   tm split-window -h -t demo -c "$PWD" "$PWD/demo/agent-work"
   sleep 3
+  # Hand focus back, so the tape's prefix+x closes the pane that has been
+  # logging for half a minute rather than the one just split — the close
+  # picker's preview is only worth showing for a pane with output behind it.
+  tm select-pane -t "$agent"
 fi

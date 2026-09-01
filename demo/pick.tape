@@ -44,9 +44,37 @@ Sleep 2s
 # stop short of the pane the split had only just created, whose scrollback is
 # empty because the hook snapshotted it before its command drew anything.
 Down
-Sleep 900ms
+Sleep 800ms
 Down
-Sleep 3500ms
+Sleep 2500ms
+Escape
+Sleep 800ms
+
+# Now the other picker: close something first so there is something to browse.
+# demo/setup handed focus back to the agent's pane, so this closes the one that
+# has been logging for half a minute.
+Ctrl+b
+Sleep 400ms
+Type "x"
+Sleep 2500ms
+
+# prefix+U lists what was closed. Its panes come out of the snapshot the close
+# was diffed against, so they preview the same way.
+Ctrl+b
+Sleep 400ms
+Type "U"
+Sleep 2200ms
+
+Tab
+Sleep 1000ms
+Type "d"
+Sleep 1200ms
+# Two stops: the first pane of the closed window is the plain shell, the second
+# is the agent's, which is the one with output worth recognising.
+Down
+Sleep 700ms
+Down
+Sleep 3s
 
 Hide
 Escape
