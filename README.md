@@ -175,7 +175,10 @@ That's it. `tmux-remux save --reason=manual` to test, `tmux-remux list` to see w
 
 Open an interactive picker over snapshot or close events. The picker is a Bubble Tea TUI that shows each snapshot's full session → window → pane tree before you restore it, and exposes the smart-restore filter as live footer toggles.
 
-- `--kind=snapshot` (default) — two-pane view (snapshots on the left, tree on the right). Toggle `s` to skip idle shells, `d` to skip sessions already running (shown collapsed with a `(running)` tag), `a` to dim snapshots older than 24h.
+![Browse snapshots and see what each pane had on screen before restoring](demo/pick.gif)
+
+- `--kind=snapshot` (default) — snapshots on the left, the selected snapshot's tree in the middle, the selected pane's captured scrollback on the right. The preview needs 120 columns; narrower than that it drops to two panes, and since the binds open the picker in a popup at 90% width, a terminal under ~134 columns never shows it. Toggle `s` to skip idle shells, `d` to skip sessions already running (shown collapsed with a `(running)` tag), `a` to dim snapshots older than 24h.
+- A snapshot saved within `min_save_interval` of the previous one is stored without scrollback on purpose (it keeps a restore storm's hook-per-window saves cheap), so its preview reads `(no scrollback captured for this pane)`.
 - `--kind=close` — list-only view of close events, used by `prefix + U` in lazytmux.
 
 Tab switches focus between panes. `?` shows the full keymap. `enter` restores; `esc` cancels.
