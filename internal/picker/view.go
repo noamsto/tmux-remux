@@ -484,23 +484,25 @@ func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightI
 	}
 }
 
-// shortReason truncates "hook:window-linked" to "wlink", "timer" to "timer",
-// "keybinding" to "key". Best-effort; falls back to the first 8 chars.
+// shortReason names a save reason in words the reader can act on. The stored
+// strings are internal hook names, and abbreviating them ("screat") or cutting
+// them to 8 characters ("hook:after-split-window" → "hook:aft") said nothing
+// about what the snapshot caught. renderList already truncates to the pane
+// width with an ellipsis, so there is no second length cut here.
 func shortReason(r string) string {
 	switch r {
-	case "timer":
-		return "timer"
 	case "keybinding":
 		return "key"
+	case "hook:after-split-window":
+		return "split"
 	case "hook:window-linked":
-		return "wlink"
+		return "new window"
 	case "hook:session-created":
-		return "screat"
+		return "new session"
 	case "hook:client-detached":
-		return "cdet"
+		return "detach"
 	}
-	if len(r) > 8 {
-		return r[:8]
-	}
-	return r
+	// An unmapped reason keeps its own words; only the hook: prefix goes, since
+	// every row in this list is a save and the prefix distinguishes nothing.
+	return strings.TrimPrefix(r, "hook:")
 }

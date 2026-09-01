@@ -116,3 +116,22 @@ func TestRenderCloseTree_NeverOverflowsFrame(t *testing.T) {
 		}
 	}
 }
+
+func TestShortReason(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"timer", "timer"},
+		{"manual", "manual"},
+		{"keybinding", "key"},
+		{"hook:after-split-window", "split"},
+		{"hook:window-linked", "new window"},
+		{"hook:session-created", "new session"},
+		{"hook:client-detached", "detach"},
+		// Unmapped: keeps its words, loses only the prefix. The old fallback
+		// cut this to "hook:pan".
+		{"hook:pane-exited", "pane-exited"},
+	} {
+		if got := shortReason(tc.in); got != tc.want {
+			t.Errorf("shortReason(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
