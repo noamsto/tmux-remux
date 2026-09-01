@@ -172,10 +172,14 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // visibleNodes flattens the current tree honoring Expanded.
 func (m PickerModel) visibleNodes() []*TreeNode {
-	if m.cursor < 0 || m.cursor >= len(m.events) {
+	// Keyed off CurrentEventID, not m.events[m.cursor]: with a close tree the
+	// cursor indexes close-tree rows, so indexing the event slice with it looks
+	// up the wrong tree (or none) and the preview finds no pane to show.
+	id := m.CurrentEventID()
+	if id == 0 {
 		return nil
 	}
-	tree := m.trees[m.events[m.cursor].ID]
+	tree := m.trees[id]
 	if tree == nil {
 		return nil
 	}
@@ -284,8 +288,10 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// after this clear.
 	m.footerNote = ""
 	// Close mode with a grouped tree: the cursor walks tree rows, so Up/Down
-	// skip headers and Left/Right collapse and expand them.
-	if m.mode == ModeClose && m.closeTree != nil {
+	// skip headers and Left/Right collapse and expand them. Only while the close
+	// tree holds focus — once Tab moves to the sub-manifest the arrows belong to
+	// its pane cursor, which is what drives the scrollback preview.
+	if m.mode == ModeClose && m.closeTree != nil && m.focus == focusList {
 		vis := m.CloseVisible()
 		switch {
 		case key.Matches(msg, m.keys.Up):
@@ -335,10 +341,9 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Preview scroll: Alt+J/K / PgUp/PgDn. Available whenever the picker is in
-	// snapshot mode — scroll up to read past output without leaving the cursor
-	// pane.
-	if m.mode == ModeSnapshot {
+	// Preview scroll: Alt+J/K / PgUp/PgDn — scroll up to read past output
+	// without leaving the cursor pane. Both modes preview scrollback.
+	if m.mode == ModeSnapshot || m.mode == ModeClose {
 		switch {
 		case key.Matches(msg, m.keys.PreviewUp):
 			inner := m.previewInnerHeight()
@@ -368,8 +373,10 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Focus-tree key handling for ModeSnapshot: intercept Up/Down/Left/Right.
-	if m.mode == ModeSnapshot && m.focus == focusTree {
+	// Focus-tree key handling: intercept Up/Down/Left/Right so they walk the
+	// manifest tree's panes. Close mode's tree is the sub-manifest of what was
+	// lost, and its panes preview the same way.
+	if (m.mode == ModeSnapshot || m.mode == ModeClose) && m.focus == focusTree {
 		switch {
 		case key.Matches(msg, m.keys.Up):
 			if idx := m.nextPaneIdx(m.treeCursor, -1); idx >= 0 {
@@ -442,7 +449,9 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Tab):
-		if m.mode == ModeSnapshot {
+		// Both modes have a tree of panes to reach; close mode's is the
+		// sub-manifest of what the event took down.
+		if m.mode == ModeSnapshot || m.mode == ModeClose {
 			if m.focus == focusList {
 				m.focus = focusTree
 				nodes := m.visibleNodes()
@@ -686,7 +695,7 @@ func (m *PickerModel) PreviewCmd() tea.Cmd {
 // node, or "" if focus is not on the tree, the node is not a pane, or the
 // pane has no scrollback.
 func (m PickerModel) focusedPaneSHA() string {
-	if m.mode != ModeSnapshot || m.focus != focusTree {
+	if m.focus != focusTree {
 		return ""
 	}
 	nodes := m.visibleNodes()

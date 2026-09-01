@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
@@ -271,3 +273,94 @@ func stripANSI(s string) string {
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func TestPaneWidths_ClosePreviewNeedsWidth(t *testing.T) {
+	narrow := PickerModel{mode: ModeClose, width: 100}
+	if _, _, pv := narrow.paneWidthsThree(); pv != 0 {
+		t.Errorf("close mode at 100 cols: got preview width %d, want 0", pv)
+	}
+	wide := PickerModel{mode: ModeClose, width: 130}
+	l, tr, pv := wide.paneWidthsThree()
+	if pv == 0 {
+		t.Error("close mode at 130 cols: got no preview column, want one")
+	}
+	if l+tr+pv != 130 {
+		t.Errorf("widths %d+%d+%d do not sum to 130", l, tr, pv)
+	}
+	if l < 32 {
+		t.Errorf("list width %d is under the 32-cell floor", l)
+	}
+}
+
+// A closed pane is read out of the snapshot the close was diffed against, so it
+// carries that snapshot's ScrollbackSHA and the close picker can preview it.
+func TestPickerModel_ClosePreviewsClosedPaneScrollback(t *testing.T) {
+	const sha = "deadbeef"
+	sub := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index: 1, Name: "tmux-remux",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/tmp", Command: "fish", ScrollbackSHA: sha}},
+			}},
+		}},
+	}
+	ev := store.Event{ID: 7, Kind: "pane-died", ManifestJSON: `{"pane_id":"%1"}`}
+
+	// A real close tree, because with one the cursor indexes close-tree rows
+	// rather than the event slice — the path production actually takes.
+	ctxs := map[int64]CloseContext{7: {
+		Label:       "pane",
+		Placement:   ClosePlacement{Session: "demo", WindowIndex: 1, Scope: "pane"},
+		SubManifest: sub,
+	}}
+	m := NewPickerModel(ModeClose, []store.Event{ev}, nil, scrollback.New(t.TempDir()))
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(BuildCloseTree([]store.Event{ev}, ctxs, "demo", nil))
+	m.Bootstrap()
+	m.width, m.height = 130, 20
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+	m.scrollbacks[sha] = []byte("step 34: reading files…")
+
+	_, _, previewWidth := m.paneWidthsThree()
+	got := m.renderPreview(previewWidth)
+	if !strings.Contains(got, "step 34") {
+		t.Errorf("close-mode preview does not show the pane's scrollback:\n%s", got)
+	}
+}
+
+// Without this the arrows stay with the close tree and the pane cursor never
+// moves, so the preview can never be pointed at anything.
+func TestPickerModel_CloseTreeYieldsArrowsWhenPreviewFocused(t *testing.T) {
+	sub := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index: 1,
+				Panes: []snapshot.Pane{
+					{Index: 1, Command: "fish", ScrollbackSHA: "aaa"},
+					{Index: 2, Command: "fish", ScrollbackSHA: "bbb"},
+				},
+			}},
+		}},
+	}
+	ev := store.Event{ID: 7, Kind: "pane-died", ManifestJSON: `{"pane_id":"%1"}`}
+	m := NewPickerModel(ModeClose, []store.Event{ev}, nil, scrollback.New(t.TempDir()))
+	m.SetCloseContexts(map[int64]CloseContext{7: {Label: "pane", SubManifest: sub}})
+	m.Bootstrap()
+	m.width, m.height = 130, 20
+	m.focus = focusTree
+	first := paneNodeIndex(t, m)
+	m.treeCursor = first
+
+	if sha := m.focusedPaneSHA(); sha == "" {
+		t.Fatal("focusedPaneSHA is empty in close mode with a pane focused")
+	}
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := next.(PickerModel).TreeCursor(); got == first {
+		t.Errorf("Down left the pane cursor at %d; it should have advanced", got)
+	}
+}

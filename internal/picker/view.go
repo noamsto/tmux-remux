@@ -37,13 +37,21 @@ func (m PickerModel) View() tea.View {
 	switch {
 	case m.mode == ModeClose && m.closeTree != nil && m.width < 80:
 		content = lipgloss.JoinVertical(lipgloss.Left, renderCloseTree(m, m.width, bodyHeight), footer)
-	case m.mode == ModeClose && m.closeTree != nil:
-		// Close mode: tree + sub-tree (showing the diff-derived sub-manifest of
-		// what was lost). No scrollback preview — close events don't carry
-		// pane scrollback.
+	case m.mode == ModeClose && m.closeTree != nil && previewWidth == 0:
+		// Close tree + the diff-derived sub-manifest of what was lost. Too
+		// narrow for the third column.
 		closes := renderCloseTree(m, listWidth, bodyHeight)
 		tree := renderTree(m, m.width-listWidth, bodyHeight)
 		body := lipgloss.JoinHorizontal(lipgloss.Top, closes, tree)
+		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
+	case m.mode == ModeClose && m.closeTree != nil:
+		// Same, plus what the pane under the sub-manifest cursor had on screen.
+		// A closed pane is read out of the snapshot the close was diffed
+		// against, so it carries that snapshot's scrollback.
+		closes := renderCloseTree(m, listWidth, bodyHeight)
+		tree := renderTree(m, treeWidth, bodyHeight)
+		preview := m.renderPreview(previewWidth)
+		body := lipgloss.JoinHorizontal(lipgloss.Top, closes, tree, preview)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	case m.width < 80:
 		list := renderList(m, listWidth, bodyHeight)
@@ -109,7 +117,9 @@ func (m PickerModel) renderFooter(width int) string {
 		// inside it.
 		parts = append(parts, hint(m.keys.Right))
 	}
-	if m.width >= 120 && m.mode == ModeSnapshot {
+	// 120 is where both modes gain the preview column; the preview is otherwise
+	// undiscoverable, since nothing else says Tab reaches it.
+	if m.width >= 120 {
 		parts = append(parts, hint(m.keys.Tab))
 		parts = append(parts, hint(m.keys.PreviewUp))
 	}
@@ -129,19 +139,26 @@ func (m PickerModel) renderFooter(width int) string {
 
 // paneWidthsThree splits the available width between list, tree, and preview.
 // Returns (list, tree, preview) where preview==0 means the preview pane is
-// hidden at this width (or in close mode).
+// hidden at this width.
 func (m PickerModel) paneWidthsThree() (int, int, int) {
 	if m.width < 80 {
 		return m.width, 0, 0
 	}
 	if m.mode == ModeClose {
-		// Close mode: list + tree (no scrollback preview). Give the list
-		// ~40% so labels like "session: reviewtest2401692 (1w)" fit.
-		listW := m.width * 2 / 5
-		if listW < 32 {
-			listW = 32
+		if m.width < 120 {
+			// Give the list ~40% so labels like "session: reviewtest2401692
+			// (1w)" fit. No room for a third column, as in snapshot mode below.
+			listW := m.width * 2 / 5
+			if listW < 32 {
+				listW = 32
+			}
+			return listW, m.width - listW, 0
 		}
-		return listW, m.width - listW, 0
+		// Thirds keep the list past its 32-cell floor while leaving the preview
+		// enough to read a wrapped line of scrollback.
+		listW := m.width / 3
+		treeW := m.width / 3
+		return listW, treeW, m.width - listW - treeW
 	}
 	if m.width < 120 {
 		// Two-pane fallback (current behavior).
