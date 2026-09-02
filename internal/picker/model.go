@@ -162,7 +162,7 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			inner := m.previewInnerHeight()
+			inner := m.paneScrollbackHeight()
 			maxScroll := m.previewMaxScroll(inner)
 			m.previewScroll += 3
 			if m.previewScroll > maxScroll {
@@ -381,7 +381,7 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeSnapshot || m.mode == ModeClose {
 		switch {
 		case key.Matches(msg, m.keys.PreviewUp):
-			inner := m.previewInnerHeight()
+			inner := m.paneScrollbackHeight()
 			maxScroll := m.previewMaxScroll(inner)
 			if m.previewScroll < maxScroll {
 				m.previewScroll++

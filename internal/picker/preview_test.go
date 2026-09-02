@@ -581,3 +581,61 @@ func TestPickerModel_DemoKeysEchoesLastKey(t *testing.T) {
 		t.Errorf("lastKey = %q with demoKeys off, want empty", off.lastKey)
 	}
 }
+
+// A pane's preview leads with a mini-map of its window when the panel is tall
+// enough, the focused pane marked, with scrollback below; a short panel drops
+// the map and shows scrollback alone.
+func TestPickerModel_PaneViewShowsContextMap(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Name:   "editor",
+				Layout: "1cb4,145x36,0,0[145x18,0,0,0,145x17,0,19{72x17,0,19,1,72x17,73,19,2}]",
+				Panes: []snapshot.Pane{
+					{Index: 1, ID: "%0", Command: "nvim", ScrollbackSHA: "a"},
+					{Index: 2, ID: "%1", Command: "agent", ScrollbackSHA: "b"},
+					{Index: 3, ID: "%2", Command: "fish", ScrollbackSHA: "c"},
+				},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.scrollbacks["b"] = []byte("agent output line one\nagent output line two")
+	// Focus the agent pane (%1).
+	for i, n := range m.VisibleNodes() {
+		if p, ok := n.Ref.(*snapshot.Pane); ok && p.ID == "%1" {
+			m.treeCursor = i
+		}
+	}
+	m.width, m.height = 160, 40
+	_, _, pw := m.paneWidthsThree()
+	if !m.paneHintShows() {
+		t.Fatal("hint should show on a tall panel")
+	}
+	got := stripANSI(m.renderPreview(pw))
+	if !strings.ContainsRune(got, '┌') {
+		t.Errorf("no mini-map art:\n%s", got)
+	}
+	if !strings.Contains(got, "▸2 agent") {
+		t.Errorf("focused pane not marked in the map:\n%s", got)
+	}
+	if !strings.Contains(got, "agent output line one") {
+		t.Errorf("scrollback missing below the map:\n%s", got)
+	}
+
+	// A short panel drops the map and shows scrollback alone.
+	m.width, m.height = 160, 12
+	if m.paneHintShows() {
+		t.Error("hint should not show on a short panel")
+	}
+	if short := stripANSI(m.renderPreview(pw)); strings.ContainsRune(short, '┌') {
+		t.Errorf("short panel should not draw the map:\n%s", short)
+	}
+}
