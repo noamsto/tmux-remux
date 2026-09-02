@@ -68,3 +68,29 @@ func TestRender_TooSmallFallsBackToSummary(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// Same geometry as TestRender_StackedPanesShareDivider but at h=8, which
+// exposes the per-boundary rounding mismatch the deduplicated scaler fixes.
+func TestRender_StackedPanesShareDivider_Small(t *testing.T) {
+	g := Grid{W: 80, H: 24, Panes: []Rect{
+		{Index: 0, W: 80, H: 11, X: 0, Y: 0},
+		{Index: 1, W: 80, H: 12, X: 0, Y: 12},
+	}}
+	got := render(g, 10, 8, nil, nil)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 8 {
+		t.Fatalf("got %d lines, want 8", len(lines))
+	}
+	// Find the divider row — the one with ├ or ┤. Exactly one such row must
+	// exist; if two exist, borders weren't merged.
+	dividers := 0
+	for i, l := range lines {
+		if strings.ContainsRune(l, '├') || strings.ContainsRune(l, '┤') {
+			dividers++
+			_ = i
+		}
+	}
+	if dividers != 1 {
+		t.Errorf("got %d divider rows, want 1:\n%s", dividers, got)
+	}
+}

@@ -3,6 +3,7 @@ package panemap
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -29,7 +30,7 @@ func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) str
 
 // render draws the art unconditionally. Separate from Render so tests can assert
 // exact output at sizes smaller than the guard allows.
-func render(g Grid, w, h int, label func(int) string, marked func(int) bool) string { //nolint:revive,unparam
+func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
 
 	boxes := scale(g, w, h)
 
@@ -66,13 +67,23 @@ type box struct {
 func scale(g Grid, w, h int) []box {
 	sx := float64(w-1) / float64(g.W)
 	sy := float64(h-1) / float64(g.H)
+
+	xBounds := make([]int, 0, 2*len(g.Panes))
+	yBounds := make([]int, 0, 2*len(g.Panes))
+	for _, p := range g.Panes {
+		xBounds = append(xBounds, p.X, p.X+p.W)
+		yBounds = append(yBounds, p.Y, p.Y+p.H)
+	}
+	xMap := scaleBoundaries(xBounds, sx)
+	yMap := scaleBoundaries(yBounds, sy)
+
 	boxes := make([]box, 0, len(g.Panes))
 	for _, p := range g.Panes {
 		b := box{
-			x0:  clamp(int(math.Round(float64(p.X)*sx)), 0, w-1),
-			y0:  clamp(int(math.Round(float64(p.Y)*sy)), 0, h-1),
-			x1:  clamp(int(math.Round(float64(p.X+p.W)*sx)), 0, w-1),
-			y1:  clamp(int(math.Round(float64(p.Y+p.H)*sy)), 0, h-1),
+			x0:  clamp(xMap[p.X], w-1),
+			y0:  clamp(yMap[p.Y], h-1),
+			x1:  clamp(xMap[p.X+p.W], w-1),
+			y1:  clamp(yMap[p.Y+p.H], h-1),
 			idx: p.Index,
 		}
 		// A pane that rounds to nothing still deserves a visible box.
@@ -85,6 +96,35 @@ func scale(g Grid, w, h int) []box {
 		boxes = append(boxes, b)
 	}
 	return boxes
+}
+
+// scaleBoundaries rounds each raw coordinate independently, except where two
+// coordinates are 1 apart — a tmux separator gap — in which case both take the
+// scaled position of the larger one. Without this, adjacent panes can round
+// their shared edge to different rows/columns, breaking the divider merge in
+// runeFor.
+func scaleBoundaries(raw []int, s float64) map[int]int {
+	uniq := make(map[int]struct{}, len(raw))
+	for _, v := range raw {
+		uniq[v] = struct{}{}
+	}
+	sorted := make([]int, 0, len(uniq))
+	for v := range uniq {
+		sorted = append(sorted, v)
+	}
+	sort.Ints(sorted)
+
+	m := make(map[int]int, len(sorted))
+	for i, v := range sorted {
+		if i > 0 && v-sorted[i-1] == 1 {
+			scaled := int(math.Round(float64(v) * s))
+			m[sorted[i-1]] = scaled
+			m[v] = scaled
+			continue
+		}
+		m[v] = int(math.Round(float64(v) * s))
+	}
+	return m
 }
 
 // runeFor picks the box-drawing rune for one cell from which of its four
@@ -147,6 +187,6 @@ func joinRunes(rows [][]rune) string {
 	return b.String()
 }
 
-func clamp(v, lo, hi int) int { //nolint:unparam
-	return min(max(v, lo), hi)
+func clamp(v, hi int) int {
+	return min(max(v, 0), hi)
 }
