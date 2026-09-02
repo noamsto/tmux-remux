@@ -3,7 +3,6 @@ package panemap
 import (
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 )
 
@@ -16,9 +15,10 @@ const (
 
 // Render draws g's panes as box art exactly w columns by h rows.
 //
-// Borders are accumulated into edge masks and only then turned into runes, so a
-// divider shared by two panes becomes one line with junctions rather than two
-// adjacent borders — which is also what keeps rounding from doubling an edge.
+// It walks g's split tree: each container divides its own rectangle among its
+// children and consecutive children share the dividing line, so a divider is
+// always one line with junctions rather than two abutting borders, and a split
+// in one column can never collide with a split in another.
 //
 // label and marked may be nil; Task 3 wires them.
 func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) string {
@@ -29,15 +29,20 @@ func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) str
 }
 
 // render skips the panel-size guard so tests can assert exact output below it.
-// It still degrades to a summary when the layout itself is undrawable, which is
-// a property of the pane geometry rather than of the panel size.
+// It still degrades to a summary when the layout itself is undrawable at this
+// size — a pane too small to hold an interior — which is a property of the
+// geometry rather than of the panel size.
 func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
-	boxes, ok := scale(g, w, h)
-	if !ok {
+	if g.root == nil {
+		return summary(g)
+	}
+	var boxes []box
+	if !layoutNode(g.root, 0, 0, w-1, h-1, &boxes) {
 		return summary(g)
 	}
 
 	// hEdge[y][x]: a horizontal segment occupies this cell. vEdge likewise.
+	// Sibling boxes set the same shared cell, so runeFor merges the divider.
 	hEdge := grid2D(w, h)
 	vEdge := grid2D(w, h)
 	for _, b := range boxes {
@@ -65,120 +70,59 @@ type box struct {
 	x0, y0, x1, y1, idx int
 }
 
-// scale maps window cells onto panel cells, reporting false when the panel is
-// too small to give every pane a box with interior — the caller then degrades to
-// a summary rather than drawing a pane as a bare line. w-1 and h-1 because a
-// box's right and bottom borders sit *on* the last column and row.
-func scale(g Grid, w, h int) ([]box, bool) {
-	alongX := func(p Rect) (int, int) { return p.X, p.W }
-	alongY := func(p Rect) (int, int) { return p.Y, p.H }
-
-	xBounds := make([]int, 0, 2*len(g.Panes))
-	yBounds := make([]int, 0, 2*len(g.Panes))
-	for _, p := range g.Panes {
-		xBounds = append(xBounds, p.X, p.X+p.W)
-		yBounds = append(yBounds, p.Y, p.Y+p.H)
-	}
-	xMap := scaleBoundaries(xBounds, sharedDividers(g.Panes, alongX, alongY), float64(w-1)/float64(g.W), w-1)
-	yMap := scaleBoundaries(yBounds, sharedDividers(g.Panes, alongY, alongX), float64(h-1)/float64(g.H), h-1)
-
-	boxes := make([]box, 0, len(g.Panes))
-	for _, p := range g.Panes {
-		b := box{
-			x0:  clamp(xMap[p.X], w-1),
-			y0:  clamp(yMap[p.Y], h-1),
-			x1:  clamp(xMap[p.X+p.W], w-1),
-			y1:  clamp(yMap[p.Y+p.H], h-1),
-			idx: p.Index,
+// layoutNode places n and its descendants into the panel rectangle
+// [x0,y0]-[x1,y1], inclusive of borders, appending one box per leaf. A
+// container divides its OWN rectangle: consecutive children share the dividing
+// line (each child's far edge is the next child's near edge), so the divider is
+// one line and a split confined to this rectangle cannot reach another. It
+// returns false the moment a leaf is too small to draw with an interior — two
+// borders with at least one cell between them — so the caller degrades to a
+// summary rather than emit bare abutting borders.
+func layoutNode(n *node, x0, y0, x1, y1 int, boxes *[]box) bool {
+	switch n.kind {
+	case leafKind:
+		if x1-x0 < 2 || y1-y0 < 2 {
+			return false
 		}
-		if b.x1 <= b.x0 || b.y1 <= b.y0 {
-			return nil, false
-		}
-		boxes = append(boxes, b)
-	}
-	return boxes, true
-}
+		*boxes = append(*boxes, box{x0: x0, y0: y0, x1: x1, y1: y1, idx: n.index})
+		return true
 
-// sharedDividers returns the boundary pairs that a divider shared by two panes
-// leaves 1 apart: the near pane's far edge, the divider itself, then the far
-// pane's near edge. along picks the axis being scaled, across the other one —
-// panes that satisfy the coordinate relation without overlapping across it sit
-// in unrelated parts of the window and share no divider.
-func sharedDividers(panes []Rect, along, across func(Rect) (int, int)) [][2]int {
-	var pairs [][2]int
-	for _, a := range panes {
-		aStart, aLen := along(a)
-		aAcross, aAcrossLen := across(a)
-		for _, b := range panes {
-			bStart, _ := along(b)
-			if bStart != aStart+aLen+1 {
-				continue
+	case rowsKind: // stacked top-to-bottom: divide the Y axis
+		top := y0
+		for i, c := range n.children {
+			bottom := y1
+			if i < len(n.children)-1 {
+				// The tmux separator sits just below child c; place the divider
+				// there, scaled into this rectangle's height.
+				sep := c.y + c.h
+				bottom = y0 + iround(float64(sep-n.y)*float64(y1-y0)/float64(n.h))
 			}
-			bAcross, bAcrossLen := across(b)
-			if aAcross >= bAcross+bAcrossLen || bAcross >= aAcross+aAcrossLen {
-				continue
+			if !layoutNode(c, x0, top, x1, bottom, boxes) {
+				return false
 			}
-			pairs = append(pairs, [2]int{aStart + aLen, bStart})
+			top = bottom
 		}
+		return true
+
+	case colsKind: // side by side: divide the X axis
+		left := x0
+		for i, c := range n.children {
+			right := x1
+			if i < len(n.children)-1 {
+				sep := c.x + c.w
+				right = x0 + iround(float64(sep-n.x)*float64(x1-x0)/float64(n.w))
+			}
+			if !layoutNode(c, left, y0, right, y1, boxes) {
+				return false
+			}
+			left = right
+		}
+		return true
 	}
-	return pairs
+	return false
 }
 
-// scaleBoundaries maps each raw coordinate onto a panel coordinate, giving the
-// two sides of every shared divider the same one so runeFor can merge them into
-// a single line. pairs are only the boundaries that actually flank a divider, so
-// a 1-cell pane keeps its own two edges apart; the relation is closed
-// transitively, so a divider chained across columns split at different heights
-// still lands on one line. The classes holding the outermost boundaries are
-// pinned to 0 and limit, keeping the frame flush with the panel edges.
-func scaleBoundaries(raw []int, pairs [][2]int, s float64, limit int) map[int]int {
-	uniq := make(map[int]struct{}, len(raw))
-	for _, v := range raw {
-		uniq[v] = struct{}{}
-	}
-	sorted := make([]int, 0, len(uniq))
-	for v := range uniq {
-		sorted = append(sorted, v)
-	}
-	slices.Sort(sorted)
-
-	parent := make(map[int]int, len(sorted))
-	for _, v := range sorted {
-		parent[v] = v
-	}
-	find := func(v int) int {
-		for parent[v] != v {
-			parent[v] = parent[parent[v]]
-			v = parent[v]
-		}
-		return v
-	}
-	for _, p := range pairs {
-		if a, b := find(p[0]), find(p[1]); a != b {
-			parent[a] = b
-		}
-	}
-
-	// sorted ascends, so the last write per class is its largest member.
-	classMax := make(map[int]int, len(sorted))
-	for _, v := range sorted {
-		classMax[find(v)] = v
-	}
-
-	first, last := find(sorted[0]), find(sorted[len(sorted)-1])
-	m := make(map[int]int, len(sorted))
-	for _, v := range sorted {
-		switch find(v) {
-		case first:
-			m[v] = 0
-		case last:
-			m[v] = limit
-		default:
-			m[v] = int(math.Round(float64(classMax[find(v)]) * s))
-		}
-	}
-	return m
-}
+func iround(f float64) int { return int(math.Round(f)) }
 
 // runeFor picks the box-drawing rune for one cell from which of its four
 // neighbours continue a line.
@@ -238,8 +182,4 @@ func joinRunes(rows [][]rune) string {
 		b.WriteString(string(r))
 	}
 	return b.String()
-}
-
-func clamp(v, hi int) int {
-	return min(max(v, 0), hi)
 }

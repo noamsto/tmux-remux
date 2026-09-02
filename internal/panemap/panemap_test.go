@@ -46,8 +46,38 @@ func TestParse_SinglePane(t *testing.T) {
 	}
 }
 
+func TestParse_Columns(t *testing.T) {
+	// A pure side-by-side split: two panes, no nesting.
+	g, err := Parse("abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1}")
+	if err != nil {
+		t.Fatalf("Parse returned %v", err)
+	}
+	want := []Rect{
+		{Index: 0, W: 40, H: 24, X: 0, Y: 0},
+		{Index: 1, W: 39, H: 24, X: 41, Y: 0},
+	}
+	if len(g.Panes) != len(want) {
+		t.Fatalf("got %d panes, want %d: %+v", len(g.Panes), len(want), g.Panes)
+	}
+	for i := range want {
+		if g.Panes[i] != want[i] {
+			t.Errorf("pane %d = %+v, want %+v", i, g.Panes[i], want[i])
+		}
+	}
+}
+
 func TestParse_Rejects(t *testing.T) {
-	for _, in := range []string{"", "nonsense", "1cb4", "1cb4,notxgeometry,0,0"} {
+	inputs := []string{
+		"",                                       // empty
+		"nonsense",                               // no comma
+		"1cb4",                                   // checksum only
+		"1cb4,notxgeometry,0,0",                  // window size not a number
+		"1cb4,80x24,0,0[80x24,0,0,0",             // unbalanced bracket
+		"1cb4,80x24,0,0{80x24,0,0,0]",            // mismatched bracket
+		"1cb4,80x24,0,0,0trailing",               // trailing garbage after a full parse
+		"1cb4,80x24,0,0[80x11,0,0,0,80x12,0,12]", // container child missing its pane index
+	}
+	for _, in := range inputs {
 		if _, err := Parse(in); !errors.Is(err, ErrNoLayout) {
 			t.Errorf("Parse(%q) error = %v, want ErrNoLayout", in, err)
 		}

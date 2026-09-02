@@ -5,7 +5,6 @@ package panemap
 
 import (
 	"errors"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -18,54 +17,148 @@ type Rect struct {
 
 // Grid is a window's own size plus every pane rectangle inside it. Pane
 // coordinates are absolute within the window, not relative to a parent split.
+// The split tree that produced them is kept privately in root; rendering needs
+// it to know which two panes a divider separates, which a flat rectangle list
+// cannot say.
 type Grid struct {
 	W, H  int
 	Panes []Rect
+	root  *node
 }
 
 // ErrNoLayout reports a layout string this package cannot draw: empty, from a
 // snapshot written before layouts were stored, or malformed.
 var ErrNoLayout = errors.New("panemap: no usable layout")
 
-// tmux writes "<checksum>,<WxH>,<X>,<Y>" followed by nested [] (rows) and {}
-// (columns) groups. A tuple with a fifth field is a pane; a tuple followed by a
-// bracket is a container, and its children carry absolute coordinates already,
-// so only the pane tuples matter.
-var (
-	winRe  = regexp.MustCompile(`^(\d+)x(\d+),(\d+),(\d+)`)
-	paneRe = regexp.MustCompile(`(\d+)x(\d+),(\d+),(\d+),(\d+)`)
+// kind distinguishes a leaf pane from the two ways tmux nests containers.
+type kind int
+
+const (
+	leafKind kind = iota
+	rowsKind      // "[...]": children stacked top-to-bottom, dividing the Y axis
+	colsKind      // "{...}": children side by side, dividing the X axis
 )
 
-// Parse extracts the window size and every pane rectangle from a tmux layout
-// string.
+// node is one cell of the layout tree: a leaf pane, or a container whose
+// children partition its rectangle along one axis. Coordinates are absolute
+// window cells, as the layout string records them.
+type node struct {
+	x, y, w, h int
+	index      int // leaf only
+	kind       kind
+	children   []*node
+}
+
+// Parse reads a tmux layout string into the split tree and, from its leaves in
+// order, the flat pane list. tmux writes "<checksum>,<cell>" where a cell is
+// "<WxH>,<X>,<Y>" followed by ",<index>" for a pane or a "[]"/"{}" group for a
+// container.
 func Parse(layout string) (Grid, error) {
 	_, body, found := strings.Cut(layout, ",")
 	if !found {
 		return Grid{}, ErrNoLayout
 	}
-	wm := winRe.FindStringSubmatch(body)
-	if wm == nil {
+	p := &parser{s: body}
+	root := p.cell()
+	if p.err || p.pos != len(body) || root.w <= 0 || root.h <= 0 {
 		return Grid{}, ErrNoLayout
 	}
-	g := Grid{W: atoi(wm[1]), H: atoi(wm[2])}
-	for _, m := range paneRe.FindAllStringSubmatch(body, -1) {
-		g.Panes = append(g.Panes, Rect{
-			W:     atoi(m[1]),
-			H:     atoi(m[2]),
-			X:     atoi(m[3]),
-			Y:     atoi(m[4]),
-			Index: atoi(m[5]),
-		})
-	}
-	if g.W <= 0 || g.H <= 0 || len(g.Panes) == 0 {
+	g := Grid{W: root.w, H: root.h, root: root}
+	appendLeaves(root, &g.Panes)
+	if len(g.Panes) == 0 {
 		return Grid{}, ErrNoLayout
 	}
 	return g, nil
 }
 
-// atoi is safe without an error check: every call site passes a regexp capture
-// group that matched \d+.
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
+// appendLeaves collects the tree's leaf panes left-to-right, depth first, which
+// is the order tmux writes them and the order the picker expects.
+func appendLeaves(n *node, out *[]Rect) {
+	if n.kind == leafKind {
+		*out = append(*out, Rect{Index: n.index, W: n.w, H: n.h, X: n.x, Y: n.y})
+		return
+	}
+	for _, c := range n.children {
+		appendLeaves(c, out)
+	}
+}
+
+// parser is a cursor over the layout body (everything after the checksum). On
+// any malformed input it sets err and stops advancing meaningfully; the caller
+// checks err rather than each step.
+type parser struct {
+	s   string
+	pos int
+	err bool
+}
+
+// cell parses one "<WxH>,<X>,<Y>" tuple and whatever follows it: a "[" or "{"
+// group makes it a container, a "," makes it a leaf carrying a pane index.
+func (p *parser) cell() *node {
+	w := p.readInt()
+	p.expect('x')
+	h := p.readInt()
+	p.expect(',')
+	x := p.readInt()
+	p.expect(',')
+	y := p.readInt()
+	n := &node{x: x, y: y, w: w, h: h}
+	switch p.peek() {
+	case '[':
+		p.pos++
+		n.kind = rowsKind
+		n.children = p.cellList()
+		p.expect(']')
+	case '{':
+		p.pos++
+		n.kind = colsKind
+		n.children = p.cellList()
+		p.expect('}')
+	case ',':
+		p.pos++
+		n.kind = leafKind
+		n.index = p.readInt()
+	default:
+		p.err = true
+	}
 	return n
+}
+
+// cellList parses one or more comma-separated cells, the children of a
+// container, stopping at the closing bracket.
+func (p *parser) cellList() []*node {
+	children := []*node{p.cell()}
+	for p.peek() == ',' {
+		p.pos++
+		children = append(children, p.cell())
+	}
+	return children
+}
+
+func (p *parser) readInt() int {
+	start := p.pos
+	for p.pos < len(p.s) && p.s[p.pos] >= '0' && p.s[p.pos] <= '9' {
+		p.pos++
+	}
+	if p.pos == start {
+		p.err = true
+		return 0
+	}
+	n, _ := strconv.Atoi(p.s[start:p.pos])
+	return n
+}
+
+func (p *parser) expect(c byte) {
+	if p.peek() == c {
+		p.pos++
+		return
+	}
+	p.err = true
+}
+
+func (p *parser) peek() byte {
+	if p.pos < len(p.s) {
+		return p.s[p.pos]
+	}
+	return 0
 }
