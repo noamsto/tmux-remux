@@ -116,6 +116,26 @@ func TestRender_LabelsPanes(t *testing.T) {
 	}
 }
 
+// The label callback owns the whole text: it is drawn verbatim, with no box
+// number auto-prepended, so the caller can lead with a handle of its choosing.
+func TestRender_LabelRenderedVerbatim(t *testing.T) {
+	got := render(mustParse(t, "x,80x24,0,0,0"), 24, 6, func(int) string { return "7 nvim" }, nil)
+	if !strings.Contains(got, "7 nvim") {
+		t.Errorf("label not rendered verbatim:\n%s", got)
+	}
+	if strings.Contains(got, "0 7 nvim") {
+		t.Errorf("box number wrongly prepended to the label:\n%s", got)
+	}
+}
+
+// With no label, the box falls back to its own number so it is never blank.
+func TestRender_NilLabelShowsBoxNumber(t *testing.T) {
+	got := render(mustParse(t, layoutStack), 30, 7, nil, nil)
+	if !strings.Contains(got, "0") || !strings.Contains(got, "1") {
+		t.Errorf("box numbers missing from:\n%s", got)
+	}
+}
+
 // A label longer than its box must not spill past the border.
 func TestRender_LabelTruncatedToBox(t *testing.T) {
 	got := render(mustParse(t, "x,80x24,0,0,0"), 24, 6, func(int) string { return strings.Repeat("x", 100) }, nil)

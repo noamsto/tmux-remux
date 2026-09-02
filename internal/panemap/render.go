@@ -3,6 +3,7 @@ package panemap
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -163,8 +164,11 @@ func dash(r rune) rune {
 }
 
 // drawLabels writes each pane's label on the first interior row of its box,
-// truncated to fit. A box with no interior room keeps its shape and loses the
-// text.
+// truncated to fit. The label callback owns the whole text — the box's own
+// number (b.idx is the pane id the layout string names) is only a fallback when
+// the caller returns nothing, since the caller usually has a friendlier handle
+// like the pane index and command. A box with no interior room keeps its shape
+// and loses the text.
 func drawLabels(out [][]rune, boxes []box, label func(int) string) {
 	for _, b := range boxes {
 		room := b.x1 - b.x0 - 3 // borders plus one space of padding each side
@@ -172,7 +176,10 @@ func drawLabels(out [][]rune, boxes []box, label func(int) string) {
 		if room < 1 || row >= b.y1 {
 			continue
 		}
-		text := strings.TrimSpace(fmt.Sprintf("%d %s", b.idx, label(b.idx)))
+		text := strings.TrimSpace(label(b.idx))
+		if text == "" {
+			text = strconv.Itoa(b.idx)
+		}
 		for i, r := range []rune(text) {
 			if i >= room {
 				break

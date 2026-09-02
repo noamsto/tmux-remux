@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -199,11 +200,13 @@ func (m PickerModel) renderWindowMap(w *snapshot.Window, innerWidth, innerHeight
 		return ""
 	}
 	title := fmt.Sprintf("%d: %s  (%d×%d)", w.Index, snapshot.StripFormat(w.Name), g.W, g.H)
+	// The layout string names each pane by its tmux id (%N), not its pane index —
+	// the two diverge whenever pane-base-index is set or a pane has been closed.
+	// So the map's box number is a pane id; look the pane up by id and label it
+	// with its friendlier pane index and command.
 	label := func(idx int) string {
-		for i := range w.Panes {
-			if w.Panes[i].Index == idx {
-				return w.Panes[i].Command
-			}
+		if p := paneByID(w, idx); p != nil {
+			return fmt.Sprintf("%d %s", p.Index, p.Command)
 		}
 		return ""
 	}
@@ -213,16 +216,24 @@ func (m PickerModel) renderWindowMap(w *snapshot.Window, innerWidth, innerHeight
 		case "":
 			return false // snapshot mode: nothing died
 		case "pane":
-			for i := range w.Panes {
-				if w.Panes[i].Index == idx {
-					return w.Panes[i].ID == place.PaneID
-				}
-			}
-			return false
+			p := paneByID(w, idx)
+			return p != nil && p.ID == place.PaneID
 		default:
 			return true // window or session close: all of it came down
 		}
 	}
 	art := panemap.Render(g, innerWidth, innerHeight-1, label, marked)
 	return rowDim.Render(ansi.Truncate(title, innerWidth, "…")) + "\n" + art
+}
+
+// paneByID returns the pane whose tmux id is "%<n>", the handle the layout
+// string uses to name each pane. Returns nil if no such pane is in the window.
+func paneByID(w *snapshot.Window, n int) *snapshot.Pane {
+	id := "%" + strconv.Itoa(n)
+	for i := range w.Panes {
+		if w.Panes[i].ID == id {
+			return &w.Panes[i]
+		}
+	}
+	return nil
 }
