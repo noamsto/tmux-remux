@@ -55,13 +55,7 @@ type scrollbackLoadedMsg struct {
 // renderPreview renders the right-most preview pane. width is the cell budget
 // (including the rounded border). Height comes from m.height.
 func (m PickerModel) renderPreview(width int) string {
-	// Match the body height the rest of the layout uses (m.height - 1 for the
-	// footer). previewFrame has Border (2 cells) + Padding(0,1) (2 cells)
-	// → 4 cells total horizontal overhead and 2 vertical (border only).
-	frameHeight := m.height - 1
-	if frameHeight < 5 {
-		frameHeight = 5
-	}
+	frameHeight := m.panelFrameHeight()
 	innerHeight := m.previewInnerHeight()
 	innerWidth := width - 4
 	if innerWidth < 1 {
@@ -143,15 +137,11 @@ func previewWindow(s string, width, height, scroll, scrollX int) string {
 }
 
 // previewInnerHeight is the number of scrollback rows the preview pane shows:
-// the body height (m.height − footer) minus the frame's border. Single source
-// of truth for renderPreview and the scroll-clamp math in Update/handleKey,
-// which otherwise drifted apart at very small terminal heights.
+// the panel's frame height minus its border. Single source of truth for
+// renderPreview and the scroll-clamp math in Update/handleKey, which otherwise
+// drifted apart at very small terminal heights and in the stacked layout.
 func (m PickerModel) previewInnerHeight() int {
-	frameHeight := m.height - 1
-	if frameHeight < 5 {
-		frameHeight = 5
-	}
-	if inner := frameHeight - 2; inner > 1 {
+	if inner := m.panelFrameHeight() - 2; inner > 1 {
 		return inner
 	}
 	return 1
