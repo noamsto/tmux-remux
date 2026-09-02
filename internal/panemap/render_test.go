@@ -136,10 +136,9 @@ func TestRender_MarkedPaneUsesDashedBorder(t *testing.T) {
 }
 
 // Two columns split at different heights keep each column's divider on its own
-// row — the left at row 5 (├), the right at row 4 (┤). Forcing them onto one row
-// is what a flat coordinate merge does, and it is the bug that erased a pane; the
-// tree confines each split to its column. Exact art so the junction glyphs where
-// each staggered divider meets the centre line are pinned too.
+// row — the left at row 5 (├), the right at row 4 (┤), never merged onto one.
+// Exact art so the junction glyphs where each staggered divider meets the centre
+// line are pinned too.
 func TestRender_StaggeredColumnsKeepSeparateDividers(t *testing.T) {
 	got := render(mustParse(t, layoutStaggered), 30, 12, nil, nil)
 	want := strings.Join([]string{

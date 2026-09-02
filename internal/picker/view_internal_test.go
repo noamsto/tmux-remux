@@ -73,12 +73,10 @@ func TestView_NarrowStacksPanel(t *testing.T) {
 	}
 }
 
-// The close picker shares renderPreview with the snapshot picker, so #85's
-// fix must cover it too: at 100 columns (stacksPanel() range) the panel used
-// to be dropped entirely for ModeClose, same as for ModeSnapshot. Mirrors
-// TestPickerModel_CloseMapMarksDeadPane's setup but selects the window node
-// so renderPreview draws the pane-layout map, and checks the panel renders
-// below the tree instead of vanishing.
+// The close picker shares renderPreview with the snapshot picker, so
+// narrow-width stacking must cover ModeClose too: at 100 columns (the
+// stacksPanel range) the panel goes below the tree rather than being dropped.
+// Selects the window node so renderPreview draws the pane-layout map.
 func TestView_CloseModeStacksPanel(t *testing.T) {
 	applyTheme(NewTheme())
 	sub := snapshot.Manifest{

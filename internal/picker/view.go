@@ -35,10 +35,7 @@ func (m PickerModel) View() tea.View {
 	case m.mode == ModeClose && m.closeTree != nil && m.width < 80:
 		content = lipgloss.JoinVertical(lipgloss.Left, renderCloseTree(m, m.width, bodyHeight), footer)
 	case m.mode == ModeClose && m.closeTree != nil && previewWidth == 0:
-		// Close tree + the diff-derived sub-manifest of what was lost, stacked
-		// above the preview panel — previewWidth==0 here means exactly the
-		// stacksPanel() range, since the width<80 case above already claimed
-		// anything narrower.
+		// Close tree + sub-manifest on top, preview panel stacked below.
 		topHeight := bodyHeight - m.panelFrameHeight()
 		closes := renderCloseTree(m, listWidth, topHeight)
 		tree := renderTree(m, m.width-listWidth, topHeight)
@@ -153,9 +150,8 @@ func (m PickerModel) bodyHeight() int {
 }
 
 // stacksPanel reports whether the map/scrollback panel goes under the tree
-// rather than beside it. Below the three-column threshold the panel used to be
-// dropped entirely, which made the preview invisible on any terminal narrow
-// enough for the 90%-width popup to land under 120 columns.
+// rather than beside it — the case for a terminal too narrow for a third column.
+// The popup is 90% of the client, so that threshold lands near 120 columns.
 func (m PickerModel) stacksPanel() bool {
 	return m.width >= 80 && m.width < 120
 }
