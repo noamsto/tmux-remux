@@ -71,25 +71,87 @@ func TestRender_TooSmallFallsBackToSummary(t *testing.T) {
 
 // Same geometry as TestRender_StackedPanesShareDivider but at h=8, which
 // exposes the per-boundary rounding mismatch the deduplicated scaler fixes.
-func TestRender_StackedPanesShareDivider_Small(t *testing.T) {
+func TestRender_StackedPanesShareDivider_AtH8(t *testing.T) {
 	g := Grid{W: 80, H: 24, Panes: []Rect{
 		{Index: 0, W: 80, H: 11, X: 0, Y: 0},
 		{Index: 1, W: 80, H: 12, X: 0, Y: 12},
 	}}
 	got := render(g, 10, 8, nil, nil)
-	lines := strings.Split(got, "\n")
-	if len(lines) != 8 {
-		t.Fatalf("got %d lines, want 8", len(lines))
+	blank := "│        │"
+	want := strings.Join([]string{
+		"┌────────┐",
+		blank, blank, blank,
+		"├────────┤",
+		blank, blank,
+		"└────────┘",
+	}, "\n")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
-	// Find the divider row — the one with ├ or ┤. Exactly one such row must
-	// exist; if two exist, borders weren't merged.
-	dividers := 0
-	for _, l := range lines {
-		if strings.ContainsRune(l, '├') || strings.ContainsRune(l, '┤') {
-			dividers++
+}
+
+// A 1-column pane sits with its own two edges only 1 apart from its
+// neighbours' — merging every gap-1 boundary would erase it.
+func TestRender_OneColumnPaneKeepsItsWidth(t *testing.T) {
+	g := Grid{W: 80, H: 24, Panes: []Rect{
+		{Index: 0, W: 39, H: 24, X: 0, Y: 0},
+		{Index: 1, W: 1, H: 24, X: 40, Y: 0},
+		{Index: 2, W: 38, H: 24, X: 42, Y: 0},
+	}}
+	got := render(g, 81, 8, nil, nil)
+	var joints []int
+	for i, r := range []rune(strings.Split(got, "\n")[0]) {
+		if r == '┬' {
+			joints = append(joints, i)
 		}
 	}
-	if dividers != 1 {
-		t.Errorf("got %d divider rows, want 1:\n%s", dividers, got)
+	if len(joints) != 2 {
+		t.Fatalf("got %d interior dividers at %v, want 2:\n%s", len(joints), joints, got)
+	}
+	if joints[1]-joints[0] < 2 {
+		t.Errorf("dividers at %v abut, so pane 1 has no width:\n%s", joints, got)
+	}
+}
+
+// Two columns split at different heights chain their divider boundaries — 10-11
+// from the left column, 11-12 from the right — so a pairwise merge leaves each
+// column drawing its own divider row.
+func TestRender_ChainedDividersShareOneRow(t *testing.T) {
+	g := Grid{W: 80, H: 24, Panes: []Rect{
+		{Index: 0, W: 40, H: 10, X: 0, Y: 0},
+		{Index: 1, W: 40, H: 13, X: 0, Y: 11},
+		{Index: 2, W: 39, H: 11, X: 41, Y: 0},
+		{Index: 3, W: 39, H: 12, X: 41, Y: 12},
+	}}
+	got := render(g, 41, 8, nil, nil)
+	left, right := strings.Repeat("─", 20), strings.Repeat("─", 18)
+	blank := "│" + strings.Repeat(" ", 20) + "│" + strings.Repeat(" ", 18) + "│"
+	want := strings.Join([]string{
+		"┌" + left + "┬" + right + "┐",
+		blank, blank, blank,
+		"├" + left + "┼" + right + "┤",
+		blank, blank,
+		"└" + left + "┴" + right + "┘",
+	}, "\n")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Six stacked panes need seven distinct rows, which a 6-row panel cannot give.
+// Drawing one of them with no height would lie about the layout, so Render
+// falls back to the summary even though the panel clears the size guard.
+func TestRender_UndrawableFallsBackToSummary(t *testing.T) {
+	g := Grid{W: 80, H: 24, Panes: []Rect{
+		{Index: 0, W: 80, H: 3, X: 0, Y: 0},
+		{Index: 1, W: 80, H: 3, X: 0, Y: 4},
+		{Index: 2, W: 80, H: 3, X: 0, Y: 8},
+		{Index: 3, W: 80, H: 3, X: 0, Y: 12},
+		{Index: 4, W: 80, H: 3, X: 0, Y: 16},
+		{Index: 5, W: 80, H: 4, X: 0, Y: 20},
+	}}
+	got := Render(g, minMapWidth, minMapHeight, nil, nil)
+	if want := summary(g); got != want {
+		t.Errorf("got:\n%s\nwant %q", got, want)
 	}
 }

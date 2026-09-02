@@ -3,7 +3,7 @@ package panemap
 import (
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -28,11 +28,14 @@ func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) str
 	return render(g, w, h, label, marked)
 }
 
-// render draws the art unconditionally. Separate from Render so tests can assert
-// exact output at sizes smaller than the guard allows.
+// render skips the panel-size guard so tests can assert exact output below it.
+// It still degrades to a summary when the layout itself is undrawable, which is
+// a property of the pane geometry rather than of the panel size.
 func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
-
-	boxes := scale(g, w, h)
+	boxes, ok := scale(g, w, h)
+	if !ok {
+		return summary(g)
+	}
 
 	// hEdge[y][x]: a horizontal segment occupies this cell. vEdge likewise.
 	hEdge := grid2D(w, h)
@@ -62,11 +65,13 @@ type box struct {
 	x0, y0, x1, y1, idx int
 }
 
-// scale maps window cells onto panel cells. w-1 and h-1 because a box's right
-// and bottom borders sit *on* the last column and row.
-func scale(g Grid, w, h int) []box {
-	sx := float64(w-1) / float64(g.W)
-	sy := float64(h-1) / float64(g.H)
+// scale maps window cells onto panel cells, reporting false when the panel is
+// too small to give every pane a box with interior — the caller then degrades to
+// a summary rather than drawing a pane as a bare line. w-1 and h-1 because a
+// box's right and bottom borders sit *on* the last column and row.
+func scale(g Grid, w, h int) ([]box, bool) {
+	alongX := func(p Rect) (int, int) { return p.X, p.W }
+	alongY := func(p Rect) (int, int) { return p.Y, p.H }
 
 	xBounds := make([]int, 0, 2*len(g.Panes))
 	yBounds := make([]int, 0, 2*len(g.Panes))
@@ -74,8 +79,8 @@ func scale(g Grid, w, h int) []box {
 		xBounds = append(xBounds, p.X, p.X+p.W)
 		yBounds = append(yBounds, p.Y, p.Y+p.H)
 	}
-	xMap := scaleBoundaries(xBounds, sx)
-	yMap := scaleBoundaries(yBounds, sy)
+	xMap := scaleBoundaries(xBounds, sharedDividers(g.Panes, alongX, alongY), float64(w-1)/float64(g.W), w-1)
+	yMap := scaleBoundaries(yBounds, sharedDividers(g.Panes, alongY, alongX), float64(h-1)/float64(g.H), h-1)
 
 	boxes := make([]box, 0, len(g.Panes))
 	for _, p := range g.Panes {
@@ -86,24 +91,47 @@ func scale(g Grid, w, h int) []box {
 			y1:  clamp(yMap[p.Y+p.H], h-1),
 			idx: p.Index,
 		}
-		// A pane that rounds to nothing still deserves a visible box.
-		if b.x1 <= b.x0 {
-			b.x1 = min(b.x0+1, w-1)
-		}
-		if b.y1 <= b.y0 {
-			b.y1 = min(b.y0+1, h-1)
+		if b.x1 <= b.x0 || b.y1 <= b.y0 {
+			return nil, false
 		}
 		boxes = append(boxes, b)
 	}
-	return boxes
+	return boxes, true
 }
 
-// scaleBoundaries rounds each raw coordinate independently, except where two
-// coordinates are 1 apart — a tmux separator gap — in which case both take the
-// scaled position of the larger one. Without this, adjacent panes can round
-// their shared edge to different rows/columns, breaking the divider merge in
-// runeFor.
-func scaleBoundaries(raw []int, s float64) map[int]int {
+// sharedDividers returns the boundary pairs that a divider shared by two panes
+// leaves 1 apart: the near pane's far edge, the divider itself, then the far
+// pane's near edge. along picks the axis being scaled, across the other one —
+// panes that satisfy the coordinate relation without overlapping across it sit
+// in unrelated parts of the window and share no divider.
+func sharedDividers(panes []Rect, along, across func(Rect) (int, int)) [][2]int {
+	var pairs [][2]int
+	for _, a := range panes {
+		aStart, aLen := along(a)
+		aAcross, aAcrossLen := across(a)
+		for _, b := range panes {
+			bStart, _ := along(b)
+			if bStart != aStart+aLen+1 {
+				continue
+			}
+			bAcross, bAcrossLen := across(b)
+			if aAcross >= bAcross+bAcrossLen || bAcross >= aAcross+aAcrossLen {
+				continue
+			}
+			pairs = append(pairs, [2]int{aStart + aLen, bStart})
+		}
+	}
+	return pairs
+}
+
+// scaleBoundaries maps each raw coordinate onto a panel coordinate, giving the
+// two sides of every shared divider the same one so runeFor can merge them into
+// a single line. pairs are only the boundaries that actually flank a divider, so
+// a 1-cell pane keeps its own two edges apart; the relation is closed
+// transitively, so a divider chained across columns split at different heights
+// still lands on one line. The classes holding the outermost boundaries are
+// pinned to 0 and limit, keeping the frame flush with the panel edges.
+func scaleBoundaries(raw []int, pairs [][2]int, s float64, limit int) map[int]int {
 	uniq := make(map[int]struct{}, len(raw))
 	for _, v := range raw {
 		uniq[v] = struct{}{}
@@ -112,17 +140,42 @@ func scaleBoundaries(raw []int, s float64) map[int]int {
 	for v := range uniq {
 		sorted = append(sorted, v)
 	}
-	sort.Ints(sorted)
+	slices.Sort(sorted)
 
-	m := make(map[int]int, len(sorted))
-	for i, v := range sorted {
-		if i > 0 && v-sorted[i-1] == 1 {
-			scaled := int(math.Round(float64(v) * s))
-			m[sorted[i-1]] = scaled
-			m[v] = scaled
-			continue
+	parent := make(map[int]int, len(sorted))
+	for _, v := range sorted {
+		parent[v] = v
+	}
+	find := func(v int) int {
+		for parent[v] != v {
+			parent[v] = parent[parent[v]]
+			v = parent[v]
 		}
-		m[v] = int(math.Round(float64(v) * s))
+		return v
+	}
+	for _, p := range pairs {
+		if a, b := find(p[0]), find(p[1]); a != b {
+			parent[a] = b
+		}
+	}
+
+	// sorted ascends, so the last write per class is its largest member.
+	classMax := make(map[int]int, len(sorted))
+	for _, v := range sorted {
+		classMax[find(v)] = v
+	}
+
+	first, last := find(sorted[0]), find(sorted[len(sorted)-1])
+	m := make(map[int]int, len(sorted))
+	for _, v := range sorted {
+		switch find(v) {
+		case first:
+			m[v] = 0
+		case last:
+			m[v] = limit
+		default:
+			m[v] = int(math.Round(float64(classMax[find(v)]) * s))
+		}
 	}
 	return m
 }
