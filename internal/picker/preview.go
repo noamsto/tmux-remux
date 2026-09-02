@@ -2,6 +2,7 @@ package picker
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/noamsto/tmux-remux/internal/panemap"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
@@ -53,13 +55,7 @@ type scrollbackLoadedMsg struct {
 // renderPreview renders the right-most preview pane. width is the cell budget
 // (including the rounded border). Height comes from m.height.
 func (m PickerModel) renderPreview(width int) string {
-	// Match the body height the rest of the layout uses (m.height - 1 for the
-	// footer). previewFrame has Border (2 cells) + Padding(0,1) (2 cells)
-	// → 4 cells total horizontal overhead and 2 vertical (border only).
-	frameHeight := m.height - 1
-	if frameHeight < 5 {
-		frameHeight = 5
-	}
+	frameHeight := m.panelFrameHeight()
 	innerHeight := m.previewInnerHeight()
 	innerWidth := width - 4
 	if innerWidth < 1 {
@@ -75,8 +71,16 @@ func (m PickerModel) renderPreview(width int) string {
 		return frame.Render(rowDim.Render("(no pane selected)"))
 	}
 	n := nodes[m.treeCursor]
+	if n.Kind == NodeWindow {
+		if w, ok := n.Ref.(*snapshot.Window); ok {
+			if art := m.renderWindowMap(w, innerWidth, innerHeight); art != "" {
+				return frame.Render(art)
+			}
+		}
+	}
 	if n.Kind != NodePane {
-		// Reachable after Left collapses to a window/session node.
+		// Reachable after Left collapses to a window/session node, and for a
+		// window whose layout predates layout capture.
 		return frame.Render(rowDim.Render("(press → to expand, ↑↓ to find a pane)"))
 	}
 	p, _ := n.Ref.(*snapshot.Pane)
@@ -133,15 +137,11 @@ func previewWindow(s string, width, height, scroll, scrollX int) string {
 }
 
 // previewInnerHeight is the number of scrollback rows the preview pane shows:
-// the body height (m.height − footer) minus the frame's border. Single source
-// of truth for renderPreview and the scroll-clamp math in Update/handleKey,
-// which otherwise drifted apart at very small terminal heights.
+// the panel's frame height minus its border. Single source of truth for
+// renderPreview and the scroll-clamp math in Update/handleKey, which otherwise
+// drifted apart at very small terminal heights and in the stacked layout.
 func (m PickerModel) previewInnerHeight() int {
-	frameHeight := m.height - 1
-	if frameHeight < 5 {
-		frameHeight = 5
-	}
-	if inner := frameHeight - 2; inner > 1 {
+	if inner := m.panelFrameHeight() - 2; inner > 1 {
 		return inner
 	}
 	return 1
@@ -189,4 +189,40 @@ func loadScrollbackCmd(sb *scrollback.Store, sha string) tea.Cmd {
 		buf, err := io.ReadAll(rc)
 		return scrollbackLoadedMsg{sha: sha, content: buf, err: err}
 	}
+}
+
+// renderWindowMap draws w's pane layout, titled with the window. Returns "" when
+// the layout is absent or unparsable so the caller can fall back to its hint.
+func (m PickerModel) renderWindowMap(w *snapshot.Window, innerWidth, innerHeight int) string {
+	g, err := panemap.Parse(w.Layout)
+	if err != nil {
+		return ""
+	}
+	title := fmt.Sprintf("%d: %s  (%d×%d)", w.Index, snapshot.StripFormat(w.Name), g.W, g.H)
+	label := func(idx int) string {
+		for i := range w.Panes {
+			if w.Panes[i].Index == idx {
+				return w.Panes[i].Command
+			}
+		}
+		return ""
+	}
+	place := m.CloseContextFor(m.CurrentEventID()).Placement
+	marked := func(idx int) bool {
+		switch place.Scope {
+		case "":
+			return false // snapshot mode: nothing died
+		case "pane":
+			for i := range w.Panes {
+				if w.Panes[i].Index == idx {
+					return w.Panes[i].ID == place.PaneID
+				}
+			}
+			return false
+		default:
+			return true // window or session close: all of it came down
+		}
+	}
+	art := panemap.Render(g, innerWidth, innerHeight-1, label, marked)
+	return rowDim.Render(ansi.Truncate(title, innerWidth, "…")) + "\n" + art
 }

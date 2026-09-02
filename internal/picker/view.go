@@ -29,21 +29,19 @@ func (m PickerModel) View() tea.View {
 	// take the rest. Measuring (rather than assuming exactly one row) keeps the
 	// body from overflowing the popup and pushing the footer off-screen.
 	footer := m.renderFooter(m.width)
-	bodyHeight := m.height - lipgloss.Height(footer)
-	if bodyHeight < 5 {
-		bodyHeight = 5
-	}
+	bodyHeight := m.bodyHeight()
 	var content string
 	switch {
 	case m.mode == ModeClose && m.closeTree != nil && m.width < 80:
 		content = lipgloss.JoinVertical(lipgloss.Left, renderCloseTree(m, m.width, bodyHeight), footer)
 	case m.mode == ModeClose && m.closeTree != nil && previewWidth == 0:
-		// Close tree + the diff-derived sub-manifest of what was lost. Too
-		// narrow for the third column.
-		closes := renderCloseTree(m, listWidth, bodyHeight)
-		tree := renderTree(m, m.width-listWidth, bodyHeight)
-		body := lipgloss.JoinHorizontal(lipgloss.Top, closes, tree)
-		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
+		// Close tree + sub-manifest on top, preview panel stacked below.
+		topHeight := bodyHeight - m.panelFrameHeight()
+		closes := renderCloseTree(m, listWidth, topHeight)
+		tree := renderTree(m, m.width-listWidth, topHeight)
+		top := lipgloss.JoinHorizontal(lipgloss.Top, closes, tree)
+		panel := m.renderPreview(m.width)
+		content = lipgloss.JoinVertical(lipgloss.Left, top, panel, footer)
 	case m.mode == ModeClose && m.closeTree != nil:
 		// Same, plus what the pane under the sub-manifest cursor had on screen.
 		// A closed pane is read out of the snapshot the close was diffed
@@ -62,10 +60,14 @@ func (m PickerModel) View() tea.View {
 		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	case previewWidth == 0:
-		list := renderList(m, listWidth, bodyHeight)
-		tree := renderTree(m, treeWidth, bodyHeight)
-		body := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
-		content = lipgloss.JoinVertical(lipgloss.Left, body, footer)
+		// previewWidth==0 here means exactly the stacksPanel() range, since
+		// the width<80 case above already claimed anything narrower.
+		topHeight := bodyHeight - m.panelFrameHeight()
+		list := renderList(m, listWidth, topHeight)
+		tree := renderTree(m, treeWidth, topHeight)
+		top := lipgloss.JoinHorizontal(lipgloss.Top, list, tree)
+		panel := m.renderPreview(m.width)
+		content = lipgloss.JoinVertical(lipgloss.Left, top, panel, footer)
 	default:
 		list := renderList(m, listWidth, bodyHeight)
 		tree := renderTree(m, treeWidth, bodyHeight)
@@ -135,6 +137,33 @@ func (m PickerModel) renderFooter(width int) string {
 	}
 	line = ansi.Truncate(line, innerWidth, "…")
 	return footerBar.Width(width).Render(line)
+}
+
+// bodyHeight is the height available to the panes above the footer. View and
+// previewInnerHeight must agree on it, so both read it from here.
+func (m PickerModel) bodyHeight() int {
+	h := m.height - lipgloss.Height(m.renderFooter(m.width))
+	if h < 5 {
+		h = 5
+	}
+	return h
+}
+
+// stacksPanel reports whether the map/scrollback panel goes under the tree
+// rather than beside it — the case for a terminal too narrow for a third column.
+// The popup is 90% of the client, so that threshold lands near 120 columns.
+func (m PickerModel) stacksPanel() bool {
+	return m.width >= 80 && m.width < 120
+}
+
+// panelFrameHeight is the frame height of the map/scrollback panel: the whole
+// body beside the tree, or the lower half beneath it.
+func (m PickerModel) panelFrameHeight() int {
+	body := m.bodyHeight()
+	if !m.stacksPanel() {
+		return body
+	}
+	return body - body/2
 }
 
 // paneWidthsThree splits the available width between list, tree, and preview.

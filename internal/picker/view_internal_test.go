@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,65 @@ func closeTreeFixture() *CloseNode {
 		4: {Label: "pane: fish", Placement: ClosePlacement{Session: "lazytmux", WindowIndex: 3, WindowName: "docs", Scope: "pane"}, SubManifest: one},
 	}
 	return BuildCloseTree(evs, ctxs, "mono", map[string]bool{"mono": true})
+}
+
+// Under the three-column threshold the panel stacks rather than vanishing.
+func TestView_NarrowStacksPanel(t *testing.T) {
+	m := PickerModel{mode: ModeSnapshot, width: 90, height: 24}
+	if !m.stacksPanel() {
+		t.Error("want a stacked panel at 90 columns")
+	}
+	wide := PickerModel{mode: ModeSnapshot, width: 160, height: 24}
+	if wide.stacksPanel() {
+		t.Error("want three columns at 160 columns")
+	}
+}
+
+// The close picker shares renderPreview with the snapshot picker, so
+// narrow-width stacking must cover ModeClose too: at 100 columns (the
+// stacksPanel range) the panel goes below the tree rather than being dropped.
+// Selects the window node so renderPreview draws the pane-layout map.
+func TestView_CloseModeStacksPanel(t *testing.T) {
+	applyTheme(NewTheme())
+	sub := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Layout: "1cb4,80x24,0,0[80x11,0,0,0,80x12,0,12,1]",
+				Panes: []snapshot.Pane{
+					{Index: 0, ID: "%0", Command: "fish"},
+					{Index: 1, ID: "%1", Command: "agent-work"},
+				},
+			}},
+		}},
+	}
+	ev := store.Event{ID: 7, Kind: "pane-died", ManifestJSON: `{"pane_id":"%1"}`}
+	ctxs := map[int64]CloseContext{7: {
+		Label:       "pane",
+		Placement:   ClosePlacement{Session: "demo", WindowIndex: 1, Scope: "pane", PaneID: "%1"},
+		SubManifest: sub,
+	}}
+
+	m := NewPickerModel(ModeClose, []store.Event{ev}, nil, nil)
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(BuildCloseTree([]store.Event{ev}, ctxs, "demo", nil))
+	m.Bootstrap()
+	m.width, m.height = 100, 30
+	m.focus = focusTree
+	m.treeCursor = windowNodeIndex(t, m)
+
+	if !m.stacksPanel() {
+		t.Fatal("want stacksPanel() true at 100 columns")
+	}
+	panel := m.renderPreview(m.width)
+	if !strings.ContainsRune(panel, '┌') {
+		t.Errorf("panel not rendered in close mode at 100 columns:\n%s", panel)
+	}
+	if out := m.View().Content; !strings.ContainsRune(out, '┌') {
+		t.Errorf("View() dropped the stacked panel in close mode at 100 columns:\n%s", out)
+	}
 }
 
 func TestCloseGuidePrefixes(t *testing.T) {
