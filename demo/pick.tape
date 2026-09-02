@@ -36,17 +36,24 @@ Sleep 2500ms
 # Tab moves into the contents tree; the panes of a live session count as
 # running, so the default filter hides them until d turns it off.
 Tab
-Sleep 1200ms
+Sleep 1000ms
 Type "d"
-Sleep 2s
+Sleep 1500ms
 
-# Walk down to the agent's pane — the preview shows what it had on screen. One
-# stop short of the pane the split had only just created, whose scrollback is
-# empty because the hook snapshotted it before its command drew anything.
+# Drop into a pane, then collapse back with Left: the preview switches from that
+# pane's scrollback to a map of the whole window's layout, panes drawn to scale
+# and labelled by command.
 Down
+Sleep 1800ms
+Left
+Sleep 3500ms
+
+# Expand again and step onto the agent's pane — now the preview is its
+# scrollback, what it had on screen when the snapshot was taken.
+Right
 Sleep 800ms
 Down
-Sleep 2500ms
+Sleep 3s
 Escape
 Sleep 800ms
 
@@ -58,8 +65,8 @@ Sleep 400ms
 Type "x"
 Sleep 2500ms
 
-# prefix+U lists what was closed. Its panes come out of the snapshot the close
-# was diffed against, so they preview the same way.
+# prefix+U lists what was closed. Collapsing to the window shows the same map,
+# with the pane that died drawn in a dashed border.
 Ctrl+b
 Sleep 400ms
 Type "U"
@@ -69,10 +76,14 @@ Tab
 Sleep 1000ms
 Type "d"
 Sleep 1200ms
-# Two stops: the first pane of the closed window is the plain shell, the second
-# is the agent's, which is the one with output worth recognising.
 Down
-Sleep 700ms
+Sleep 1500ms
+Left
+Sleep 3500ms
+
+# Back into the panes for the closed agent's scrollback.
+Right
+Sleep 800ms
 Down
 Sleep 3s
 
