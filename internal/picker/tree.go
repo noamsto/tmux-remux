@@ -98,7 +98,8 @@ func paneLabel(p *snapshot.Pane) string {
 	if cmd == "" {
 		cmd = "(none)"
 	}
-	return fmt.Sprintf("%-7s %s", cmd, cwd)
+	// Lead with the pane index so a tree row matches the numbered box in the map.
+	return fmt.Sprintf("%d %-7s %s", p.Index, cmd, cwd)
 }
 
 // FilterDecorate walks the tree and marks each node Skipped/SkipReason based on
