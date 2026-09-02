@@ -217,6 +217,22 @@ func (m PickerModel) renderWindowMap(w *snapshot.Window, innerWidth, innerHeight
 		}
 		return ""
 	}
-	art := panemap.Render(g, innerWidth, innerHeight-1, label, nil)
+	place := m.CloseContextFor(m.CurrentEventID()).Placement
+	marked := func(idx int) bool {
+		switch place.Scope {
+		case "":
+			return false // snapshot mode: nothing died
+		case "pane":
+			for i := range w.Panes {
+				if w.Panes[i].Index == idx {
+					return w.Panes[i].ID == place.PaneID
+				}
+			}
+			return false
+		default:
+			return true // window or session close: all of it came down
+		}
+	}
+	art := panemap.Render(g, innerWidth, innerHeight-1, label, marked)
 	return rowDim.Render(ansi.Truncate(title, innerWidth, "…")) + "\n" + art
 }

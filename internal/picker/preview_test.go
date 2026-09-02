@@ -426,6 +426,44 @@ func TestPickerModel_WindowNodeWithoutLayoutKeepsHint(t *testing.T) {
 	}
 }
 
+// In close mode the map dashes the pane the event took down.
+func TestPickerModel_CloseMapMarksDeadPane(t *testing.T) {
+	sub := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Layout: "1cb4,80x24,0,0[80x11,0,0,0,80x12,0,12,1]",
+				Panes: []snapshot.Pane{
+					{Index: 0, ID: "%0", Command: "fish"},
+					{Index: 1, ID: "%1", Command: "agent-work"},
+				},
+			}},
+		}},
+	}
+	ev := store.Event{ID: 7, Kind: "pane-died", ManifestJSON: `{"pane_id":"%1"}`}
+	ctxs := map[int64]CloseContext{7: {
+		Label:       "pane",
+		Placement:   ClosePlacement{Session: "demo", WindowIndex: 1, Scope: "pane", PaneID: "%1"},
+		SubManifest: sub,
+	}}
+
+	m := NewPickerModel(ModeClose, []store.Event{ev}, nil, nil)
+	m.SetCloseContexts(ctxs)
+	m.SetCloseTree(BuildCloseTree([]store.Event{ev}, ctxs, "demo", nil))
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+	m.focus = focusTree
+	m.treeCursor = windowNodeIndex(t, m)
+
+	_, _, previewWidth := m.paneWidthsThree()
+	got := m.renderPreview(previewWidth)
+	if !strings.ContainsRune(got, '┄') && !strings.ContainsRune(got, '┆') {
+		t.Errorf("dead pane not dashed in:\n%s", got)
+	}
+}
+
 func windowNodeIndex(t *testing.T, m PickerModel) int {
 	t.Helper()
 	for i, n := range m.VisibleNodes() {

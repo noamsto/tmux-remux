@@ -702,6 +702,7 @@ func placementFor(closeMan closeevent.CloseManifest, item *closeevent.ClosedItem
 	if p.Session == closeevent.UnknownSession {
 		p.Session = ""
 	}
+	p.PaneID = closeMan.PaneID
 	switch {
 	case item.Session != nil:
 		p.Scope = "session"

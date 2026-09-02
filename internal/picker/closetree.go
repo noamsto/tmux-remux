@@ -31,6 +31,7 @@ type ClosePlacement struct {
 	WindowName  string
 	Scope       string // "session" | "window" | "pane"
 	PaneCount   int    // panes in the closed window; 0 for other scopes
+	PaneID      string // tmux id of the lost pane; empty unless Scope == "pane"
 }
 
 // CloseNode is one row of the close picker's tree.
