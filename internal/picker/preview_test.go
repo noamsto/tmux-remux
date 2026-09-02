@@ -376,9 +376,9 @@ func TestPickerModel_WindowNodeShowsMap(t *testing.T) {
 				Name:   "tmux-remux",
 				Layout: "1cb4,145x36,0,0[145x18,0,0,0,145x17,0,19{72x17,0,19,1,72x17,73,19,2}]",
 				Panes: []snapshot.Pane{
-					{Index: 0, Command: "nvim"},
-					{Index: 1, Command: "agent-work"},
-					{Index: 2, Command: "fish"},
+					{Index: 0, ID: "%0", Command: "nvim"},
+					{Index: 1, ID: "%1", Command: "agent-work"},
+					{Index: 2, ID: "%2", Command: "fish"},
 				},
 			}},
 		}},
@@ -399,6 +399,87 @@ func TestPickerModel_WindowNodeShowsMap(t *testing.T) {
 	}
 	if !strings.ContainsRune(got, '┌') || !strings.Contains(got, "agent-work") {
 		t.Errorf("no labelled box art in:\n%s", got)
+	}
+}
+
+// With pane-base-index set, the layout string still numbers panes by tmux id
+// (0,1,2) while the snapshot records pane_index 1,2,3. The map must match boxes
+// to panes by id, so every box — including the top one the old index match left
+// blank — is labelled with its own pane index and command, not a shifted one.
+func TestPickerModel_WindowMapLabelsByPaneID(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Name:   "editor",
+				Layout: "1cb4,145x36,0,0[145x18,0,0,0,145x17,0,19{72x17,0,19,1,72x17,73,19,2}]",
+				Panes: []snapshot.Pane{
+					{Index: 1, ID: "%0", Command: "nvim"},
+					{Index: 2, ID: "%1", Command: "agentwork"},
+					{Index: 3, ID: "%2", Command: "shellfish"},
+				},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+	m.focus = focusTree
+	m.treeCursor = windowNodeIndex(t, m)
+
+	_, _, previewWidth := m.paneWidthsThree()
+	got := m.renderPreview(previewWidth)
+	// The top box is layout pane 0 → id %0 → pane index 1: it must read "1 nvim",
+	// never blank and never a neighbour's command.
+	for _, want := range []string{"1 nvim", "2 agentwork", "3 shellfish"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("map missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The map lives on the window node, so Up/Down must be able to land there while
+// it is expanded — not only by collapsing it with Left. Up from the first pane
+// lands on the window node; Down steps back into the panes.
+func TestPickerModel_WindowNodeReachableWhenExpanded(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Name:   "editor",
+				Layout: "1cb4,80x24,0,0[80x11,0,0,0,80x12,0,12,1]",
+				Panes: []snapshot.Pane{
+					{Index: 1, ID: "%0", Command: "nvim"},
+					{Index: 2, ID: "%1", Command: "fish"},
+				},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+
+	u, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = u.(PickerModel)
+	u, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = u.(PickerModel)
+	if got := m.VisibleNodes()[m.treeCursor].Kind; got != NodeWindow {
+		t.Fatalf("Up from the first pane landed on %v, want the window node (the map)", got)
+	}
+	u, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = u.(PickerModel)
+	if got := m.VisibleNodes()[m.treeCursor].Kind; got != NodePane {
+		t.Errorf("Down from the window node landed on %v, want a pane", got)
 	}
 }
 
@@ -473,4 +554,30 @@ func windowNodeIndex(t *testing.T, m PickerModel) int {
 	}
 	t.Fatal("no window node in visible tree")
 	return -1
+}
+
+// With demoKeys on, each key press is echoed into the footer so a screen
+// recording can show what was pressed; off, nothing is echoed.
+func TestPickerModel_DemoKeysEchoesLastKey(t *testing.T) {
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[]}`}
+
+	on := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	on.demoKeys = true
+	on.width, on.height = 160, 24
+	u, _ := on.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	on = u.(PickerModel)
+	if on.lastKey != "↓" {
+		t.Errorf("lastKey = %q, want ↓", on.lastKey)
+	}
+	if foot := on.renderFooter(on.width); !strings.ContainsRune(foot, '↓') {
+		t.Errorf("footer missing the key cast:\n%s", foot)
+	}
+
+	off := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	off.width, off.height = 160, 24
+	u, _ = off.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	off = u.(PickerModel)
+	if off.lastKey != "" {
+		t.Errorf("lastKey = %q with demoKeys off, want empty", off.lastKey)
+	}
 }

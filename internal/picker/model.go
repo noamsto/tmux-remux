@@ -3,6 +3,7 @@ package picker
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -78,6 +79,11 @@ type PickerModel struct {
 	// filtered out before constructing the model. Rendered as a footer line so
 	// the user knows the list is pruned. Close mode only.
 	hiddenCount int
+	// demoKeys echoes the last key pressed into the footer, for screen
+	// recordings where the viewer can't see the keyboard. Off unless
+	// REMUX_DEMO_KEYS is set; never on in normal use.
+	demoKeys bool
+	lastKey  string
 }
 
 // CloseContext is the picker-facing summary of a single close event, used to
@@ -110,6 +116,7 @@ func NewPickerModel(mode Mode, events []store.Event, running map[string]bool, sb
 		scrollbacks:      make(map[string][]byte),
 		scrollbackErrors: make(map[string]error),
 		loadingSHAs:      make(map[string]bool),
+		demoKeys:         os.Getenv("REMUX_DEMO_KEYS") != "",
 	}
 }
 
@@ -145,6 +152,9 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.demoKeys {
+			m.lastKey = keyLabel(msg)
+		}
 		return m.handleKey(msg)
 	case tea.MouseWheelMsg:
 		if m.mode != ModeSnapshot {
@@ -213,13 +223,38 @@ func (m PickerModel) firstPaneIdx() int {
 }
 
 // isNavTarget reports whether `n` is a valid Up/Down landing spot in tree
-// focus: panes (where the preview lives) and collapsed non-leaf nodes (so the
-// user can step onto a collapsed window/session and press Right to re-expand).
+// focus: panes (scrollback preview), window nodes (the layout map lives there),
+// and collapsed non-leaf nodes (so the user can step onto a collapsed
+// window/session and press Right to re-expand). An expanded session is passed
+// over — its only preview is a hint — so Up/Down step window → panes → window.
 func isNavTarget(n *TreeNode) bool {
-	if n.Kind == NodePane {
+	if n.Kind == NodePane || n.Kind == NodeWindow {
 		return true
 	}
 	return !n.Expanded && len(n.Children) > 0
+}
+
+// keyLabel is a compact, readable name for a key press, shown in the footer
+// when demoKeys is on so a screen recording can convey what was pressed.
+func keyLabel(msg tea.KeyPressMsg) string {
+	switch s := msg.String(); s {
+	case "up":
+		return "↑"
+	case "down":
+		return "↓"
+	case "left":
+		return "←"
+	case "right":
+		return "→"
+	case "enter":
+		return "↵"
+	case "tab":
+		return "⇥"
+	case " ", "space":
+		return "space"
+	default:
+		return s
+	}
 }
 
 // nextPaneIdx walks from `start` in `dir` (+1 or -1) and returns the next
@@ -398,9 +433,13 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				n := nodes[m.treeCursor]
 				switch {
 				case !n.Expanded && len(n.Children) > 0:
-					// Cursor on a collapsed parent: expand and re-snap to first
-					// pane within (preserves pane-first invariant).
+					// Cursor on a collapsed parent: expand and dive to the first
+					// pane within.
 					n.Expanded = true
+					m.treeCursor = m.firstPaneIdxIn(n)
+				case n.Expanded && len(n.Children) > 0:
+					// On an already-expanded window/session (the map is showing):
+					// dive to the first pane within, without collapsing.
 					m.treeCursor = m.firstPaneIdxIn(n)
 				case n.Kind == NodePane:
 					// On a leaf pane: nothing to expand. No-op.

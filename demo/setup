@@ -30,11 +30,13 @@ fi
 COLS=95
 ROWS=24
 HISTORY=0
+DEMOKEYS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --cols) COLS="$2"; shift 2 ;;
     --rows) ROWS="$2"; shift 2 ;;
     --history) HISTORY=1; shift ;;
+    --demo-keys) DEMOKEYS=1; shift ;;
     *) printf 'demo/setup: unknown argument: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
@@ -66,6 +68,13 @@ FISH="$(command -v fish)"
 tm new-session -d -x "$COLS" -y "$ROWS" -s demo -c "$PWD" "$FISH"
 tm set -g default-shell "$FISH"
 tm set -g prefix C-b
+
+# The picker echoes each key press into its footer under this, so a recording
+# can show what was pressed. The picker opens via display-popup, which inherits
+# the server's global environment. Off by default; pick.tape asks for it.
+if [ "$DEMOKEYS" = 1 ]; then
+  tm set-environment -g REMUX_DEMO_KEYS 1
+fi
 
 # The real plugin wiring, so the recording exercises the binary just built.
 "$BIN" triggers --auto-restore=off | tm source-file -
@@ -107,21 +116,23 @@ sleep 2
 tm set -p -t demo @remux_relaunch "$PWD/demo/agent-work"
 tm run-shell "$BIN save"
 
-# pick.tape previews a pane's scrollback, and a save inside MinSaveInterval (30s)
-# is deliberately downgraded to a scrollback-free snapshot — the preview would
-# then read "(no scrollback captured for this pane)". A save that changes nothing
-# returns before it stamps last_save_ts, so waiting the throttle out and then
-# making one structural change leaves the newest snapshot, the one the picker
-# opens on, carrying scrollback for every pane. The agent has been logging the
-# whole time, so that scrollback is worth looking at.
+# pick.tape previews a pane's scrollback and shows the pane map, so the snapshot
+# it opens on must (1) carry scrollback and (2) show each pane's real command. A
+# save inside MinSaveInterval (30s) is downgraded to a scrollback-free snapshot,
+# and a pane snapshotted the instant it is born reports "tmux" as its command,
+# before its own program replaces the shell. So: split the third pane first, let
+# every pane settle past the throttle, then take one explicit non-throttled save
+# — the commands have changed since the split's own hook save, so it records a
+# fresh snapshot rather than a no-op, and it is the newest, the one the picker
+# opens on.
 if [ "$HISTORY" = 1 ]; then
   # The agent's pane is still active from the base scene above.
   agent="$(tm display -p -t demo '#{pane_id}')"
-  sleep 32
   tm split-window -h -t demo -c "$PWD" "$PWD/demo/agent-work"
-  sleep 3
   # Hand focus back, so the tape's prefix+x closes the pane that has been
-  # logging for half a minute rather than the one just split — the close
-  # picker's preview is only worth showing for a pane with output behind it.
+  # logging rather than the one just split — the close picker's preview is only
+  # worth showing for a pane with output behind it.
   tm select-pane -t "$agent"
+  sleep 32
+  tm run-shell "$BIN save"
 fi

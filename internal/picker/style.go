@@ -25,6 +25,7 @@ var (
 	footerOff  lipgloss.Style
 	footerKey  lipgloss.Style
 	footerSep  lipgloss.Style
+	keyCast    lipgloss.Style
 
 	previewHeader lipgloss.Style
 )
@@ -55,6 +56,7 @@ func applyTheme(t Theme) {
 	footerOff = lipgloss.NewStyle().Foreground(t.Overlay())
 	footerKey = lipgloss.NewStyle().Foreground(t.Lavender())
 	footerSep = lipgloss.NewStyle().Foreground(t.Overlay())
+	keyCast = lipgloss.NewStyle().Foreground(t.Base()).Background(t.Mauve()).Bold(true)
 
 	previewHeader = lipgloss.NewStyle().Foreground(t.Blue()).Bold(true)
 }
