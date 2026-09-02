@@ -17,7 +17,7 @@ Set Padding 12
 # so 145 columns here leaves the picker 130, and undo.tape's 95 could never show
 # a preview at all.
 Hide
-Type "./demo/setup --cols 145 --rows 36 --history"
+Type "./demo/setup --cols 145 --rows 36 --history --demo-keys"
 Enter
 Sleep 45s
 Type "clear; tmux -L vhs attach -t demo"
@@ -27,7 +27,8 @@ Show
 
 Sleep 1500ms
 
-# The snapshot picker.
+# The snapshot picker. Keys land in the footer (REMUX_DEMO_KEYS via demo/setup),
+# so the navigation is legible; vim keys j/k/l/h drive the tree.
 Ctrl+b
 Sleep 400ms
 Type "R"
@@ -38,15 +39,20 @@ Sleep 2500ms
 Tab
 Sleep 1200ms
 Type "d"
-Sleep 2s
+Sleep 1500ms
 
-# Walk down to the agent's pane — the preview shows what it had on screen. One
-# stop short of the pane the split had only just created, whose scrollback is
-# empty because the hook snapshotted it before its command drew anything.
-Down
-Sleep 800ms
-Down
-Sleep 2500ms
+# j steps onto the window: the preview is a map of its pane layout, each pane
+# drawn to scale and labelled with its index and command.
+Type "j"
+Sleep 3500ms
+
+# l dives into the window — the preview becomes the first pane's scrollback.
+Type "l"
+Sleep 1800ms
+
+# j walks to the agent's pane and the output it had on screen.
+Type "j"
+Sleep 3s
 Escape
 Sleep 800ms
 
@@ -69,11 +75,15 @@ Tab
 Sleep 1000ms
 Type "d"
 Sleep 1200ms
-# Two stops: the first pane of the closed window is the plain shell, the second
-# is the agent's, which is the one with output worth recognising.
-Down
-Sleep 700ms
-Down
+
+# j onto the window: the map draws the pane that died in a dashed border.
+Type "j"
+Sleep 3500ms
+
+# l into the panes, j onto the closed agent's pane and its scrollback.
+Type "l"
+Sleep 1200ms
+Type "j"
 Sleep 3s
 
 Hide

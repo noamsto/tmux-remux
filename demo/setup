@@ -30,11 +30,13 @@ fi
 COLS=95
 ROWS=24
 HISTORY=0
+DEMOKEYS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --cols) COLS="$2"; shift 2 ;;
     --rows) ROWS="$2"; shift 2 ;;
     --history) HISTORY=1; shift ;;
+    --demo-keys) DEMOKEYS=1; shift ;;
     *) printf 'demo/setup: unknown argument: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
@@ -66,6 +68,13 @@ FISH="$(command -v fish)"
 tm new-session -d -x "$COLS" -y "$ROWS" -s demo -c "$PWD" "$FISH"
 tm set -g default-shell "$FISH"
 tm set -g prefix C-b
+
+# The picker echoes each key press into its footer under this, so a recording
+# can show what was pressed. The picker opens via display-popup, which inherits
+# the server's global environment. Off by default; pick.tape asks for it.
+if [ "$DEMOKEYS" = 1 ]; then
+  tm set-environment -g REMUX_DEMO_KEYS 1
+fi
 
 # The real plugin wiring, so the recording exercises the binary just built.
 "$BIN" triggers --auto-restore=off | tm source-file -
