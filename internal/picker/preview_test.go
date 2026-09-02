@@ -231,6 +231,23 @@ func TestRenderPreview_PaneWithoutSHA(t *testing.T) {
 	}
 }
 
+func TestRenderPreview_ScrollbackSkipped(t *testing.T) {
+	man := snapshot.Manifest{V: 1, ScrollbackSkipped: true, Sessions: []snapshot.Session{{
+		Windows: []snapshot.Window{{Panes: []snapshot.Pane{{}}}},
+	}}}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: string(raw)}
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.focus = focusTree
+	m.treeCursor = paneNodeIndex(t, m)
+
+	got := m.renderPreview(60)
+	if !strings.Contains(stripANSI(got), "min_save_interval") {
+		t.Errorf("expected throttle explanation, got: %q", got)
+	}
+}
+
 func TestRenderPreview_Loaded(t *testing.T) {
 	man := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
 		Windows: []snapshot.Window{{Panes: []snapshot.Pane{{ScrollbackSHA: "abc"}}}},
