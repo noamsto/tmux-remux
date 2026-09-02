@@ -84,10 +84,9 @@ func TestRender_StackedPanesShareDivider_Small(t *testing.T) {
 	// Find the divider row — the one with ├ or ┤. Exactly one such row must
 	// exist; if two exist, borders weren't merged.
 	dividers := 0
-	for i, l := range lines {
+	for _, l := range lines {
 		if strings.ContainsRune(l, '├') || strings.ContainsRune(l, '┤') {
 			dividers++
-			_ = i
 		}
 	}
 	if dividers != 1 {
