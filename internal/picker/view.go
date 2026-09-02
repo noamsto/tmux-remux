@@ -129,6 +129,9 @@ func (m PickerModel) renderFooter(width int) string {
 	if m.footerNote != "" {
 		line = footerWarn.Render(m.footerNote) + sep + line
 	}
+	if m.demoKeys && m.lastKey != "" {
+		line = keyCast.Render(" "+m.lastKey+" ") + sep + line
+	}
 	// Truncate: footerBar.Width wraps overflow to a second row otherwise, which
 	// would break the single-row height View() reserves for the footer.
 	innerWidth := width - footerBar.GetHorizontalFrameSize()

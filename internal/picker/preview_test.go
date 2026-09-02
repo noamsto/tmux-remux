@@ -555,3 +555,29 @@ func windowNodeIndex(t *testing.T, m PickerModel) int {
 	t.Fatal("no window node in visible tree")
 	return -1
 }
+
+// With demoKeys on, each key press is echoed into the footer so a screen
+// recording can show what was pressed; off, nothing is echoed.
+func TestPickerModel_DemoKeysEchoesLastKey(t *testing.T) {
+	ev := store.Event{ID: 1, Kind: "snapshot", ManifestJSON: `{"v":1,"sessions":[]}`}
+
+	on := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	on.demoKeys = true
+	on.width, on.height = 160, 24
+	u, _ := on.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	on = u.(PickerModel)
+	if on.lastKey != "↓" {
+		t.Errorf("lastKey = %q, want ↓", on.lastKey)
+	}
+	if foot := on.renderFooter(on.width); !strings.ContainsRune(foot, '↓') {
+		t.Errorf("footer missing the key cast:\n%s", foot)
+	}
+
+	off := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	off.width, off.height = 160, 24
+	u, _ = off.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	off = u.(PickerModel)
+	if off.lastKey != "" {
+		t.Errorf("lastKey = %q with demoKeys off, want empty", off.lastKey)
+	}
+}
