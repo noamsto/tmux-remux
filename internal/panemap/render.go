@@ -20,7 +20,8 @@ const (
 // always one line with junctions rather than two abutting borders, and a split
 // in one column can never collide with a split in another.
 //
-// label and marked may be nil; Task 3 wires them.
+// label supplies each pane's text and marked which panes get a dashed border;
+// either may be nil.
 func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) string {
 	if w < minMapWidth || h < minMapHeight {
 		return summary(g)
