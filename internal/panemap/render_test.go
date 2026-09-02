@@ -108,30 +108,28 @@ func TestRender_KeepsProportions(t *testing.T) {
 }
 
 // Two columns split at different heights keep each column's divider on its own
-// row. Forcing them onto one row — what a flat coordinate merge does — is the
-// bug that erased a pane; the tree confines each split to its column.
+// row — the left at row 5 (├), the right at row 4 (┤). Forcing them onto one row
+// is what a flat coordinate merge does, and it is the bug that erased a pane; the
+// tree confines each split to its column. Exact art so the junction glyphs where
+// each staggered divider meets the centre line are pinned too.
 func TestRender_StaggeredColumnsKeepSeparateDividers(t *testing.T) {
-	g := mustParse(t, layoutStaggered)
-	var boxes []box
-	if !layoutNode(g.root, 0, 0, 29, 11, &boxes) {
-		t.Fatal("layout unexpectedly undrawable at 30x12")
-	}
-	if len(boxes) != 4 {
-		t.Fatalf("got %d boxes, want 4", len(boxes))
-	}
-	// Panes 0 and 1 are the left column; 2 and 3 the right. Their shared
-	// dividers are pane0.y1 and pane2.y1 respectively.
-	by := map[int]box{}
-	for _, b := range boxes {
-		by[b.idx] = b
-	}
-	if by[0].y1 == by[2].y1 {
-		t.Errorf("left divider %d and right divider %d landed on the same row; columns were merged", by[0].y1, by[2].y1)
-	}
-	for _, b := range boxes {
-		if b.x1-b.x0 < 2 || b.y1-b.y0 < 2 {
-			t.Errorf("pane %d has no interior: %+v", b.idx, b)
-		}
+	got := render(mustParse(t, layoutStaggered), 30, 12, nil, nil)
+	want := strings.Join([]string{
+		"┌──────────────┬─────────────┐",
+		"│              │             │",
+		"│              │             │",
+		"│              │             │",
+		"│              ├─────────────┤",
+		"├──────────────┤             │",
+		"│              │             │",
+		"│              │             │",
+		"│              │             │",
+		"│              │             │",
+		"│              │             │",
+		"└──────────────┴─────────────┘",
+	}, "\n")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 
