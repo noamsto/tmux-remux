@@ -443,6 +443,46 @@ func TestPickerModel_WindowMapLabelsByPaneID(t *testing.T) {
 	}
 }
 
+// The map lives on the window node, so Up/Down must be able to land there while
+// it is expanded — not only by collapsing it with Left. Up from the first pane
+// lands on the window node; Down steps back into the panes.
+func TestPickerModel_WindowNodeReachableWhenExpanded(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Name:   "editor",
+				Layout: "1cb4,80x24,0,0[80x11,0,0,0,80x12,0,12,1]",
+				Panes: []snapshot.Pane{
+					{Index: 1, ID: "%0", Command: "nvim"},
+					{Index: 2, ID: "%1", Command: "fish"},
+				},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+
+	u, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = u.(PickerModel)
+	u, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = u.(PickerModel)
+	if got := m.VisibleNodes()[m.treeCursor].Kind; got != NodeWindow {
+		t.Fatalf("Up from the first pane landed on %v, want the window node (the map)", got)
+	}
+	u, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = u.(PickerModel)
+	if got := m.VisibleNodes()[m.treeCursor].Kind; got != NodePane {
+		t.Errorf("Down from the window node landed on %v, want a pane", got)
+	}
+}
+
 // A snapshot written before layouts were stored must not regress.
 func TestPickerModel_WindowNodeWithoutLayoutKeepsHint(t *testing.T) {
 	man := snapshot.Manifest{

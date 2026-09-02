@@ -213,10 +213,12 @@ func (m PickerModel) firstPaneIdx() int {
 }
 
 // isNavTarget reports whether `n` is a valid Up/Down landing spot in tree
-// focus: panes (where the preview lives) and collapsed non-leaf nodes (so the
-// user can step onto a collapsed window/session and press Right to re-expand).
+// focus: panes (scrollback preview), window nodes (the layout map lives there),
+// and collapsed non-leaf nodes (so the user can step onto a collapsed
+// window/session and press Right to re-expand). An expanded session is passed
+// over — its only preview is a hint — so Up/Down step window → panes → window.
 func isNavTarget(n *TreeNode) bool {
-	if n.Kind == NodePane {
+	if n.Kind == NodePane || n.Kind == NodeWindow {
 		return true
 	}
 	return !n.Expanded && len(n.Children) > 0
@@ -398,9 +400,13 @@ func (m PickerModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				n := nodes[m.treeCursor]
 				switch {
 				case !n.Expanded && len(n.Children) > 0:
-					// Cursor on a collapsed parent: expand and re-snap to first
-					// pane within (preserves pane-first invariant).
+					// Cursor on a collapsed parent: expand and dive to the first
+					// pane within.
 					n.Expanded = true
+					m.treeCursor = m.firstPaneIdxIn(n)
+				case n.Expanded && len(n.Children) > 0:
+					// On an already-expanded window/session (the map is showing):
+					// dive to the first pane within, without collapsing.
 					m.treeCursor = m.firstPaneIdxIn(n)
 				case n.Kind == NodePane:
 					// On a leaf pane: nothing to expand. No-op.
