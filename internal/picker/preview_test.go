@@ -364,3 +364,75 @@ func TestPickerModel_CloseTreeYieldsArrowsWhenPreviewFocused(t *testing.T) {
 		t.Errorf("Down left the pane cursor at %d; it should have advanced", got)
 	}
 }
+
+// A window node's preview shows the map, not the old "press →" hint.
+func TestPickerModel_WindowNodeShowsMap(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name: "demo",
+			Windows: []snapshot.Window{{
+				Index:  1,
+				Name:   "tmux-remux",
+				Layout: "1cb4,145x36,0,0[145x18,0,0,0,145x17,0,19{72x17,0,19,1,72x17,73,19,2}]",
+				Panes: []snapshot.Pane{
+					{Index: 0, Command: "nvim"},
+					{Index: 1, Command: "agent-work"},
+					{Index: 2, Command: "fish"},
+				},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+	m.focus = focusTree
+	m.treeCursor = windowNodeIndex(t, m)
+
+	_, _, previewWidth := m.paneWidthsThree()
+	got := m.renderPreview(previewWidth)
+	if strings.Contains(got, "press → to expand") {
+		t.Errorf("still showing the hint instead of a map:\n%s", got)
+	}
+	if !strings.ContainsRune(got, '┌') || !strings.Contains(got, "agent-work") {
+		t.Errorf("no labelled box art in:\n%s", got)
+	}
+}
+
+// A snapshot written before layouts were stored must not regress.
+func TestPickerModel_WindowNodeWithoutLayoutKeepsHint(t *testing.T) {
+	man := snapshot.Manifest{
+		V: 1,
+		Sessions: []snapshot.Session{{
+			Name:    "demo",
+			Windows: []snapshot.Window{{Index: 1, Panes: []snapshot.Pane{{Index: 0}}}},
+		}},
+	}
+	raw, _ := json.Marshal(man)
+	ev := store.Event{ID: 7, Kind: "snapshot", ManifestJSON: string(raw)}
+
+	m := NewPickerModel(ModeSnapshot, []store.Event{ev}, nil, nil)
+	m.Bootstrap()
+	m.width, m.height = 160, 24
+	m.focus = focusTree
+	m.treeCursor = windowNodeIndex(t, m)
+
+	_, _, previewWidth := m.paneWidthsThree()
+	if got := m.renderPreview(previewWidth); !strings.Contains(got, "press → to expand") {
+		t.Errorf("want the hint for a layout-less window, got:\n%s", got)
+	}
+}
+
+func windowNodeIndex(t *testing.T, m PickerModel) int {
+	t.Helper()
+	for i, n := range m.VisibleNodes() {
+		if n.Kind == NodeWindow {
+			return i
+		}
+	}
+	t.Fatal("no window node in visible tree")
+	return -1
+}

@@ -2,6 +2,7 @@ package picker
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/noamsto/tmux-remux/internal/panemap"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
@@ -75,8 +77,16 @@ func (m PickerModel) renderPreview(width int) string {
 		return frame.Render(rowDim.Render("(no pane selected)"))
 	}
 	n := nodes[m.treeCursor]
+	if n.Kind == NodeWindow {
+		if w, ok := n.Ref.(*snapshot.Window); ok {
+			if art := m.renderWindowMap(w, innerWidth, innerHeight); art != "" {
+				return frame.Render(art)
+			}
+		}
+	}
 	if n.Kind != NodePane {
-		// Reachable after Left collapses to a window/session node.
+		// Reachable after Left collapses to a window/session node, and for a
+		// window whose layout predates layout capture.
 		return frame.Render(rowDim.Render("(press → to expand, ↑↓ to find a pane)"))
 	}
 	p, _ := n.Ref.(*snapshot.Pane)
@@ -189,4 +199,24 @@ func loadScrollbackCmd(sb *scrollback.Store, sha string) tea.Cmd {
 		buf, err := io.ReadAll(rc)
 		return scrollbackLoadedMsg{sha: sha, content: buf, err: err}
 	}
+}
+
+// renderWindowMap draws w's pane layout, titled with the window. Returns "" when
+// the layout is absent or unparsable so the caller can fall back to its hint.
+func (m PickerModel) renderWindowMap(w *snapshot.Window, innerWidth, innerHeight int) string {
+	g, err := panemap.Parse(w.Layout)
+	if err != nil {
+		return ""
+	}
+	title := fmt.Sprintf("%d: %s  (%d×%d)", w.Index, snapshot.StripFormat(w.Name), g.W, g.H)
+	label := func(idx int) string {
+		for i := range w.Panes {
+			if w.Panes[i].Index == idx {
+				return w.Panes[i].Command
+			}
+		}
+		return ""
+	}
+	art := panemap.Render(g, innerWidth, innerHeight-1, label, nil)
+	return rowDim.Render(ansi.Truncate(title, innerWidth, "…")) + "\n" + art
 }
