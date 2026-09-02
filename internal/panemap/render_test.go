@@ -33,7 +33,7 @@ func TestRender_SinglePane(t *testing.T) {
 	got := render(mustParse(t, "x,80x24,0,0,0"), 10, 4, nil, nil)
 	want := strings.Join([]string{
 		"┌────────┐",
-		"│        │",
+		"│ 0      │",
 		"│        │",
 		"└────────┘",
 	}, "\n")
@@ -48,9 +48,9 @@ func TestRender_StackedPanesShareDivider(t *testing.T) {
 	got := render(mustParse(t, layoutStack), 10, 5, nil, nil)
 	want := strings.Join([]string{
 		"┌────────┐",
-		"│        │",
+		"│ 0      │",
 		"├────────┤",
-		"│        │",
+		"│ 1      │",
 		"└────────┘",
 	}, "\n")
 	if got != want {
@@ -64,10 +64,10 @@ func TestRender_StackedPanesShareDivider_AtH8(t *testing.T) {
 	got := render(mustParse(t, layoutStack), 10, 8, nil, nil)
 	want := strings.Join([]string{
 		"┌────────┐",
-		"│        │",
+		"│ 0      │",
 		"│        │",
 		"├────────┤",
-		"│        │",
+		"│ 1      │",
 		"│        │",
 		"│        │",
 		"└────────┘",
@@ -83,10 +83,10 @@ func TestRender_NestedLayout(t *testing.T) {
 	got := render(mustParse(t, layoutDemo), 24, 6, nil, nil)
 	want := strings.Join([]string{
 		"┌──────────────────────┐",
-		"│                      │",
+		"│ 0                    │",
 		"│                      │",
 		"├──────────┬───────────┤",
-		"│          │           │",
+		"│ 1        │ 2         │",
 		"└──────────┴───────────┘",
 	}, "\n")
 	if got != want {
@@ -107,6 +107,34 @@ func TestRender_KeepsProportions(t *testing.T) {
 	}
 }
 
+// Each pane's label is written inside its box.
+func TestRender_LabelsPanes(t *testing.T) {
+	label := func(i int) string { return []string{"nvim", "agent-work"}[i] }
+	got := render(mustParse(t, layoutStack), 30, 7, label, nil)
+	if !strings.Contains(got, "nvim") || !strings.Contains(got, "agent-work") {
+		t.Errorf("labels missing from:\n%s", got)
+	}
+}
+
+// A label longer than its box must not spill past the border.
+func TestRender_LabelTruncatedToBox(t *testing.T) {
+	got := render(mustParse(t, "x,80x24,0,0,0"), 24, 6, func(int) string { return strings.Repeat("x", 100) }, nil)
+	for _, line := range strings.Split(got, "\n") {
+		if len([]rune(line)) != 24 {
+			t.Fatalf("line %q is %d runes, want 24", line, len([]rune(line)))
+		}
+	}
+}
+
+// The marked pane's border is dashed so the map says which one died.
+func TestRender_MarkedPaneUsesDashedBorder(t *testing.T) {
+	marked := func(i int) bool { return i == 1 }
+	got := render(mustParse(t, layoutStack), 30, 7, nil, marked)
+	if !strings.ContainsRune(got, '┄') && !strings.ContainsRune(got, '┆') {
+		t.Errorf("no dashed border for the marked pane:\n%s", got)
+	}
+}
+
 // Two columns split at different heights keep each column's divider on its own
 // row — the left at row 5 (├), the right at row 4 (┤). Forcing them onto one row
 // is what a flat coordinate merge does, and it is the bug that erased a pane; the
@@ -116,12 +144,12 @@ func TestRender_StaggeredColumnsKeepSeparateDividers(t *testing.T) {
 	got := render(mustParse(t, layoutStaggered), 30, 12, nil, nil)
 	want := strings.Join([]string{
 		"┌──────────────┬─────────────┐",
-		"│              │             │",
+		"│ 0            │ 2           │",
 		"│              │             │",
 		"│              │             │",
 		"│              ├─────────────┤",
-		"├──────────────┤             │",
-		"│              │             │",
+		"├──────────────┤ 3           │",
+		"│ 1            │             │",
 		"│              │             │",
 		"│              │             │",
 		"│              │             │",

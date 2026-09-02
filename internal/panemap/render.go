@@ -31,10 +31,16 @@ func Render(g Grid, w, h int, label func(int) string, marked func(int) bool) str
 // render skips the panel-size guard so tests can assert exact output below it.
 // It still degrades to a summary when the layout itself is undrawable at this
 // size — a pane too small to hold an interior — which is a property of the
-// geometry rather than of the panel size.
-func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
+// geometry rather than of the panel size. label and marked may be nil.
+func render(g Grid, w, h int, label func(int) string, marked func(int) bool) string {
 	if g.root == nil {
 		return summary(g)
+	}
+	if label == nil {
+		label = func(int) string { return "" }
+	}
+	if marked == nil {
+		marked = func(int) bool { return false }
 	}
 	var boxes []box
 	if !layoutNode(g.root, 0, 0, w-1, h-1, &boxes) {
@@ -43,8 +49,10 @@ func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
 
 	// hEdge[y][x]: a horizontal segment occupies this cell. vEdge likewise.
 	// Sibling boxes set the same shared cell, so runeFor merges the divider.
+	// dashed marks the borders of a marked pane so its lines render broken.
 	hEdge := grid2D(w, h)
 	vEdge := grid2D(w, h)
+	dashed := grid2D(w, h)
 	for _, b := range boxes {
 		for x := b.x0; x <= b.x1; x++ {
 			hEdge[b.y0][x] = true
@@ -54,15 +62,31 @@ func render(g Grid, w, h int, _ func(int) string, _ func(int) bool) string {
 			vEdge[y][b.x0] = true
 			vEdge[y][b.x1] = true
 		}
+		if !marked(b.idx) {
+			continue
+		}
+		for x := b.x0; x <= b.x1; x++ {
+			dashed[b.y0][x] = true
+			dashed[b.y1][x] = true
+		}
+		for y := b.y0; y <= b.y1; y++ {
+			dashed[y][b.x0] = true
+			dashed[y][b.x1] = true
+		}
 	}
 
 	out := make([][]rune, h)
 	for y := range out {
 		out[y] = make([]rune, w)
 		for x := range out[y] {
-			out[y][x] = runeFor(hEdge, vEdge, x, y, w, h)
+			r := runeFor(hEdge, vEdge, x, y, w, h)
+			if dashed[y][x] {
+				r = dash(r)
+			}
+			out[y][x] = r
 		}
 	}
+	drawLabels(out, boxes, label)
 	return joinRunes(out)
 }
 
@@ -123,6 +147,39 @@ func layoutNode(n *node, x0, y0, x1, y1 int, boxes *[]box) bool {
 }
 
 func iround(f float64) int { return int(math.Round(f)) }
+
+// dash swaps a plain line for its dashed counterpart. Junctions stay solid:
+// they belong to two boxes at once, and dashing them would claim a border the
+// marked pane only half owns.
+func dash(r rune) rune {
+	switch r {
+	case '─':
+		return '┄'
+	case '│':
+		return '┆'
+	}
+	return r
+}
+
+// drawLabels writes each pane's label on the first interior row of its box,
+// truncated to fit. A box with no interior room keeps its shape and loses the
+// text.
+func drawLabels(out [][]rune, boxes []box, label func(int) string) {
+	for _, b := range boxes {
+		room := b.x1 - b.x0 - 3 // borders plus one space of padding each side
+		row := b.y0 + 1
+		if room < 1 || row >= b.y1 {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprintf("%d %s", b.idx, label(b.idx)))
+		for i, r := range []rune(text) {
+			if i >= room {
+				break
+			}
+			out[row][b.x0+2+i] = r
+		}
+	}
+}
 
 // runeFor picks the box-drawing rune for one cell from which of its four
 // neighbours continue a line.
