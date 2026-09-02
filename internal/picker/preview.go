@@ -86,6 +86,9 @@ func (m PickerModel) renderPreview(width int) string {
 	}
 	p, _ := n.Ref.(*snapshot.Pane)
 	if p == nil || p.ScrollbackSHA == "" {
+		if p != nil && m.manifests[m.CurrentEventID()].ScrollbackSkipped {
+			return frame.Render(rowDim.Render("(scrollback skipped — saved within min_save_interval)"))
+		}
 		return frame.Render(rowDim.Render("(no scrollback captured for this pane)"))
 	}
 	sha := p.ScrollbackSHA
