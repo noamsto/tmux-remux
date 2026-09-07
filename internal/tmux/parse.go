@@ -125,7 +125,7 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pane line %d: pane_index: %w", i+1, err)
 		}
-		pid, err := strconv.Atoi(fields[5])
+		pid, err := parseIntOrZero(fields[5])
 		if err != nil {
 			return nil, fmt.Errorf("pane line %d: pid: %w", i+1, err)
 		}
@@ -135,7 +135,7 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		}
 		out = append(out, PaneRow{
 			Session: fields[0], WindowIndex: wi, PaneIndex: pi,
-			Cwd: fields[3], Command: fields[4], PID: pid, LastUsed: lu, ID: fields[7],
+			Cwd: fields[3], Command: fields[4], PID: int(pid), LastUsed: lu, ID: fields[7],
 			Relaunch: fields[8],
 		})
 	}
@@ -144,7 +144,8 @@ func ParsePanes(s string) ([]PaneRow, error) {
 
 // parseIntOrZero parses s as an int64 in base 10. Empty strings return 0
 // (handles tmux's empty session_last_attached / pane_last_used for never-
-// attached sessions and freshly-created panes).
+// attached sessions and freshly-created panes, and the empty pane_pid /
+// pane_last_used a dead pane reports under remain-on-exit).
 func parseIntOrZero(s string) (int64, error) {
 	if s == "" {
 		return 0, nil

@@ -151,3 +151,20 @@ func TestParsePanesEmptyLastUsed(t *testing.T) {
 		t.Errorf("LastUsed = %d, want 0 for empty input", got[0].LastUsed)
 	}
 }
+
+func TestParsePanesDeadPane(t *testing.T) {
+	// A pane whose process exited under remain-on-exit lingers in the layout,
+	// but tmux reports pane_pid, pane_current_path and pane_last_used empty.
+	input := "s1\x1f1\x1f1\x1f\x1flztmux-remote-picker\x1f\x1f\x1f%1\x1f\n"
+	got, err := tmux.ParsePanes(input)
+	if err != nil {
+		t.Fatalf("ParsePanes: %v", err)
+	}
+	// The pane is kept: the saved layout string still counts it.
+	want := []tmux.PaneRow{
+		{Session: "s1", WindowIndex: 1, PaneIndex: 1, Command: "lztmux-remote-picker", ID: "%1"},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("mismatch (-want +got):\n%s", diff)
+	}
+}
