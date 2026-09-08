@@ -9,11 +9,11 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/google/go-cmp v0.7.0
-	github.com/klauspost/compress v1.19.2
+	github.com/klauspost/compress v1.20.0
 	github.com/noamsto/themestate v0.1.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/sys v0.47.0
-	modernc.org/sqlite v1.57.0
+	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.48.0
+	modernc.org/sqlite v1.58.0
 )
 
 require (
