@@ -730,9 +730,12 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 	}
 
 	// Defaults say nothing, so they are not printed: a shell that is fish, a
-	// window that held one pane, a session that is still running.
+	// window that held one pane, a session that is still running. hasCmd is
+	// tracked separately from extra[0] == cmd because "(gone)" or a pane count
+	// can also land first when cmd itself is elided.
 	var extra []string
-	if cmd != "" && cmd != "fish" {
+	hasCmd := cmd != "" && cmd != "fish"
+	if hasCmd {
 		extra = append(extra, cmd)
 	}
 	if !v.live[r.Session] {
@@ -749,14 +752,24 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 	right = append(right, columnAge(v.now.Sub(time.UnixMilli(r.Ts))))
 	tail := strings.Join(right, " ")
 
-	line := v.layoutRow(r, name, extra, target, tail, innerWidth)
+	line, cmdStart, cmdEnd := v.layoutRow(r, name, extra, hasCmd, target, tail, innerWidth)
+
+	// One flat style over plain text, then StyleRanges punches in the command's
+	// own colour: lipgloss v2 resets to the terminal default (not the outer
+	// style) at the end of a span rendered separately and spliced in by hand,
+	// so a nested Render() leaves a hole in rowActive's background once the
+	// span ends. StyleRanges avoids that — applied to the already-rendered
+	// line, it restores the surrounding style after the range it recolours.
+	var styled string
 	if active {
-		// One flat style over plain text: lipgloss v2 strips ESC bytes from
-		// pre-styled input, so a role colour nested inside rowActive's
-		// background collapses to invisible.
-		return rowActive.Width(innerWidth).Render(line)
+		styled = rowActive.Width(innerWidth).Render(line)
+	} else {
+		styled = closeRowScopeStyle(r.Scope).Width(innerWidth).Render(line)
 	}
-	return closeRowScopeStyle(r.Scope).Width(innerWidth).Render(line)
+	if cmdStart < 0 {
+		return styled
+	}
+	return lipgloss.StyleRanges(styled, lipgloss.NewRange(cmdStart, cmdEnd, closeRowCmd))
 }
 
 // layoutRow fits the columns into innerWidth by giving them up in order of
@@ -765,18 +778,32 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 // then the extra column, and only then is the name cut to the bone. The name
 // is defended this far because nerd-font glyph runs measure narrower than
 // they paint, so a name cut mid-run loses the words that identify it.
-func (v closeListView) layoutRow(r CloseRow, name string, extra []string, target, tail string, innerWidth int) string {
+//
+// hasCmd reports whether extra[0] is the closed pane's command, so callers
+// can recolour it; layoutRow returns its [start,end) cell range in the
+// finished line, or (-1,-1) when there is no command or it didn't survive the
+// column-shedding above. Positions are cell offsets — lipgloss.StyleRanges
+// indexes by display width, not by rune or byte count, and glyph-dense
+// window names make those three disagree.
+func (v closeListView) layoutRow(r CloseRow, name string, extra []string, hasCmd bool, target, tail string, innerWidth int) (line string, cmdStart, cmdEnd int) {
 	avail := innerWidth - lipgloss.Width(tail) - 1
 	if avail < 1 {
 		avail = 1
 	}
 
+	cmdStart, cmdEnd = -1, -1
 	build := func(name string, cwdWidth int, extra []string) string {
 		cols := []string{closeMarker + fmt.Sprintf("%-*s", closeKindWidth, r.Scope)}
 		if cwdWidth > 0 {
 			cols = append(cols, fitCwd(v.tails[r.EventID], cwdWidth))
 		}
 		cols = append(cols, name)
+		prefix := strings.Join(cols, " ")
+		cmdStart, cmdEnd = -1, -1
+		if hasCmd && len(extra) > 0 {
+			cmdStart = lipgloss.Width(prefix) + 1
+			cmdEnd = cmdStart + lipgloss.Width(extra[0])
+		}
 		cols = append(cols, extra...)
 		return strings.Join(append(cols, target), " ")
 	}
@@ -804,13 +831,17 @@ func (v closeListView) layoutRow(r CloseRow, name string, extra []string, target
 		left = build(clip(left, 4), 0, extra)
 	}
 
-	line := left
+	line = left
 	if gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(tail); gap > 0 {
 		line += strings.Repeat(" ", gap)
 	} else {
 		line += " "
 	}
-	return ansi.Truncate(line+tail, innerWidth, "…")
+	line = ansi.Truncate(line+tail, innerWidth, "…")
+	if cmdEnd > lipgloss.Width(line) {
+		cmdStart, cmdEnd = -1, -1
+	}
+	return line, cmdStart, cmdEnd
 }
 
 // cwdColumnWidth budgets the cwd column: as wide as the widest tail in the

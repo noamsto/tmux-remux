@@ -219,6 +219,70 @@ func TestCloseListRowStyle_NeverFaintOrItalic(t *testing.T) {
 	}
 }
 
+// sgrBefore returns the parameters of the SGR sequence in effect at the start
+// of substr's first occurrence in rendered's visible text, found by walking
+// rendered while tracking the visible (ANSI-stripped) rune offset.
+func sgrBefore(t *testing.T, rendered, substr string) string {
+	t.Helper()
+	stripped := ansi.Strip(rendered)
+	at := strings.Index(stripped, substr)
+	if at < 0 {
+		t.Fatalf("substring %q not found in %q", substr, stripped)
+	}
+	target := utf8.RuneCountInString(stripped[:at])
+
+	var lastSGR string
+	visible := 0
+	for i := 0; i < len(rendered); {
+		if rendered[i] == 0x1b && i+1 < len(rendered) && rendered[i+1] == '[' {
+			end := strings.IndexByte(rendered[i:], 'm')
+			if end < 0 {
+				break
+			}
+			// An escape immediately before the target position takes effect
+			// there, so it must be consumed even after visible == target —
+			// otherwise the reset+recolour pair right at a StyleRanges
+			// boundary is missed and the stale colour looks like it survived.
+			lastSGR = rendered[i+2 : i+end]
+			i += end + 1
+			continue
+		}
+		if visible == target {
+			break
+		}
+		_, size := utf8.DecodeRuneInString(rendered[i:])
+		visible++
+		i += size
+	}
+	return lastSGR
+}
+
+// TestCloseListRow_CommandHasItsOwnColour pins the fix for a real rendering
+// bug: the closed pane's command sat in the same colour as the window name
+// beside it, so a glyph-dense tmux title and its trailing command read as one
+// run of text ("codex" looked like part of "ENG-8208 … #3452"). The command
+// must carry a colour distinct from the window name's, on both the resting
+// and the cursor (background-carrying) row style.
+func TestCloseListRow_CommandHasItsOwnColour(t *testing.T) {
+	applyTheme(Theme{}) // deterministic Mocha fallback colors
+	now := time.Now()
+	rows, ctxs, live := closeListFixture(now)
+	v := newCloseListView(rows, ctxs, live, now)
+	row := rowByEvent(t, rows, 1) // pane close: window "main", command "claude".
+
+	for _, active := range []bool{false, true} {
+		rendered := v.renderRow(row, 76, active)
+		cmdSGR := sgrBefore(t, rendered, "claude")
+		nameSGR := sgrBefore(t, rendered, "main")
+		if cmdSGR == nameSGR {
+			t.Errorf("active=%v: command shares the window name's colour (%q)", active, cmdSGR)
+		}
+		if !strings.Contains(cmdSGR, "249;226;175") {
+			t.Errorf("active=%v: command SGR = %q, want the theme's yellow accent", active, cmdSGR)
+		}
+	}
+}
+
 func TestClosePreviewHeader(t *testing.T) {
 	man := snapshot.Manifest{Sessions: []snapshot.Session{{
 		Name:    "lazytmux",

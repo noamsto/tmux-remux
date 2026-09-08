@@ -31,6 +31,7 @@ var (
 	keyCast    lipgloss.Style
 
 	previewHeader lipgloss.Style
+	closeRowCmd   lipgloss.Style
 
 	// closeRailStyles and closeLabelStyles colour the stacked close preview's
 	// pane blocks. Indexed by block position and cycled, so two blocks are
@@ -68,6 +69,10 @@ func applyTheme(t Theme) {
 	keyCast = lipgloss.NewStyle().Foreground(t.Base()).Background(t.Mauve()).Bold(true)
 
 	previewHeader = lipgloss.NewStyle().Foreground(t.Blue()).Bold(true)
+	// Shares the preview's second-rail accent so a command reads the same
+	// wherever it appears. Must stay distinct from nodeWindow: the two sit
+	// adjacent in a row, over glyph-dense window names with no other boundary.
+	closeRowCmd = lipgloss.NewStyle().Foreground(t.Yellow())
 
 	accents := []color.Color{t.Blue(), t.Yellow()}
 	closeRailStyles = make([]lipgloss.Style, len(accents))
