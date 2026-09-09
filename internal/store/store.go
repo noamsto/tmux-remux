@@ -408,3 +408,29 @@ func (s *Store) DeleteScrollback(ctx context.Context, sha string) error {
 	}
 	return nil
 }
+
+// SnapshotsBefore returns up to limit snapshot events timestamped in
+// [since, before), newest first — the run of saves leading up to a close,
+// which is where a close event looks for scrollback its own snapshot skipped.
+func (s *Store) SnapshotsBefore(ctx context.Context, before, since int64, limit int) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
+		FROM events
+		WHERE kind = 'snapshot' AND ts < ? AND ts >= ?
+		ORDER BY ts DESC, id DESC
+		LIMIT ?
+	`, before, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query snapshots before %d: %w", before, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Event
+	for rows.Next() {
+		var ev Event
+		if err := rows.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}

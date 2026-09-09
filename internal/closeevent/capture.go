@@ -180,6 +180,10 @@ func resolveAtCapture(ctx context.Context, db *store.Store, a Args, man CloseMan
 	if item == nil {
 		return nil
 	}
+	// Before the item is embedded, not after: the SHAs this fills in are what
+	// linkResolvedScrollback then pins, which is what keeps the blobs alive
+	// once the snapshot that captured them is pruned.
+	FillScrollback(ctx, db, item, prior.SavedAt)
 	return &ResolvedClose{Item: *item, SavedAt: prior.SavedAt}
 }
 
