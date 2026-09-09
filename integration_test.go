@@ -536,7 +536,9 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 	dbPath := remuxEnv(t)
 	bin := buildRemux(t)
 	srv := testutil.StartServer(t)
-	wireTriggers(t, srv, bin)
+	if v := wireTriggers(t, srv, bin); !v.AtLeast(3, 8) {
+		t.Skipf("needs the tmux 3.8 pane-exited hook, have %s", v)
+	}
 
 	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
 		t.Fatalf("new-session: %v\n%s", err, out)
@@ -573,8 +575,14 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 	}
 	waitForThrottledSnapshot(t, dbPath)
 
-	if out, err := srv.Tmux("kill-pane", "-t", victim); err != nil {
-		t.Fatalf("kill-pane: %v\n%s", err, out)
+	// The victim's own program exits, so pane-exited fires and carries its
+	// pane id. Killing the pane instead lands on after-kill-pane, which carries
+	// no id and has to recover it by diffing the survivors against the newest
+	// snapshot — a diff that resolves nothing when a save lands between the kill
+	// and the hook, as it does on a loaded runner. That race is
+	// TestTriggersKillPaneResolvesViaSurvivorDiff's subject, not this test's.
+	if out, err := srv.Tmux("send-keys", "-t", victim, "exit", "Enter"); err != nil {
+		t.Fatalf("send-keys exit: %v\n%s", err, out)
 	}
 
 	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
