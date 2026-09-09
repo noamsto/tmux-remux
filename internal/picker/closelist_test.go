@@ -1,7 +1,9 @@
 package picker_test
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
 	"github.com/noamsto/tmux-remux/internal/picker"
@@ -76,12 +78,17 @@ func closeRows(rows []picker.CloseRow) []picker.CloseRow {
 }
 
 // sections returns the Section text of every header row, in order.
+// sections returns the section rows' titles with the leading scope glyph
+// dropped, so these tests pin which groups a list is cut into and in what
+// order, not which glyph titles them.
 func sections(rows []picker.CloseRow) []string {
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		if r.Kind == picker.RowSectionHeader {
-			out = append(out, r.Section)
+		if r.Kind != picker.RowSectionHeader {
+			continue
 		}
+		_, glyph := utf8.DecodeRuneInString(r.Section)
+		out = append(out, strings.TrimPrefix(r.Section[glyph:], " "))
 	}
 	return out
 }
@@ -100,7 +107,7 @@ func TestBuildCloseList_SectionAssignment(t *testing.T) {
 
 	rows := picker.BuildCloseList(evs, ctxs, "mono")
 
-	if got, want := sections(rows), []string{"THIS SESSION · mono", "OTHER SESSIONS"}; !equalStrings(got, want) {
+	if got, want := sections(rows), []string{"mono", "other sessions"}; !equalStrings(got, want) {
 		t.Fatalf("sections = %v, want %v", got, want)
 	}
 	closes := closeRows(rows)
@@ -143,7 +150,7 @@ func TestBuildCloseList_HeaderSuppressedWhenSectionEmpty(t *testing.T) {
 
 	rows := picker.BuildCloseList(evs, ctxs, "mono")
 
-	if got, want := sections(rows), []string{"OTHER SESSIONS"}; !equalStrings(got, want) {
+	if got, want := sections(rows), []string{"other sessions"}; !equalStrings(got, want) {
 		t.Fatalf("sections = %v, want %v (no this-session closes)", got, want)
 	}
 }
@@ -314,7 +321,7 @@ func TestBuildCloseList_UnattributedCloseFallsBackToUnknownSession(t *testing.T)
 
 	rows := picker.BuildCloseList(evs, ctxs, "mono")
 
-	if got, want := sections(rows), []string{"OTHER SESSIONS"}; !equalStrings(got, want) {
+	if got, want := sections(rows), []string{"other sessions"}; !equalStrings(got, want) {
 		t.Fatalf("sections = %v, want %v", got, want)
 	}
 	closes := closeRows(rows)

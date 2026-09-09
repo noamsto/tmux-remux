@@ -47,10 +47,13 @@ func (r CloseRow) Selectable() bool {
 	return r.Kind == RowClose
 }
 
-const sectionOther = "OTHER SESSIONS"
+// Section titles. The current session is titled by its own name — the reader
+// already knows which session they are in, so the glyph is what says "this
+// one" — and everything else falls under one glyphed heading.
+const sectionOther = glyphOther + " other sessions"
 
 func sectionThis(current string) string {
-	return "THIS SESSION · " + current
+	return glyphSession + " " + current
 }
 
 // collapseKey identifies closes a user would read as one repeated event.

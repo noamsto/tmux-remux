@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -225,36 +226,41 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 }
 
 // closeListWidth splits a side-by-side close layout between the list and the
-// preview. The list's appetite is bounded — its columns are a marker, a kind,
-// a path tail, a name and a reopen target, and past closeListMax the extra
-// cells only pad the gap before the age — while the preview's is not: it
-// shows scrollback, which is what tells two otherwise identical closes apart.
-// So the list takes a fixed share between its floor and that ceiling, and
-// every cell beyond goes to the preview. The floor binds until the terminal
-// is around 195 columns wide; the proportion is what keeps the two growing
-// together past that.
+// preview. Both appetites are bounded, and the preview's is the smaller: it
+// cuts scrollback to the column rather than wrapping it, so once it holds the
+// widest line a pane is likely to have produced, further cells only pad the
+// right of every row. The list keeps finding uses for width — more of the
+// window name, the cwd tail, the reopen target — so the preview is capped at
+// closePreviewMax and the surplus goes to the list. Below that cap the two
+// grow together, with the list holding its floor.
 func closeListWidth(width int) int {
-	w := width * 2 / 5
-	if w < closeListMin {
-		w = closeListMin
+	preview := width * 3 / 5
+	if preview > closePreviewMax {
+		preview = closePreviewMax
 	}
-	if w > closeListMax {
-		w = closeListMax
+	if preview < closePreviewMin {
+		preview = closePreviewMin
 	}
-	return w
+	if w := width - preview; w > closeListMin {
+		return w
+	}
+	return closeListMin
 }
 
-// Bounds on the close list's column, both read off rendered output for a list
+// closeListMin is the close list's floor, read off rendered output for a list
 // whose rows carry every column — including the cwd tail, which only appears
-// when a session's closes are not all in one directory. The floor is where
-// layoutRow stops shedding: below 78 the cwd goes first, then at 44 the
-// "(gone)" tag that says the session must be recreated, at 36 the window
-// name, at 30 the reopen target. The ceiling is where the cwd column reaches
-// its 24-cell cap and further cells only pad the gap before the age.
-const (
-	closeListMin = 78
-	closeListMax = 100
-)
+// when a session's closes are not all in one directory. It is where layoutRow
+// stops shedding, with four cells in hand: at 66 the cwd goes first, from 50
+// the name is clipped, at 40 the "(gone)" tag that says the session must be
+// recreated goes, and at 27 the reopen target.
+const closeListMin = 71
+
+// closePreviewMax is the widest the close preview grows before its surplus is
+// better spent on the list: twenty cells past the standard pane closePreviewMin
+// is cut for, which is slack enough for a prompt-indented line. Wider
+// scrollback than that is not stranded — M-h/M-l pan the preview sideways,
+// while a clipped row of the list has no such escape hatch.
+const closePreviewMax = closePreviewMin + 20
 
 func renderList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height).MaxHeight(height)
@@ -701,13 +707,29 @@ func columnAge(d time.Duration) string {
 	return strings.TrimSuffix(humanAge(d), " ago")
 }
 
-// closeMarker opens every restorable row. Section headers carry no marker,
-// which is what the column means: there is something here to restore.
-const closeMarker = "● "
+// Scope glyphs. One opens every close row in place of the scope word it used
+// to spell out, and two title the list's sections. All are one cell wide, so
+// the columns after them line up down the list. The values are stand-ins for
+// the Nerd Font icons named beside them, which the picker cannot yet assume
+// the terminal has.
+const (
+	glyphPane    = "▪" // nerd: nf-cod-terminal
+	glyphWindow  = "◫" // nerd: nf-cod-window
+	glyphSession = "▣" // nerd: nf-cod-multiple_windows
+	glyphOther   = "◇" // nerd: nf-cod-layers
+)
 
-// closeKindWidth pads the kind column so every row's cwd starts in the same
-// column. "session" is the longest of the three.
-const closeKindWidth = 7
+// scopeGlyph is the glyph for what a close row would restore, matching the
+// colour closeRowScopeStyle gives the same three levels.
+func scopeGlyph(scope string) string {
+	switch scope {
+	case "session":
+		return glyphSession
+	case "window":
+		return glyphWindow
+	}
+	return glyphPane
+}
 
 // renderRow renders one flat close row as a single line of exactly innerWidth
 // cells. Section headers render their text alone.
@@ -793,7 +815,7 @@ func (v closeListView) layoutRow(r CloseRow, name string, extra []string, hasCmd
 
 	cmdStart, cmdEnd = -1, -1
 	build := func(name string, cwdWidth int, extra []string) string {
-		cols := []string{closeMarker + fmt.Sprintf("%-*s", closeKindWidth, r.Scope)}
+		cols := []string{scopeGlyph(r.Scope)}
 		if cwdWidth > 0 {
 			cols = append(cols, fitCwd(v.tails[r.EventID], cwdWidth))
 		}
@@ -812,7 +834,7 @@ func (v closeListView) layoutRow(r CloseRow, name string, extra []string, hasCmd
 		if budget < floor {
 			budget = floor
 		}
-		return ansi.Truncate(name, budget, "…")
+		return clipName(name, budget)
 	}
 
 	left := build(name, v.cwdColumnWidth(innerWidth), extra)
@@ -842,6 +864,37 @@ func (v closeListView) layoutRow(r CloseRow, name string, extra []string, hasCmd
 		cmdStart, cmdEnd = -1, -1
 	}
 	return line, cmdStart, cmdEnd
+}
+
+// clipName cuts a window name to width cells. A name carrying a nerd-font
+// glyph run — the ticket id, agent and PR glyphs a window name accretes — is
+// cut from the left, because the run sits at the end and is what identifies
+// the window: the prose head is the half a reader can afford to lose. A name
+// without one is cut from the right, where a leading ellipsis would hide the
+// words that discriminate instead.
+func clipName(name string, width int) string {
+	w := lipgloss.Width(name)
+	if w <= width {
+		return name
+	}
+	if !hasGlyphRun(name) {
+		return ansi.Truncate(name, width, "…")
+	}
+	// A double-width rune straddling the cut can leave TruncateLeft one cell
+	// over budget; the re-truncate clamps it back, as fitCwd does.
+	return ansi.Truncate(ansi.TruncateLeft(name, w-width+1, "…"), width, "")
+}
+
+// hasGlyphRun reports whether name carries a private-use codepoint, i.e. a
+// nerd-font glyph. Emoji are deliberately not counted: they turn up mid-name
+// as often as at the end, so they say nothing about which end to cut.
+func hasGlyphRun(name string) bool {
+	for _, r := range name {
+		if unicode.In(r, unicode.Co) {
+			return true
+		}
+	}
+	return false
 }
 
 // cwdColumnWidth budgets the cwd column: as wide as the widest tail in the

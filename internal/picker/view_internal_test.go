@@ -496,9 +496,9 @@ func rowByEvent(t *testing.T, rows []CloseRow, id int64) CloseRow {
 }
 
 // TestCloseListRow_Columns pins the exact column layout at a comfortable
-// width: marker, kind, the cwd column (blank where the session's modal cwd is
-// what the close was in), name, extra, target, then a right-aligned count and
-// age. The cwd column is as wide as the widest tail in the list — 11 for
+// width: the scope glyph, the cwd column (blank where the session's modal cwd
+// is what the close was in), name, extra, target, then a right-aligned count
+// and age. The cwd column is as wide as the widest tail in the list — 11 for
 // "wt/feat-104" — so a row that elides it still pads to keep names aligned.
 func TestCloseListRow_Columns(t *testing.T) {
 	applyTheme(NewTheme())
@@ -515,22 +515,22 @@ func TestCloseListRow_Columns(t *testing.T) {
 		{
 			name: "pane close in the session's modal cwd",
 			id:   1,
-			want: "● pane    " + blankCwd + " main claude → mono:2" + strings.Repeat(" ", 32) + "4m",
+			want: glyphPane + " " + blankCwd + " main claude → mono:2" + strings.Repeat(" ", 40) + "4m",
 		},
 		{
 			name: "collapsed two-pane window close",
 			id:   2,
-			want: "● window  " + blankCwd + " docs 2p → mono:3" + strings.Repeat(" ", 32) + "×2 18h",
+			want: glyphWindow + " " + blankCwd + " docs 2p → mono:3" + strings.Repeat(" ", 40) + "×2 18h",
 		},
 		{
 			name: "worktree close shows the discriminating tail",
 			id:   4,
-			want: "● pane    wt/feat-104 code claude → mono:4" + strings.Repeat(" ", 32) + "2d",
+			want: glyphPane + " wt/feat-104 code claude → mono:4" + strings.Repeat(" ", 40) + "2d",
 		},
 		{
 			name: "session close names its window count and targets the session",
 			id:   5,
-			want: "● session " + blankCwd + " 3w (gone) → tp-g6-nix-config" + strings.Repeat(" ", 23) + "45m",
+			want: glyphSession + " " + blankCwd + " 3w (gone) → tp-g6-nix-config" + strings.Repeat(" ", 31) + "45m",
 		},
 	}
 	for _, tt := range tests {
@@ -543,17 +543,17 @@ func TestCloseListRow_Columns(t *testing.T) {
 	}
 }
 
-// TestCloseListRow_HeaderCarriesNoMarker keeps section headers structural:
-// they render their text and nothing else, so the ● column reads as "this is
-// restorable".
-func TestCloseListRow_HeaderCarriesNoMarker(t *testing.T) {
+// TestCloseListRow_HeaderIsItsTitleAlone keeps section headers structural:
+// a header renders its glyph and title and none of a close row's columns, so
+// the columns after the glyph read as "this is restorable".
+func TestCloseListRow_HeaderIsItsTitleAlone(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
 	v := newCloseListView(rows, ctxs, live, now)
 	got := strings.TrimRight(ansi.Strip(v.renderRow(rows[0], 76, false)), " ")
-	if got != "THIS SESSION · mono" {
-		t.Errorf("header row = %q, want %q", got, "THIS SESSION · mono")
+	if want := glyphSession + " mono"; got != want {
+		t.Errorf("header row = %q, want %q", got, want)
 	}
 }
 
@@ -599,8 +599,8 @@ func TestCloseListRow_TieHasNoModalCwd(t *testing.T) {
 	rows := BuildCloseList(evs, ctxs, "duo")
 	v := newCloseListView(rows, ctxs, map[string]bool{"duo": true}, now)
 	want := map[int64]string{
-		1: "● pane    tmux-remux  main claude → duo:1",
-		2: "● pane    wt/feat-104 feat claude → duo:2",
+		1: glyphPane + " tmux-remux  main claude → duo:1",
+		2: glyphPane + " wt/feat-104 feat claude → duo:2",
 	}
 	for id, prefix := range want {
 		got := ansi.Strip(v.renderRow(rowByEvent(t, rows, id), 76, false))
@@ -660,14 +660,14 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 		want  string
 	}{
 		// 20-cell tail, quarter-row budget 30 capped at 24: the tail fits whole.
-		{120, "● pane    wt/topic-branch-long release-notes-editor claude → solo:1"},
+		{120, glyphPane + " wt/topic-branch-long release-notes-editor claude → solo:1"},
 		// Quarter-row budget 19: one cell short, so the head goes, not the tail.
-		{76, "● pane    …/topic-branch-long release-notes-editor claude → solo:1"},
+		{76, glyphPane + " …/topic-branch-long release-notes-editor claude → solo:1"},
 		// The column no longer fits beside the name, and yields whole.
-		{60, "● pane    release-notes-editor claude → solo:1"},
-		{46, "● pane    release-notes-ed… claude → solo:1"},
+		{50, glyphPane + " release-notes-editor claude → solo:1"},
+		{40, glyphPane + " release-notes-edit… claude → solo:1"},
 		// The extra column goes before the name is cut past its floor.
-		{34, "● pane    release… → solo:1"},
+		{28, glyphPane + " release… → solo:1"},
 	}
 	for _, tt := range tests {
 		t.Run(strconv.Itoa(tt.width), func(t *testing.T) {
@@ -700,12 +700,12 @@ func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 	r := rowByEvent(t, rows, 1)
 
 	// A quarter of 32 is exactly the floor, and the whole 8-cell tail fits.
-	if got := ansi.Strip(v.renderRow(r, 32, false)); !strings.HasPrefix(got, "● pane    wt/topic a → s:1") {
+	if got := ansi.Strip(v.renderRow(r, 32, false)); !strings.HasPrefix(got, glyphPane+" wt/topic a → s:1") {
 		t.Errorf("at 32 the column should hold the tail, got %q", got)
 	}
 	// A quarter of 30 is under it. The row has room to spare, so this is the
 	// floor talking, not the layout running out of width.
-	if got := ansi.Strip(v.renderRow(r, 30, false)); !strings.HasPrefix(got, "● pane    a → s:1") {
+	if got := ansi.Strip(v.renderRow(r, 30, false)); !strings.HasPrefix(got, glyphPane+" a → s:1") {
 		t.Errorf("at 30 the column should be dropped, got %q", got)
 	}
 }
@@ -785,7 +785,7 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 			t.Errorf("default %q should be elided, got %q", unwanted, defaults)
 		}
 	}
-	if want := "● window  shell → mono:1"; !strings.HasPrefix(defaults, want) {
+	if want := glyphWindow + " shell → mono:1"; !strings.HasPrefix(defaults, want) {
 		t.Errorf("row = %q, want prefix %q", defaults, want)
 	}
 
@@ -823,13 +823,13 @@ func TestCloseListRow_CwdYieldsBeforeTheName(t *testing.T) {
 	if !strings.Contains(wide, "wt/topic") || !strings.Contains(wide, name) {
 		t.Fatalf("at 76 both columns fit; got %q", wide)
 	}
-	// At 56 they do not both fit. The cwd column is the one that goes.
-	tight := ansi.Strip(v.renderRow(r, 56, false))
+	// At 50 they do not both fit. The cwd column is the one that goes.
+	tight := ansi.Strip(v.renderRow(r, 50, false))
 	if strings.Contains(tight, "wt/topic") {
-		t.Errorf("cwd column should be dropped at 56, got %q", tight)
+		t.Errorf("cwd column should be dropped at 50, got %q", tight)
 	}
 	if !strings.Contains(tight, name) {
-		t.Errorf("name should survive intact at 56, got %q", tight)
+		t.Errorf("name should survive intact at 50, got %q", tight)
 	}
 }
 
@@ -889,10 +889,9 @@ func closeListModel(t *testing.T, n int) PickerModel {
 	return m
 }
 
-// The flat list and its preview split the width so that the preview — the
-// column carrying the scrollback that tells two similar closes apart — is
-// never the one that gives way: the list stops growing at a width that fits
-// its columns and every cell past that goes to the preview. Below
+// The flat list and its preview split the width so that the preview stops
+// growing once it holds the widest line a pane is cut for, and every cell past
+// that goes to the list, which keeps finding uses for width. Below
 // closeSideBySideMin there is no preview column at all; it stacks underneath
 // instead, which is why widening a terminal never costs the list a column.
 // Widths are spelled out rather than read off the constants, which would make
@@ -901,7 +900,7 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	// wantList of 0 means "stacked": one full-width column, no preview beside it.
 	for _, tc := range []struct{ w, wantList int }{
-		{80, 0}, {100, 0}, {130, 0}, {160, 0}, {162, 0}, {163, 78}, {180, 78}, {200, 80}, {250, 100}, {300, 100},
+		{80, 0}, {100, 0}, {130, 0}, {150, 0}, {155, 0}, {156, 71}, {163, 71}, {180, 75}, {200, 95}, {250, 145}, {300, 195},
 	} {
 		m.width, m.height = tc.w, 40
 		list, tree, preview := m.paneWidthsThree()
@@ -926,18 +925,18 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 		if list != tc.wantList {
 			t.Errorf("width=%d: list = %d, want %d", tc.w, list, tc.wantList)
 		}
-		if preview < list {
-			t.Errorf("width=%d: preview = %d, narrower than the list (%d)", tc.w, preview, list)
+		if preview < closePreviewMin {
+			t.Errorf("width=%d: preview = %d, under the width a pane line needs (%d)", tc.w, preview, closePreviewMin)
 		}
 	}
-	// Past the list's ceiling the extra cells are all the preview's: fifty
-	// more columns of terminal buy the list nothing and the preview fifty.
+	// Past the preview's ceiling the extra cells are all the list's: fifty
+	// more columns of terminal buy the preview nothing and the list fifty.
 	m.width = 250
 	list, _, preview := m.paneWidthsThree()
 	m.width = 300
 	wideList, _, widePreview := m.paneWidthsThree()
-	if wideList != list || widePreview-preview != 50 {
-		t.Errorf("250→300 columns: list %d→%d, preview %d→%d — growth is not all going to the preview",
+	if widePreview != preview || wideList-list != 50 {
+		t.Errorf("250→300 columns: list %d→%d, preview %d→%d — growth is not all going to the list",
 			list, wideList, preview, widePreview)
 	}
 }
@@ -950,10 +949,10 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 // reopened. layoutRow sheds columns in order as a row runs out of room, so a
 // floor set a few cells lower silently drops one of them and the row reads as
 // a live session, or as the only close in its directory. Widths narrower than
-// this were rendered and looked at: below 78 the longest-named row loses its
-// cwd, 44 loses "(gone)", 36 loses the name, 30 loses the target. The check
-// is on the longest row in the fixture, since that is the one that sheds
-// first.
+// this were rendered and looked at: the longest-named row keeps every column
+// down to 67, loses its cwd at 66, starts clipping its name at 50, loses
+// "(gone)" at 40 and its target at 27. The check is on the longest row in the
+// fixture, since that is the one that sheds first.
 func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	m.width, m.height = closeSideBySideMin, 40
@@ -961,7 +960,7 @@ func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.
 	lines := innerLines(t, renderCloseList(m, listW, 38))
 	for _, want := range []string{
 		"main claude → mono:2",
-		"services/document test-runner-long-5 (gone) → nix-config:11",
+		"document test-runner-long-5 (gone) → nix-config:11",
 	} {
 		found := false
 		for _, l := range lines {
