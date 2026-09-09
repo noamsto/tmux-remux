@@ -137,3 +137,67 @@ func TestBuildCloseContextsScrollbackSkippedReflectsResolvedItem(t *testing.T) {
 		t.Error("CloseContext.SubManifest.ScrollbackSkipped = true, want false: the embedded entity carries real scrollback")
 	}
 }
+
+// An event already in the store carries no embedded scrollback when the
+// snapshot it was captured against was throttled. The preview would have
+// nothing to draw, so resolving it looks back past the throttled snapshot for
+// the pane's own last capture — which is also what clears the "skipped" note.
+func TestBuildCloseContextsAdoptsScrollbackFromAnEarlierSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	window := func(sha string) snapshot.Window {
+		return snapshot.Window{Index: 1, Name: "w", ID: "@1", Panes: []snapshot.Pane{
+			{Index: 1, ID: "%1"},
+			{Index: 2, ID: "%2", ScrollbackSHA: sha},
+		}}
+	}
+	insert := func(ts int64, skipped bool, sha string) {
+		t.Helper()
+		body, err := json.Marshal(snapshot.Manifest{
+			V: 1, Host: "h", SavedAt: ts, ScrollbackSkipped: skipped,
+			Sessions: []snapshot.Session{{Name: "work", Windows: []snapshot.Window{window(sha)}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.InsertEvent(ctx, store.Event{
+			Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(body),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert(1000, false, "deadbeef")
+	insert(2000, true, "")
+
+	// %2 is gone from the post-close index, so the diff resolves the close
+	// against the throttled snapshot — the one carrying no scrollback at all.
+	closeMan := closeevent.CloseManifest{
+		SessionName: "work", WindowID: "@1", PaneID: "%2",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "work", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "work", WindowIndex: 1, PaneIndex: 1, ID: "%1"}},
+		},
+	}
+	closeJSON, err := json.Marshal(closeMan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs := []store.Event{{ID: 9, Ts: 3000, Kind: "pane-died", Host: "h", ManifestJSON: string(closeJSON)}}
+
+	ctxs := buildCloseContexts(ctx, db, evs)
+	cc, ok := ctxs[9]
+	if !ok {
+		t.Fatalf("no CloseContext resolved for the close event; ctxs = %+v", ctxs)
+	}
+	if !subManifestHasScrollback(cc.SubManifest) {
+		t.Errorf("sub-manifest carries no scrollback; want the capture from the earlier snapshot: %+v", cc.SubManifest)
+	}
+	if cc.SubManifest.ScrollbackSkipped {
+		t.Error("SubManifest.ScrollbackSkipped = true, want false: the close now carries the pane's own capture")
+	}
+}

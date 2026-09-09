@@ -491,6 +491,7 @@ func resolveEvent(ctx context.Context, db *store.Store, ev store.Event) (*closee
 	if !ok {
 		return nil, snapshot.Manifest{}, false
 	}
+	closeevent.FillScrollback(ctx, db, item, savedAt)
 	// Equivalent on both paths: savedAt == prior.SavedAt on the snapshot path,
 	// and a manifest's Host is only ever written, never read.
 	return item, snapshot.Manifest{Host: ev.Host, SavedAt: savedAt}, true
@@ -709,6 +710,7 @@ func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event)
 		if !ok {
 			continue
 		}
+		closeevent.FillScrollback(ctx, db, item, savedAt)
 		sub := item.SubManifest(ev.Host, savedAt)
 		sub.ScrollbackSkipped = prior.ScrollbackSkipped && !subManifestHasScrollback(sub)
 		out[ev.ID] = picker.CloseContext{

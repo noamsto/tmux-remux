@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -525,4 +526,120 @@ func TestTriggersMonitorSaveTick(t *testing.T) {
 		}
 	}
 	t.Fatal("no snapshot with reason=timer within 10s — the monitor hook did not fire")
+}
+
+// A close resolves against whichever snapshot is newest before it, and a save
+// that lands inside min_save_interval writes one with no scrollback at all —
+// so on a busy server the pane's captured output sits a save or two back,
+// present in the store but invisible to the close. The event must adopt it.
+func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	wireTriggers(t, srv, bin)
+
+	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "/bin/sh"); err != nil {
+		t.Fatalf("split-window: %v\n%s", err, out)
+	}
+	panes, err := srv.Tmux("list-panes", "-t", "work", "-F", "#{pane_id}")
+	if err != nil {
+		t.Fatalf("list-panes: %v\n%s", err, panes)
+	}
+	ids := strings.Fields(panes)
+	if len(ids) != 2 {
+		t.Fatalf("want 2 panes, got %v", ids)
+	}
+	victim := ids[1]
+
+	// Something identifiable on the victim's screen, so the adopted blob can be
+	// shown to be that pane's own output rather than any capture at all.
+	const marker = "remux-adopted-marker"
+	if out, err := srv.Tmux("send-keys", "-t", victim, "echo "+marker, "Enter"); err != nil {
+		t.Fatalf("send-keys: %v\n%s", err, out)
+	}
+	waitForPaneText(t, srv, victim, marker)
+
+	// The full save captures the marker; the split right after it is a
+	// structural change inside min_save_interval, so its save records structure
+	// with no scrollback and becomes the newest snapshot before the close.
+	if out, err := srv.Tmux("run-shell", bin+" save --reason=test"); err != nil {
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "/bin/sh"); err != nil {
+		t.Fatalf("split-window: %v\n%s", err, out)
+	}
+	waitForThrottledSnapshot(t, dbPath)
+
+	if out, err := srv.Tmux("kill-pane", "-t", victim); err != nil {
+		t.Fatalf("kill-pane: %v\n%s", err, out)
+	}
+
+	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+		return m.PaneID == victim && m.Resolved != nil && m.Resolved.Item.Pane != nil &&
+			m.Resolved.Item.Pane.ScrollbackSHA != ""
+	})
+
+	sha := m.Resolved.Item.Pane.ScrollbackSHA
+	sb := scrollback.New(filepath.Join(filepath.Dir(dbPath), "scrollbacks"))
+	rc, err := sb.Stream(context.Background(), sha)
+	if err != nil {
+		t.Fatalf("adopted scrollback %s is not in the store: %v", sha, err)
+	}
+	defer func() { _ = rc.Close() }()
+	body, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), marker) {
+		t.Errorf("adopted scrollback is not the victim's output:\n%s", body)
+	}
+}
+
+// waitForPaneText polls a pane's screen for up to 5s until it shows want.
+func waitForPaneText(t *testing.T, srv *testutil.Server, target, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		out, err := srv.Tmux("capture-pane", "-p", "-t", target)
+		if err == nil {
+			last = out
+			if strings.Contains(out, want) {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("pane %s never showed %q; last screen:\n%s", target, want, last)
+}
+
+// waitForThrottledSnapshot polls for up to 5s for a snapshot that recorded
+// structure but skipped scrollback — the state that hid a pane's output from
+// the close that followed it.
+func waitForThrottledSnapshot(t *testing.T, dbPath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		db, err := store.Open(context.Background(), dbPath)
+		if err != nil {
+			continue
+		}
+		evs, err := db.ListEvents(context.Background(), store.ListOpts{Kinds: []string{"snapshot"}, Limit: 1})
+		_ = db.Close()
+		if err != nil || len(evs) == 0 {
+			continue
+		}
+		var m snapshot.Manifest
+		if json.Unmarshal([]byte(evs[0].ManifestJSON), &m) != nil {
+			continue
+		}
+		if m.ScrollbackSkipped {
+			return
+		}
+	}
+	t.Fatal("no scrollback-skipped snapshot within 5s")
 }
