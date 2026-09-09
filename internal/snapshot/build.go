@@ -59,6 +59,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 
 	for _, s := range sessions {
 		if s.BridgeHost != "" {
+			m.Bridged = append(m.Bridged, s.Name)
 			continue
 		}
 		sess := Session{Name: s.Name, LastAttached: s.LastAttached}

@@ -522,3 +522,38 @@ func fakeTmuxEmitting(t *testing.T, out string) string {
 	}
 	return path
 }
+
+// A close inside a lazytmux bridge-mirror session can never be undone: the
+// snapshot builder skips those sessions, so nothing ever accounts for the
+// event.
+func TestBridgeSessionCloseNeverReachesUndo(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	// What snapshot.Build writes for a server holding one bridge session.
+	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Bridged: []string{"halo-houston"}}
+	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", SessionID: "$3", SessionName: "halo-houston",
+		WindowID: "@31", Host: "h",
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if id != 0 {
+		t.Errorf("Capture stored event %d, want it dropped at the source", id)
+	}
+
+	target, err := restorableClose(ctx, db, "halo-houston")
+	if err != nil {
+		t.Fatalf("restorableClose: %v", err)
+	}
+	if len(target.Discarded) > 0 {
+		t.Errorf("Discarded = %+v, want undo to report nothing to undo", target.Discarded)
+	}
+}

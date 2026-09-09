@@ -146,6 +146,9 @@ func TestBuildSkipsBridgeSessions(t *testing.T) {
 					t.Errorf("bridge session leaked into manifest: %+v", s)
 				}
 			}
+			if len(m.Bridged) != 1 || m.Bridged[0] != "host-remote" {
+				t.Errorf("Bridged = %v, want [host-remote]", m.Bridged)
+			}
 			for _, s := range m.Sessions {
 				if len(s.Windows) == 0 {
 					t.Errorf("session %q has no windows, want its own windows/panes intact", s.Name)
