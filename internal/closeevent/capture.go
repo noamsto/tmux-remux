@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -48,6 +49,13 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 	// index nothing was lost, so drop it at the source rather than storing a row
 	// the picker can only render as "no recoverable entity".
 	if entityStillLive(a) {
+		return 0, nil
+	}
+
+	// A lazytmux bridge mirror is left out of every snapshot (always
+	// reconstructible from its remote), so nothing inside one ever resolves.
+	// Same reasoning as above: drop it at the source.
+	if bridgedSession(ctx, db, a.SessionName) {
 		return 0, nil
 	}
 
@@ -111,6 +119,24 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 
 	linkResolvedScrollback(ctx, db, id, man.Resolved)
 	return id, nil
+}
+
+// bridgedSession reports whether name is a session snapshot.Build skipped for
+// carrying @bridge_host. An unnamed session — after-kill-pane carries no
+// hook_session_name — answers false and stays on the ordinary resolve path.
+func bridgedSession(ctx context.Context, db *store.Store, name string) bool {
+	if name == "" {
+		return false
+	}
+	snap, err := db.LatestSnapshot(ctx)
+	if err != nil || snap == nil {
+		return false
+	}
+	var m snapshot.Manifest
+	if json.Unmarshal([]byte(snap.ManifestJSON), &m) != nil {
+		return false
+	}
+	return slices.Contains(m.Bridged, name)
 }
 
 // resolveAtCapture embeds the closed entity in the event at capture time so a

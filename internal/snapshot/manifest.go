@@ -35,8 +35,12 @@ type Manifest struct {
 	// a pane simply never having had scrollback captured. The picker uses
 	// this to tell "throttled" apart from "nothing captured yet" in the
 	// preview.
-	ScrollbackSkipped bool      `json:"scrollback_skipped,omitempty"`
-	Sessions          []Session `json:"sessions"`
+	ScrollbackSkipped bool `json:"scrollback_skipped,omitempty"`
+	// Bridged names the sessions Build deliberately left out for carrying
+	// @bridge_host. closeevent.Capture reads it to drop closes inside them:
+	// nothing this snapshot omits can ever be resolved against it.
+	Bridged  []string  `json:"bridged,omitempty"`
+	Sessions []Session `json:"sessions"`
 }
 
 // Session captures one tmux session's structure.
