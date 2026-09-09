@@ -248,6 +248,7 @@ func (c RestoreCmd) Run() error {
 		for _, s := range rows {
 			running[s.Name] = true
 		}
+		f.Bridged = bridgedSessions(rows)
 
 		opts := resolveBuildOptions(ctx, t, cfg.CommandAllowList)
 		plan, stats := restore.BuildPlan(m, f, running, opts)
@@ -256,10 +257,10 @@ func (c RestoreCmd) Run() error {
 			log.Logf("restore: snapshot %d (age %s): apply failed: %v", ev.ID, age, err)
 			return err
 		}
-		log.Logf("restore: snapshot %d (age %s): %d sessions restored, skipped %d running / %d stale / %d idle (%d idle windows), %d actions, %d failed",
-			ev.ID, age, stats.SessionsKept, stats.SessionsSkippedRunning,
-			stats.SessionsSkippedStale, stats.SessionsSkippedIdle,
-			stats.WindowsSkippedIdle, len(plan), len(failed))
+		log.Logf("restore: snapshot %d (age %s): %d sessions restored, skipped %d bridged / %d running / %d stale / %d idle (%d idle windows), %d actions, %d failed",
+			ev.ID, age, stats.SessionsKept, stats.SessionsSkippedBridged,
+			stats.SessionsSkippedRunning, stats.SessionsSkippedStale,
+			stats.SessionsSkippedIdle, stats.WindowsSkippedIdle, len(plan), len(failed))
 		for _, actionErr := range failed {
 			log.Logf("restore: snapshot %d: action failed: %v", ev.ID, actionErr)
 		}
@@ -609,15 +610,17 @@ func (c PickCmd) Run() error {
 		for _, s := range sessions {
 			runningSet[s.Name] = true
 		}
+		bridged := bridgedSessions(sessions)
 
 		sb := scrollback.New(cfg.ScrollbackDir)
 		var ctxs map[int64]picker.CloseContext
 		hidden := 0
 		if mode == picker.ModeClose {
 			ctxs = buildCloseContexts(ctx, db, evs)
-			evs, hidden = partitionRecoverable(evs, ctxs)
+			evs, hidden = partitionRecoverable(evs, ctxs, bridged)
 		}
 		m := picker.NewPickerModel(mode, evs, runningSet, sb)
+		m.SetBridged(bridged)
 		if mode == picker.ModeClose {
 			m.SetCloseContexts(ctxs)
 			m.SetHiddenCount(hidden)
@@ -669,16 +672,35 @@ func (c PickCmd) Run() error {
 // time, or a window moved rather than closed — carries nothing to restore, so
 // the picker hides it behind the returned count instead of listing a dead
 // "(invalid manifest)" row.
-func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext) (kept []store.Event, hidden int) {
+//
+// A close inside a session that is a bridge mirror right now is hidden the
+// same way. Capture drops these at the source, but a store keeps every one
+// recorded before that drop worked, and restoring one injects a window into a
+// rendering of a remote.
+func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext, bridged map[string]bool) (kept []store.Event, hidden int) {
 	kept = make([]store.Event, 0, len(evs))
 	for _, ev := range evs {
-		if len(ctxs[ev.ID].SubManifest.Sessions) == 0 {
+		cc := ctxs[ev.ID]
+		if len(cc.SubManifest.Sessions) == 0 || bridged[cc.Placement.Session] {
 			hidden++
 			continue
 		}
 		kept = append(kept, ev)
 	}
 	return kept, hidden
+}
+
+// bridgedSessions names the sessions carrying @bridge_host — lazytmux bridge
+// mirrors — out of a live list-sessions. Live is the point: every other source
+// of this answer can be older than the bridge it is being asked about.
+func bridgedSessions(rows []tmux.SessionRow) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range rows {
+		if s.BridgeHost != "" {
+			out[s.Name] = true
+		}
+	}
+	return out
 }
 
 // buildCloseContexts resolves each close event — against its parent snapshot
@@ -796,6 +818,10 @@ func (c CaptureEventCmd) Run() error {
 		var post closeevent.IndexPost
 		post.Windows, _ = t.ListWindows(ctx)
 		post.Panes, _ = t.ListPanes(ctx)
+		// Same best-effort read as the index above: a session list that fails
+		// to come back leaves the set empty, which drops nothing — the old
+		// behaviour, not a new refusal to record.
+		sessions, _ := t.ListSessions(ctx)
 		_, err := closeevent.Capture(ctx, db, closeevent.Args{
 			Kind:        c.Kind,
 			SessionID:   c.Session,
@@ -804,6 +830,7 @@ func (c CaptureEventCmd) Run() error {
 			PaneID:      c.Pane,
 			Host:        hostname(),
 			Index:       post,
+			Bridged:     bridgedSessions(sessions),
 		})
 		return err
 	})

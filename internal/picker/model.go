@@ -590,6 +590,14 @@ func (m *PickerModel) SetCloseContexts(ctx map[int64]CloseContext) {
 	m.closeContexts = ctx
 }
 
+// SetBridged records which sessions are lazytmux bridge mirrors right now, so
+// the tree marks them skipped and the restore built from this model's filter
+// leaves them alone. Read from live tmux by the caller: a snapshot old enough
+// to still contain a mirror is exactly the one that cannot say so itself.
+func (m *PickerModel) SetBridged(bridged map[string]bool) {
+	m.filter.Bridged = bridged
+}
+
 // SetHiddenCount records how many unrecoverable close events the caller
 // filtered out. Rendered as a footer line in the list pane. Close mode only.
 func (m *PickerModel) SetHiddenCount(n int) {

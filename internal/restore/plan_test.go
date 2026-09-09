@@ -250,3 +250,32 @@ func TestBuildPlanNoDecorationNoSetOption(t *testing.T) {
 		}
 	}
 }
+
+// Mirrors are kept out of new snapshots, but an older snapshot still holds
+// them — it predates the exclusion, or the bridge, or the option. Restoring
+// one recreates a fake mirror session full of the renderer's local shells, so
+// the plan drops it on the live answer rather than on what the snapshot says.
+func TestBuildPlan_SkipsLiveBridgeMirrors(t *testing.T) {
+	m := snapshot.Manifest{V: 1, SavedAt: time.Now().UnixMilli(), Sessions: []snapshot.Session{
+		{Name: "halo-nix-amd-ai", LastAttached: time.Now().Unix(), Windows: []snapshot.Window{
+			{Index: 1, Name: "nix-amd-ai", Panes: []snapshot.Pane{{Index: 1, Command: "fish", ChildCount: 1}}},
+		}},
+		{Name: "mono", LastAttached: time.Now().Unix(), Windows: []snapshot.Window{
+			{Index: 1, Name: "w", Panes: []snapshot.Pane{{Index: 1, Command: "fish", ChildCount: 1}}},
+		}},
+	}}
+	f := filter.Filter{Bridged: map[string]bool{"halo-nix-amd-ai": true}}
+
+	plan, stats := restore.BuildPlan(m, f, nil, restore.BuildOptions{})
+	if stats.SessionsSkippedBridged != 1 {
+		t.Errorf("SessionsSkippedBridged = %d, want 1", stats.SessionsSkippedBridged)
+	}
+	if stats.SessionsKept != 1 {
+		t.Errorf("SessionsKept = %d, want 1 (mono)", stats.SessionsKept)
+	}
+	for _, a := range plan {
+		if cw, ok := a.(restore.CreateWindow); ok && cw.Session == "halo-nix-amd-ai" {
+			t.Errorf("plan recreates the mirror session: %+v", cw)
+		}
+	}
+}

@@ -21,6 +21,15 @@ type Filter struct {
 	SkipIdleWindows     bool
 	SkipRunningSessions bool
 	IdleShellNames      map[string]bool // override default set
+	// Bridged names the sessions that are lazytmux bridge mirrors right now,
+	// read from live tmux (#{@bridge_host}) by whoever built this filter. It
+	// is a field rather than a per-query argument like `running` because the
+	// answer cannot come from the snapshot being restored: a snapshot may
+	// predate the bridge, predate the option, or have been written by a build
+	// that did not record it, and restoring a mirror it happens to contain
+	// recreates a session that is a rendering of a remote — panes that were
+	// only ever the renderer's own local shell.
+	Bridged map[string]bool
 }
 
 // SkipSnapshot returns true if the whole snapshot should be skipped due to age.
@@ -34,8 +43,14 @@ func (f Filter) SkipSnapshot(savedAtMillis int64) bool {
 }
 
 // SessionSkipReason reports why the session would be filtered out:
-// "running", "stale", or "" when it should be kept.
+// "bridged", "running", "stale", or "" when it should be kept.
 func (f Filter) SessionSkipReason(s snapshot.Session, running map[string]bool) string {
+	// Checked before "running", and unconditionally: a mirror is not a thing
+	// to restore whatever the flags say, and it is usually running too, which
+	// would otherwise report the less specific reason.
+	if f.Bridged[s.Name] {
+		return "bridged"
+	}
 	if f.SkipRunningSessions && running[s.Name] {
 		return "running"
 	}
@@ -48,8 +63,8 @@ func (f Filter) SessionSkipReason(s snapshot.Session, running map[string]bool) s
 	return ""
 }
 
-// SkipSession returns true if the session should be filtered out (already
-// running or stale).
+// SkipSession returns true if the session should be filtered out (a live
+// bridge mirror, already running, or stale).
 func (f Filter) SkipSession(s snapshot.Session, running map[string]bool) bool {
 	return f.SessionSkipReason(s, running) != ""
 }

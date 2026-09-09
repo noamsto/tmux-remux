@@ -617,3 +617,77 @@ func TestCaptureLinksResolvedPaneScrollback(t *testing.T) {
 		t.Errorf("refcount = %d, want 1", refcount)
 	}
 }
+
+// Whether a session is a bridge mirror is read from live tmux, not from the
+// last snapshot. The two disagree exactly when it matters: a snapshot written
+// by a build that never recorded the field leaves Bridged empty while the
+// mirror has been excluded from Sessions all along, and every close inside it
+// gets recorded as restorable. That was the state of a real store: two live
+// mirrors, `"bridged": null`, and 376 recorded mirror closes.
+func TestCaptureDropsBridgedOnTheLiveAnswerNotTheSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	// A snapshot that excludes the mirror but says nothing about why.
+	silent := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{
+		{Name: "mono", Windows: []snapshot.Window{{Index: 1, ID: "@1", Panes: []snapshot.Pane{{Index: 1, ID: "%1"}}}}},
+	}}
+
+	t.Run("live tmux says mirror, snapshot does not", func(t *testing.T) {
+		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		body, err := json.Marshal(silent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.InsertEvent(ctx, store.Event{Ts: 100, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(body)}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := closeevent.Capture(ctx, db, closeevent.Args{
+			Kind: "window-unlinked", SessionID: "$3", SessionName: "halo-houston",
+			WindowID: "@31", Host: "h", Bridged: map[string]bool{"halo-houston": true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != 0 {
+			t.Errorf("Capture stored event %d, want it dropped at the source", id)
+		}
+	})
+
+	// And the converse: a stale Bridged entry must not suppress a real close.
+	// The bridge is gone, the session is an ordinary one now, and losing a
+	// window in it is as undoable as anywhere else.
+	t.Run("snapshot says mirror, live tmux does not", func(t *testing.T) {
+		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		stale := silent
+		stale.Bridged = []string{"halo-houston"}
+		stale.Sessions = []snapshot.Session{{
+			Name:    "halo-houston",
+			Windows: []snapshot.Window{{Index: 31, ID: "@31", Panes: []snapshot.Pane{{Index: 1, ID: "%1"}}}},
+		}}
+		body, err := json.Marshal(stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.InsertEvent(ctx, store.Event{Ts: 100, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(body)}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := closeevent.Capture(ctx, db, closeevent.Args{
+			Kind: "window-unlinked", SessionID: "$3", SessionName: "halo-houston",
+			WindowID: "@31", Host: "h",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == 0 {
+			t.Error("Capture dropped a close in a session that is no longer a mirror")
+		}
+	})
+}

@@ -525,7 +525,8 @@ func fakeTmuxEmitting(t *testing.T, out string) string {
 
 // A close inside a lazytmux bridge-mirror session can never be undone: the
 // snapshot builder skips those sessions, so nothing ever accounts for the
-// event.
+// event. Whether the session is a mirror is read from live tmux and passed in
+// — the snapshot deliberately says nothing about what it left out.
 func TestBridgeSessionCloseNeverReachesUndo(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
@@ -534,13 +535,14 @@ func TestBridgeSessionCloseNeverReachesUndo(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	// What snapshot.Build writes for a server holding one bridge session.
+	// What snapshot.Build writes for a server holding one bridge session: the
+	// mirror is absent from Sessions, and Bridged records that it was omitted.
 	snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Bridged: []string{"halo-houston"}}
 	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
 
 	id, err := closeevent.Capture(ctx, db, closeevent.Args{
 		Kind: "window-unlinked", SessionID: "$3", SessionName: "halo-houston",
-		WindowID: "@31", Host: "h",
+		WindowID: "@31", Host: "h", Bridged: map[string]bool{"halo-houston": true},
 	})
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
