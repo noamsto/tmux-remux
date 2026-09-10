@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -27,6 +26,14 @@ type Args struct {
 	// entity is already gone when the hook fires). Empty when the server is
 	// unreachable — i.e. the last session closed and nothing survived.
 	Index IndexPost
+	// Bridged is the set of sessions that are lazytmux bridge mirrors right
+	// now, read from live tmux by the caller alongside Index. Asking tmux
+	// rather than the last snapshot matters because the two disagree exactly
+	// when it counts: a bridge attached since the last save, or a snapshot
+	// written by a build that did not record the field. Either way the mirror
+	// is already excluded from snapshots while its closes go on being
+	// recorded as restorable.
+	Bridged map[string]bool
 }
 
 // Capture inserts a close event into the store unless a fresh outer-scope
@@ -54,8 +61,11 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 
 	// A lazytmux bridge mirror is left out of every snapshot (always
 	// reconstructible from its remote), so nothing inside one ever resolves.
-	// Same reasoning as above: drop it at the source.
-	if bridgedSession(ctx, db, a.SessionName) {
+	// Same reasoning as above: drop it at the source. An unnamed session —
+	// after-kill-pane carries no hook_session_name — matches nothing and
+	// stays on the ordinary resolve path, where the snapshot diff finds no
+	// missing pane for a mirror and drops the event anyway.
+	if a.Bridged[a.SessionName] {
 		return 0, nil
 	}
 
@@ -119,24 +129,6 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 
 	linkResolvedScrollback(ctx, db, id, man.Resolved)
 	return id, nil
-}
-
-// bridgedSession reports whether name is a session snapshot.Build skipped for
-// carrying @bridge_host. An unnamed session — after-kill-pane carries no
-// hook_session_name — answers false and stays on the ordinary resolve path.
-func bridgedSession(ctx context.Context, db *store.Store, name string) bool {
-	if name == "" {
-		return false
-	}
-	snap, err := db.LatestSnapshot(ctx)
-	if err != nil || snap == nil {
-		return false
-	}
-	var m snapshot.Manifest
-	if json.Unmarshal([]byte(snap.ManifestJSON), &m) != nil {
-		return false
-	}
-	return slices.Contains(m.Bridged, name)
 }
 
 // resolveAtCapture embeds the closed entity in the event at capture time so a

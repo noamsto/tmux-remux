@@ -92,3 +92,24 @@ func TestSessionSkipReason(t *testing.T) {
 		t.Errorf("kept session: reason = %q, want \"\"", got)
 	}
 }
+
+// A session that is a bridge mirror right now is a rendering of a remote: its
+// panes were only ever the renderer's own local shell, so recreating them is a
+// lie however the flags are set. The reason is reported ahead of "running"
+// because a mirror is normally running too, and "running" would send a reader
+// looking for a session they could just attach to.
+func TestSessionSkipReason_LiveBridgeMirror(t *testing.T) {
+	mirror := snapshot.Session{Name: "halo-houston", LastAttached: time.Now().Unix()}
+	f := filter.Filter{Bridged: map[string]bool{"halo-houston": true}}
+	if got := f.SessionSkipReason(mirror, nil); got != "bridged" {
+		t.Errorf("SessionSkipReason = %q, want %q with no flags set at all", got, "bridged")
+	}
+	f.SkipRunningSessions = true
+	if got := f.SessionSkipReason(mirror, map[string]bool{"halo-houston": true}); got != "bridged" {
+		t.Errorf("SessionSkipReason = %q, want %q ahead of \"running\"", got, "bridged")
+	}
+	other := snapshot.Session{Name: "mono", LastAttached: time.Now().Unix()}
+	if got := f.SessionSkipReason(other, nil); got != "" {
+		t.Errorf("SessionSkipReason(mono) = %q, want it kept", got)
+	}
+}

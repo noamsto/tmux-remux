@@ -95,6 +95,7 @@ type BuildOptions struct {
 // filter dropped entirely because every window was idle plain shells.
 type PlanStats struct {
 	SessionsKept           int
+	SessionsSkippedBridged int
 	SessionsSkippedRunning int
 	SessionsSkippedStale   int
 	SessionsSkippedIdle    int
@@ -137,6 +138,9 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 	var stats PlanStats
 	for _, sess := range m.Sessions {
 		switch f.SessionSkipReason(sess, runningSessions) {
+		case "bridged":
+			stats.SessionsSkippedBridged++
+			continue
 		case "running":
 			stats.SessionsSkippedRunning++
 			continue

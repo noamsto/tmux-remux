@@ -27,12 +27,52 @@ func TestPartitionRecoverable(t *testing.T) {
 		3: {Label: "window-unlinked"},
 	}
 
-	kept, hidden := partitionRecoverable(evs, ctxs)
+	kept, hidden := partitionRecoverable(evs, ctxs, nil)
 	if len(kept) != 1 || kept[0].ID != 1 {
 		t.Fatalf("kept = %+v, want only event 1", kept)
 	}
 	if hidden != 2 {
 		t.Errorf("hidden = %d, want 2", hidden)
+	}
+}
+
+// Capture drops closes inside a bridge mirror at the source, but a store keeps
+// every one recorded before that drop worked — 376 of them on the machine this
+// was found on. Listing one offers to inject a window into a rendering of a
+// remote, so a close whose session is a mirror right now is hidden the same way
+// an unrecoverable one is.
+func TestPartitionRecoverableHidesLiveBridgeMirrors(t *testing.T) {
+	evs := []store.Event{{ID: 1}, {ID: 2}}
+	ctxs := map[int64]picker.CloseContext{
+		1: {
+			Placement:   picker.ClosePlacement{Session: "mono", WindowIndex: 1, Scope: "window"},
+			SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{Name: "mono"}}},
+		},
+		2: {
+			Placement:   picker.ClosePlacement{Session: "halo-houston", WindowIndex: 1, Scope: "window"},
+			SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{Name: "halo-houston"}}},
+		},
+	}
+
+	kept, hidden := partitionRecoverable(evs, ctxs, map[string]bool{"halo-houston": true})
+	if len(kept) != 1 || kept[0].ID != 1 {
+		t.Fatalf("kept = %+v, want only event 1 (the close outside the mirror)", kept)
+	}
+	if hidden != 1 {
+		t.Errorf("hidden = %d, want 1", hidden)
+	}
+}
+
+// bridgedSessions reads the answer off a live list-sessions, which is the only
+// source that cannot be older than the bridge being asked about.
+func TestBridgedSessions(t *testing.T) {
+	got := bridgedSessions([]tmux.SessionRow{
+		{Name: "mono"},
+		{Name: "halo-houston", BridgeHost: "halo"},
+		{Name: "halo-lazytmux", BridgeHost: "halo"},
+	})
+	if len(got) != 2 || !got["halo-houston"] || !got["halo-lazytmux"] {
+		t.Errorf("bridgedSessions = %v, want the two @bridge_host sessions", got)
 	}
 }
 

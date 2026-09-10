@@ -37,8 +37,10 @@ type Manifest struct {
 	// preview.
 	ScrollbackSkipped bool `json:"scrollback_skipped,omitempty"`
 	// Bridged names the sessions Build deliberately left out for carrying
-	// @bridge_host. closeevent.Capture reads it to drop closes inside them:
-	// nothing this snapshot omits can ever be resolved against it.
+	// @bridge_host — a record of what this snapshot omits, so a reader can
+	// tell a skipped mirror from a session that simply did not exist. It is
+	// not what decisions read: whether a session is a mirror is a live fact,
+	// and this field is absent from every snapshot written before it existed.
 	Bridged  []string  `json:"bridged,omitempty"`
 	Sessions []Session `json:"sessions"`
 }
