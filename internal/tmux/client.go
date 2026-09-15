@@ -72,17 +72,18 @@ func isNoServerStderr(s string) bool {
 		strings.Contains(s, "error connecting to ")
 }
 
-// withSynthesizedTmuxEnv returns env unchanged when TMUX is already set,
-// otherwise appends a synthesized TMUX=<socket>,0,0 entry. The socket path
-// follows tmux's own default-socket logic: $TMUX_TMPDIR/tmux-<UID>/default,
-// with /tmp as the TMUX_TMPDIR fallback. The pid/session-id components are
-// dummies — tmux only checks that TMUX is non-empty and that the socket path
-// resolves to a running server.
-func withSynthesizedTmuxEnv(env []string) []string {
+// SocketPath returns the tmux socket path implied by env: the first
+// comma-separated field of TMUX when set — every hook-invoked process has it
+// — otherwise tmux's own default-socket rule, $TMUX_TMPDIR/tmux-<uid>/default
+// with /tmp as the TMUX_TMPDIR fallback.
+func SocketPath(env []string) string {
 	tmpdir := ""
 	for _, e := range env {
-		if strings.HasPrefix(e, "TMUX=") {
-			return env
+		if v, ok := strings.CutPrefix(e, "TMUX="); ok && v != "" {
+			socket, _, _ := strings.Cut(v, ",")
+			if socket != "" {
+				return socket
+			}
 		}
 		if v, ok := strings.CutPrefix(e, "TMUX_TMPDIR="); ok {
 			tmpdir = v
@@ -91,7 +92,20 @@ func withSynthesizedTmuxEnv(env []string) []string {
 	if tmpdir == "" {
 		tmpdir = "/tmp"
 	}
-	return append(env, fmt.Sprintf("TMUX=%s/tmux-%d/default,0,0", tmpdir, os.Getuid()))
+	return fmt.Sprintf("%s/tmux-%d/default", tmpdir, os.Getuid())
+}
+
+// withSynthesizedTmuxEnv returns env unchanged when TMUX is already set,
+// otherwise appends a synthesized TMUX=<socket>,0,0 entry. The pid/session-id
+// components are dummies — tmux only checks that TMUX is non-empty and that
+// the socket path resolves to a running server.
+func withSynthesizedTmuxEnv(env []string) []string {
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX=") {
+			return env
+		}
+	}
+	return append(env, fmt.Sprintf("TMUX=%s,0,0", SocketPath(env)))
 }
 
 const (

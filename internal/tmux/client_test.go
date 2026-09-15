@@ -192,3 +192,44 @@ func writeFakeTmux(t *testing.T, body string) string {
 	}
 	return path
 }
+
+func TestSocketPath(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{
+			name: "TMUX set wins over everything",
+			env:  []string{"TMUX_TMPDIR=/ignored", "TMUX=/run/user/1000/tmux-1000/default,660951,87"},
+			want: "/run/user/1000/tmux-1000/default",
+		},
+		{
+			name: "TMUX without the pid,session suffix",
+			env:  []string{"TMUX=/run/user/1000/tmux-1000/norgb"},
+			want: "/run/user/1000/tmux-1000/norgb",
+		},
+		{
+			name: "TMUX unset falls back to TMUX_TMPDIR",
+			env:  []string{"TMUX_TMPDIR=/run/user/1000"},
+			want: fmt.Sprintf("/run/user/1000/tmux-%d/default", os.Getuid()),
+		},
+		{
+			name: "neither set falls back to /tmp",
+			env:  []string{"HOME=/home/x"},
+			want: fmt.Sprintf("/tmp/tmux-%d/default", os.Getuid()),
+		},
+		{
+			name: "empty TMUX is treated as unset",
+			env:  []string{"TMUX=", "TMUX_TMPDIR=/run/user/1000"},
+			want: fmt.Sprintf("/run/user/1000/tmux-%d/default", os.Getuid()),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tmux.SocketPath(tt.env); got != tt.want {
+				t.Errorf("SocketPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -90,7 +90,7 @@ func TestSaveRestoreRoundtrip(t *testing.T) {
 	scrollDir := filepath.Join(dir, "sb")
 	ctx := context.Background()
 
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
 
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(dir, "test.db"))
+	db, err := store.Open(ctx, filepath.Join(dir, "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,13 +345,13 @@ func wireTriggers(t *testing.T, srv *testutil.Server, bin string) tmux.Version {
 
 // waitForEvent polls the store for up to 5s for an event of kind whose manifest
 // satisfies match, and returns it.
-func waitForEvent(t *testing.T, dbPath, kind string, match func(closeevent.CloseManifest) bool) closeevent.CloseManifest {
+func waitForEvent(t *testing.T, dbPath, socket, kind string, match func(closeevent.CloseManifest) bool) closeevent.CloseManifest {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var seen []string
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, socket)
 		if err != nil {
 			continue // hook may not have created the DB yet
 		}
@@ -406,7 +406,7 @@ func TestTriggersCloseEventsCarrySession(t *testing.T) {
 		t.Fatalf("split-window: %v\n%s", err, out)
 	}
 
-	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+	m := waitForEvent(t, dbPath, srv.Socket, "pane-died", func(m closeevent.CloseManifest) bool {
 		return m.PaneID != ""
 	})
 	if m.SessionID == "" {
@@ -436,7 +436,7 @@ func TestTriggersWindowCloseCarriesSession(t *testing.T) {
 		t.Fatalf("kill-window: %v\n%s", err, out)
 	}
 
-	m := waitForEvent(t, dbPath, "window-unlinked", func(m closeevent.CloseManifest) bool {
+	m := waitForEvent(t, dbPath, srv.Socket, "window-unlinked", func(m closeevent.CloseManifest) bool {
 		return m.WindowID != ""
 	})
 	if m.SessionID == "" {
@@ -500,7 +500,7 @@ func TestUndoDropsFloatingPane(t *testing.T) {
 		t.Errorf("restored tiled pane geometry = %v, want %v", got, wantGeometry)
 	}
 	assertOnlyTiledPanes(t, srv, "work:doomed", 2)
-	db, err := store.Open(context.Background(), dbPath)
+	db, err := store.Open(context.Background(), dbPath, srv.Socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestTriggersKillPaneResolvesViaSurvivorDiff(t *testing.T) {
 		t.Fatalf("kill-pane: %v\n%s", err, out)
 	}
 
-	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+	m := waitForEvent(t, dbPath, srv.Socket, "pane-died", func(m closeevent.CloseManifest) bool {
 		return m.PaneID == victim
 	})
 	if m.WindowID == "" {
@@ -611,7 +611,7 @@ func TestTriggersMonitorSaveTick(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(250 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, srv.Socket)
 		if err != nil {
 			continue
 		}
@@ -665,7 +665,7 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 	// screen it holds is not the test's business and is not deterministic
 	// anyway: the hooks are backgrounded, so a later `send-keys` may or may not
 	// have painted by the time that save reads the pane.
-	waitForCapturedScrollback(t, dbPath)
+	waitForCapturedScrollback(t, dbPath, srv.Socket)
 
 	// A structural change inside min_save_interval now records structure with
 	// no scrollback at all, and becomes the newest snapshot before the close —
@@ -674,7 +674,7 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 	if out, err := srv.Tmux("split-window", "-d", "-t", "work", "/bin/sh"); err != nil {
 		t.Fatalf("split-window: %v\n%s", err, out)
 	}
-	waitForThrottledSnapshot(t, dbPath)
+	waitForThrottledSnapshot(t, dbPath, srv.Socket)
 
 	// The victim's own program exits, so pane-exited fires and carries its
 	// pane id. Killing the pane instead lands on after-kill-pane, which carries
@@ -686,7 +686,7 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 		t.Fatalf("send-keys exit: %v\n%s", err, out)
 	}
 
-	m := waitForEvent(t, dbPath, "pane-died", func(m closeevent.CloseManifest) bool {
+	m := waitForEvent(t, dbPath, srv.Socket, "pane-died", func(m closeevent.CloseManifest) bool {
 		return m.PaneID == victim && m.Resolved != nil && m.Resolved.Item.Pane != nil &&
 			m.Resolved.Item.Pane.ScrollbackSHA != ""
 	})
@@ -708,12 +708,12 @@ func TestTriggersCloseAdoptsScrollbackFromAnEarlierSave(t *testing.T) {
 
 // waitForCapturedScrollback polls for up to 5s for a snapshot that captured
 // pane scrollback — the save a later throttled one hides from a close.
-func waitForCapturedScrollback(t *testing.T, dbPath string) {
+func waitForCapturedScrollback(t *testing.T, dbPath, socket string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, socket)
 		if err != nil {
 			continue
 		}
@@ -744,12 +744,12 @@ func waitForCapturedScrollback(t *testing.T, dbPath string) {
 // waitForThrottledSnapshot polls for up to 5s for a snapshot that recorded
 // structure but skipped scrollback — the state that hid a pane's output from
 // the close that followed it.
-func waitForThrottledSnapshot(t *testing.T, dbPath string) {
+func waitForThrottledSnapshot(t *testing.T, dbPath, socket string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, socket)
 		if err != nil {
 			continue
 		}

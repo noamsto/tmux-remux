@@ -82,7 +82,7 @@ func TestBridgedSessions(t *testing.T) {
 // unexplained one (see internal/picker/preview.go's closePaneContent).
 func TestBuildCloseContextsPropagatesScrollbackSkipped(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestBuildCloseContextsPropagatesScrollbackSkipped(t *testing.T) {
 // the embedded entity's own scrollback, not prior's throttle status.
 func TestBuildCloseContextsScrollbackSkippedReflectsResolvedItem(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestBuildCloseContextsScrollbackSkippedReflectsResolvedItem(t *testing.T) {
 // the pane's own last capture — which is also what clears the "skipped" note.
 func TestBuildCloseContextsAdoptsScrollbackFromAnEarlierSnapshot(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}

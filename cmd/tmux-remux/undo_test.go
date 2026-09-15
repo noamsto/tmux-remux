@@ -40,7 +40,7 @@ func TestUndoFailuresDemotesOnlySetLayout(t *testing.T) {
 // (mono:4, id @9) plus whatever close events the test inserts on top.
 func seedStore(ctx context.Context, t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 // event in it can only resolve through the entity embedded at capture time.
 func emptyStore(ctx context.Context, t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestMatchParentWindow(t *testing.T) {
 // mono (window @9) and lazytmux (window @20).
 func seedTwoSessionStore(ctx context.Context, t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestBuildRestorePlan_WindowCloseInsertsAtItsIndex(t *testing.T) {
 // later actions in the same plan target.
 func TestBuildRestorePlan_SessionCloseNeverInserts(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -549,7 +549,7 @@ func fakeTmuxEmitting(t *testing.T, out string) string {
 // — the snapshot deliberately says nothing about what it left out.
 func TestBridgeSessionCloseNeverReachesUndo(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

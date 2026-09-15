@@ -17,20 +17,30 @@ import (
 	"github.com/noamsto/tmux-remux/internal/store/migrations"
 )
 
-// Store wraps a *sql.DB connection to the tmux-remux SQLite database.
+// Store wraps a *sql.DB connection to the tmux-remux SQLite database, scoped
+// to one tmux server. InsertEvent, LatestSnapshot, LatestSnapshotBefore,
+// ListEvents, DeleteEvents, SetMeta, GetMeta and the prune methods filter on
+// serverKey, so a second server sharing the file cannot read, overwrite, or
+// delete this one's events or meta. The scrollback tables are the deliberate
+// exception — blobs are content-addressed and shared across servers by
+// refcount. ListServerLanes and DeleteServerLane are the other exception:
+// gc needs to see and remove lanes belonging to servers other than this one,
+// so those two deliberately operate across all serverKeys.
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	serverKey string
 }
 
 // Open opens (or creates) the SQLite database at path, runs any pending
-// migrations, and returns a *Store. WAL is enabled, foreign keys are on.
-func Open(ctx context.Context, path string) (*Store, error) {
+// migrations, and returns a *Store scoped to serverKey — the tmux socket
+// path, from [tmux.SocketPath].
+func Open(ctx context.Context, path, serverKey string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, serverKey: serverKey}
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -38,8 +48,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return s, nil
 }
 
-// DB returns the underlying *sql.DB. Callers may use it for ad-hoc queries
-// not yet wrapped by typed methods.
+// ServerKey returns the tmux socket path this Store is scoped to.
+func (s *Store) ServerKey() string { return s.serverKey }
+
+// DB returns the underlying *sql.DB, for tests only. Queries through it
+// bypass the server-key partition every typed method enforces.
 func (s *Store) DB() *sql.DB { return s.db }
 
 // Close closes the underlying database connection.
@@ -122,9 +135,9 @@ type Event struct {
 // InsertEvent inserts a new event row and returns its id.
 func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO events (ts, kind, scope, reason, host, parent_event_id, manifest_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, ev.Ts, ev.Kind, ev.Scope, ev.Reason, ev.Host, ev.ParentEventID, ev.ManifestJSON)
+		INSERT INTO events (ts, kind, scope, reason, host, parent_event_id, manifest_json, server_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, ev.Ts, ev.Kind, ev.Scope, ev.Reason, ev.Host, ev.ParentEventID, ev.ManifestJSON, s.serverKey)
 	if err != nil {
 		return 0, fmt.Errorf("insert event: %w", err)
 	}
@@ -140,10 +153,10 @@ func (s *Store) LatestSnapshotBefore(ctx context.Context, ts int64) (*Event, err
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot' AND ts < ?
+		WHERE server_key = ? AND kind = 'snapshot' AND ts < ?
 		ORDER BY ts DESC, id DESC
 		LIMIT 1
-	`, ts)
+	`, s.serverKey, ts)
 	var ev Event
 	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
 	if err != nil {
@@ -162,10 +175,10 @@ func (s *Store) LatestSnapshot(ctx context.Context) (*Event, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot'
+		WHERE server_key = ? AND kind = 'snapshot'
 		ORDER BY ts DESC, id DESC
 		LIMIT 1
-	`)
+	`, s.serverKey)
 	var ev Event
 	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
 	if err != nil {
@@ -188,8 +201,8 @@ type ListOpts struct {
 func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) {
 	var b strings.Builder
 	b.WriteString(`SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json FROM events`)
-	var clauses []string
-	var args []any
+	clauses := []string{"server_key = ?"}
+	args := []any{s.serverKey}
 	if len(opts.Kinds) > 0 {
 		placeholders := make([]string, len(opts.Kinds))
 		for i, k := range opts.Kinds {
@@ -206,10 +219,8 @@ func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) 
 		}
 		clauses = append(clauses, "kind NOT IN ("+strings.Join(placeholders, ",")+")")
 	}
-	if len(clauses) > 0 {
-		b.WriteString(" WHERE ")
-		b.WriteString(strings.Join(clauses, " AND "))
-	}
+	b.WriteString(" WHERE ")
+	b.WriteString(strings.Join(clauses, " AND "))
 	b.WriteString(" ORDER BY ts DESC, id DESC")
 	if opts.Limit > 0 {
 		b.WriteString(" LIMIT ?")
@@ -233,6 +244,28 @@ func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) 
 	return out, rows.Err()
 }
 
+// DeleteEvents removes the given event ids belonging to this Store's server.
+// Ids from another server are silently not deleted: the caller's list comes
+// from a scoped read, so an id outside this lane is a bug upstream, not a
+// request to reach across servers.
+func (s *Store) DeleteEvents(ctx context.Context, ids []int64) error {
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids), len(ids)+1)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	args = append(args, s.serverKey)
+	var b strings.Builder
+	b.WriteString("DELETE FROM events WHERE id IN (")
+	b.WriteString(strings.Join(placeholders, ","))
+	b.WriteString(") AND server_key = ?")
+	if _, err := s.db.ExecContext(ctx, b.String(), args...); err != nil {
+		return fmt.Errorf("delete events: %w", err)
+	}
+	return nil
+}
+
 // PruneSnapshots deletes snapshot events beyond the keep newest, except that
 // the newest snapshot of each UTC calendar day in the 7 days before nowMs
 // also survives. The per-day floor is the retention safety net: with 60s
@@ -243,23 +276,24 @@ func (s *Store) PruneSnapshots(ctx context.Context, keep int, nowMs int64) error
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind = 'snapshot'
+		  AND server_key = ?
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind = 'snapshot'
+		      WHERE kind = 'snapshot' AND server_key = ?
 		      ORDER BY ts DESC
 		      LIMIT ?
 		  )
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind = 'snapshot' AND ts >= ?
+		      WHERE kind = 'snapshot' AND server_key = ? AND ts >= ?
 		        AND ts IN (
 		            SELECT max(ts)
 		            FROM events
-		            WHERE kind = 'snapshot' AND ts >= ?
+		            WHERE kind = 'snapshot' AND server_key = ? AND ts >= ?
 		            GROUP BY date(ts/1000, 'unixepoch')
 		        )
 		  )
-	`, keep, weekAgo, weekAgo)
+	`, s.serverKey, s.serverKey, keep, s.serverKey, weekAgo, s.serverKey, weekAgo)
 	if err != nil {
 		return fmt.Errorf("prune snapshots: %w", err)
 	}
@@ -279,8 +313,9 @@ func (s *Store) PruneUnresolvableCloseEvents(ctx context.Context) (int64, error)
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind != 'snapshot'
-		  AND ts <= (SELECT MIN(ts) FROM events WHERE kind = 'snapshot')
-	`)
+		  AND server_key = ?
+		  AND ts <= (SELECT MIN(ts) FROM events WHERE kind = 'snapshot' AND server_key = ?)
+	`, s.serverKey, s.serverKey)
 	if err != nil {
 		return 0, fmt.Errorf("prune unresolvable close events: %w", err)
 	}
@@ -298,13 +333,14 @@ func (s *Store) PruneCloseEvents(ctx context.Context, keep int) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind != 'snapshot'
+		  AND server_key = ?
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind != 'snapshot'
+		      WHERE kind != 'snapshot' AND server_key = ?
 		      ORDER BY ts DESC
 		      LIMIT ?
 		  )
-	`, keep)
+	`, s.serverKey, s.serverKey, keep)
 	if err != nil {
 		return 0, fmt.Errorf("prune close events: %w", err)
 	}
@@ -356,22 +392,26 @@ func (s *Store) LinkEventScrollback(ctx context.Context, eventID int64, paneKey,
 	return nil
 }
 
-// SetMeta upserts a key/value into the meta table.
+// SetMeta upserts a key/value for this Store's server. Keys live in
+// server_state, not meta: a value like last_save_ts describes one tmux
+// server's history and sharing it lets a second server's save throttle this
+// one's.
 func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO meta (key, value) VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, key, value)
+		INSERT INTO server_state (server_key, key, value) VALUES (?, ?, ?)
+		ON CONFLICT(server_key, key) DO UPDATE SET value = excluded.value
+	`, s.serverKey, key, value)
 	if err != nil {
 		return fmt.Errorf("set meta: %w", err)
 	}
 	return nil
 }
 
-// GetMeta returns the value for key, or "" if absent.
+// GetMeta returns the value for key in this Store's server, or "" if absent.
 func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM server_state WHERE server_key = ? AND key = ?`, s.serverKey, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -416,10 +456,10 @@ func (s *Store) SnapshotsBefore(ctx context.Context, before, since int64, limit 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot' AND ts < ? AND ts >= ?
+		WHERE server_key = ? AND kind = 'snapshot' AND ts < ? AND ts >= ?
 		ORDER BY ts DESC, id DESC
 		LIMIT ?
-	`, before, since, limit)
+	`, s.serverKey, before, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query snapshots before %d: %w", before, err)
 	}
@@ -433,4 +473,61 @@ func (s *Store) SnapshotsBefore(ctx context.Context, before, since int64, limit 
 		out = append(out, ev)
 	}
 	return out, rows.Err()
+}
+
+// ServerLane is one partition of the events table, keyed by tmux socket path.
+type ServerLane struct {
+	Key      string
+	NewestTs int64
+}
+
+// ListServerLanes returns every server_key present in events with its newest
+// event timestamp. Cross-lane: unlike every other read, it is not scoped to
+// this Store's server. Used by gc to find lanes whose server is gone.
+func (s *Store) ListServerLanes(ctx context.Context) ([]ServerLane, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT server_key, MAX(ts) FROM events GROUP BY server_key`)
+	if err != nil {
+		return nil, fmt.Errorf("list server lanes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ServerLane
+	for rows.Next() {
+		var lane ServerLane
+		if err := rows.Scan(&lane.Key, &lane.NewestTs); err != nil {
+			return nil, fmt.Errorf("scan server lane: %w", err)
+		}
+		out = append(out, lane)
+	}
+	return out, rows.Err()
+}
+
+// DeleteServerLane removes every event and every server_state row belonging to
+// serverKey, returning the event count. Cross-lane, like ListServerLanes.
+// Orphaned scrollback blobs are left to the caller's zero-refcount sweep.
+//
+// Both deletes run in one transaction: ListServerLanes only surfaces keys
+// still present in events, so a partial delete that dropped the events but
+// not the server_state row would strand that row — gc could never see the
+// key again to finish the cleanup.
+func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `DELETE FROM events WHERE server_key = ?`, serverKey)
+	if err != nil {
+		return 0, fmt.Errorf("delete server lane events: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete server lane events: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_state WHERE server_key = ?`, serverKey); err != nil {
+		return 0, fmt.Errorf("delete server lane state: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+	return n, nil
 }

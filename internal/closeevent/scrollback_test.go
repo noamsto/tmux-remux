@@ -17,7 +17,7 @@ import (
 func fillStore(t *testing.T, snaps ...snapshot.Manifest) *store.Store {
 	t.Helper()
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}

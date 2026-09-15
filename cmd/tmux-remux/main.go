@@ -72,6 +72,13 @@ func main() {
 	}
 }
 
+// serverKey returns the store partition for the tmux server this process
+// targets. Every command must derive it the same way, or a hook's close
+// events and a timer's snapshots land in different lanes on one server.
+func serverKey() string {
+	return tmux.SocketPath(os.Environ())
+}
+
 // withStore opens the DB after ensuring storage directories exist, takes an
 // exclusive flock on cfg.LockPath to serialize writers, runs fn, and closes
 // the DB. Used by every subcommand's Run.
@@ -87,7 +94,7 @@ func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) 
 		return err
 	}
 	defer func() { _ = lock.Release() }()
-	db, err := store.Open(ctx, cfg.DBPath)
+	db, err := store.Open(ctx, cfg.DBPath, serverKey())
 	if err != nil {
 		return err
 	}
@@ -445,12 +452,11 @@ func currentSession(ctx context.Context, t *tmux.Client, flag string) string {
 }
 
 func deleteEvents(ctx context.Context, db *store.Store, evs []store.Event) error {
-	for _, ev := range evs {
-		if _, err := db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", ev.ID); err != nil {
-			return err
-		}
+	ids := make([]int64, len(evs))
+	for i, ev := range evs {
+		ids[i] = ev.ID
 	}
-	return nil
+	return db.DeleteEvents(ctx, ids)
 }
 
 // discardSummary explains why undo restored nothing this press. `more` reports
@@ -907,6 +913,22 @@ func (PruneCmd) Run() error {
 // GCCmd reaps orphan scrollback files.
 type GCCmd struct{}
 
+// lanesToReap returns the server keys whose events gc should delete: not this
+// server's own lane, no events newer than cutoff, and no socket file left on
+// disk. A socket that still exists with no server behind it is the normal
+// state between a server dying and restore running, so reaping it would
+// delete exactly what restore needs.
+func lanesToReap(lanes []store.ServerLane, self string, cutoff int64, exists func(string) bool) []string {
+	var out []string
+	for _, lane := range lanes {
+		if lane.Key == self || lane.NewestTs > cutoff || exists(lane.Key) {
+			continue
+		}
+		out = append(out, lane.Key)
+	}
+	return out
+}
+
 func (GCCmd) Run() error {
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
 		log, err := applog.Open(cfg.LogPath)
@@ -915,6 +937,26 @@ func (GCCmd) Run() error {
 		}
 		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
+		lanes, err := db.ListServerLanes(ctx)
+		if err != nil {
+			return err
+		}
+		// Reused from restore rather than a dedicated knob: both ask the same
+		// question, "how old is too old to still matter", so a dead lane and a
+		// stale snapshot age out together.
+		cutoff := time.Now().Add(-cfg.RestoreMaxSnapshotAge).UnixMilli()
+		socketExists := func(path string) bool {
+			_, err := os.Stat(path)
+			return err == nil
+		}
+		for _, key := range lanesToReap(lanes, db.ServerKey(), cutoff, socketExists) {
+			n, err := db.DeleteServerLane(ctx, key)
+			if err != nil {
+				log.Logf("gc: reap lane %s: %v", key, err)
+				continue
+			}
+			log.Logf("gc: reaped lane %s (%d events)", key, n)
+		}
 		orphans, err := db.ScrollbacksWithZeroRef(ctx)
 		if err != nil {
 			return err
