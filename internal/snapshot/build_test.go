@@ -72,6 +72,37 @@ func TestBuildCarriesWindowAndPaneIDs(t *testing.T) {
 	}
 }
 
+func TestBuildDropsFloatingPanesAndNormalizesLayout(t *testing.T) {
+	fc := &fakeClient{
+		sessions: []tmux.SessionRow{{Name: "s1"}},
+		windows: []tmux.WindowRow{{
+			Session: "s1", Index: 1,
+			Layout: "aaee,80x24,0,0{40x24,0,0,0,30x7,9,3,2,39x24,41,0,1}<30x7,9,3,2>",
+		}},
+		panes: []tmux.PaneRow{
+			{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%0"},
+			{Session: "s1", WindowIndex: 1, PaneIndex: 1, ID: "%1"},
+			{Session: "s1", WindowIndex: 1, PaneIndex: 2, ID: "%2", Floating: true},
+		},
+	}
+	m, err := snapshot.Build(context.Background(), fc, "h", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	win := m.Sessions[0].Windows[0]
+	if got, want := win.Layout, "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"; got != want {
+		t.Errorf("Layout = %q, want %q", got, want)
+	}
+	if len(win.Panes) != 2 {
+		t.Fatalf("Panes = %+v, want two non-floating panes", win.Panes)
+	}
+	for _, p := range win.Panes {
+		if p.ID == "%2" {
+			t.Error("captured floating pane %2")
+		}
+	}
+}
+
 func TestBuildCarriesDecoration(t *testing.T) {
 	fc := &fakeClient{
 		sessions: []tmux.SessionRow{{Name: "s1"}},

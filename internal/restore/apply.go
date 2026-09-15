@@ -12,6 +12,16 @@ type Runner interface {
 	Run(ctx context.Context, args []string) (string, error)
 }
 
+// FailedAction identifies an action that could not be applied. Apply continues
+// after individual failures, leaving callers to decide which failures are
+// fatal for their workflow.
+type FailedAction struct {
+	Action Action
+	Err    error
+}
+
+func (f FailedAction) Error() string { return f.Err.Error() }
+
 // Apply executes the plan via the Runner. Best-effort: a failed action is
 // collected and the rest of the plan still runs. The returned slice holds one
 // error per failed action so callers can report a partial restore; only an
@@ -22,8 +32,8 @@ type Runner interface {
 // new pane). When empty, the trailing arg is omitted and tmux uses its
 // default-command. Scrollback rendering is the responsibility of the startup
 // command itself — see restore.BuildStartupCommand.
-func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
-	var failed []error
+func Apply(ctx context.Context, t Runner, plan []Action) ([]FailedAction, error) {
+	var failed []FailedAction
 	// failedWindows holds the "<session>:<index>" target of every CreateWindow
 	// that failed. Apply is best-effort, so without this a later SplitPane or
 	// SetLayout aimed at the same index would still run and land on whatever
@@ -36,7 +46,7 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 		case CreateWindow:
 			target = fmt.Sprintf("%s:%d", v.Session, v.Index)
 			if err := createWindow(ctx, t, v); err != nil {
-				failed = append(failed, err)
+				failed = append(failed, FailedAction{Action: a, Err: err})
 				failedWindows[target] = true
 			}
 			continue
@@ -68,7 +78,7 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]error, error) {
 			continue
 		}
 		if _, err := t.Run(ctx, args); err != nil {
-			failed = append(failed, err)
+			failed = append(failed, FailedAction{Action: a, Err: err})
 		}
 	}
 	return failed, nil

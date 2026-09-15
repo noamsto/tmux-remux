@@ -7,6 +7,7 @@ import (
 
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // Action is one step of a restore plan. Concrete types are in this file.
@@ -194,9 +195,13 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 					StartupCommand: startupFor(p),
 				})
 			}
+			layout := win.Layout
+			if normalized, err := tmux.NormalizeLayout(layout); err == nil {
+				layout = normalized
+			}
 			plan = append(plan, SetLayout{
 				Window: fmt.Sprintf("%s:%d", sess.Name, win.Index),
-				Layout: win.Layout,
+				Layout: layout,
 			})
 		}
 		if sessionStarted {
@@ -231,8 +236,12 @@ func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarg
 		}
 		return plan
 	}
+	layout := win.Layout
+	if normalized, err := tmux.NormalizeLayout(layout); err == nil {
+		layout = normalized
+	}
 	return []Action{
 		SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
-		SetLayout{Window: liveTarget, Layout: win.Layout},
+		SetLayout{Window: liveTarget, Layout: layout},
 	}
 }

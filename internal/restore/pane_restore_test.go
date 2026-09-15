@@ -33,6 +33,20 @@ func TestBuildPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
 	}
 }
 
+func TestBuildPaneRestoreRepairsLegacyFloatingLayoutInLiveWindow(t *testing.T) {
+	win := snapshot.Window{
+		Layout: "aaee,80x24,0,0{40x24,0,0,0,30x7,9,3,2,39x24,41,0,1}<30x7,9,3,2>",
+	}
+	plan := restore.BuildPaneRestore(snapshot.Pane{Cwd: "/b"}, win, "s1", "@7", defaultOpts)
+	want := []restore.Action{
+		restore.SplitPane{Target: "@7", Cwd: "/b"},
+		restore.SetLayout{Window: "@7", Layout: "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"},
+	}
+	if diff := cmp.Diff(want, plan); diff != "" {
+		t.Errorf("plan mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestBuildPaneRestoreRecreatesGoneWindow(t *testing.T) {
 	win := paneRestoreWindow()
 	lost := win.Panes[1]

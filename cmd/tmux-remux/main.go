@@ -286,6 +286,12 @@ func (c UndoCmd) Run() error {
 		return fmt.Errorf("only --pop is supported in v0.1.0")
 	}
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
+		log, err := applog.Open(cfg.LogPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = log.Close() }()
+
 		t := tmux.NewClient("tmux")
 		target, err := restorableClose(ctx, db, currentSession(ctx, t, c.Session))
 		if err != nil {
@@ -306,11 +312,12 @@ func (c UndoCmd) Run() error {
 		if err != nil {
 			return err
 		}
-		if len(failed) > 0 {
+		fatal := undoFailures(target.Event.ID, failed, log.Logf)
+		if len(fatal) > 0 {
 			// A partial or total restore failure must not delete the close
 			// event — erasing history for a restore that didn't happen would
 			// make the window unrecoverable even on a second undo.
-			return fmt.Errorf("restore failed, close event kept for retry: %w", errors.Join(failed...))
+			return fmt.Errorf("restore failed, close event kept for retry: %w", errors.Join(fatal...))
 		}
 		focusRestored(ctx, t, m)
 		if err := deleteEvents(ctx, db, []store.Event{target.Event}); err != nil {
@@ -649,7 +656,7 @@ func (c PickCmd) Run() error {
 				return err
 			}
 			if len(failed) > 0 {
-				return fmt.Errorf("restore failed: %w", errors.Join(failed...))
+				return fmt.Errorf("restore failed: %w", errors.Join(failureErrors(failed)...))
 			}
 			focusRestored(ctx, t, m)
 			return nil
@@ -660,6 +667,26 @@ func (c PickCmd) Run() error {
 		_, err = restore.Apply(ctx, t, plan)
 		return err
 	})
+}
+
+func failureErrors(failed []restore.FailedAction) []error {
+	errs := make([]error, len(failed))
+	for i, failure := range failed {
+		errs[i] = failure.Err
+	}
+	return errs
+}
+
+func undoFailures(eventID int64, failed []restore.FailedAction, logf func(string, ...any)) []error {
+	var fatal []error
+	for _, failure := range failed {
+		if _, ok := failure.Action.(restore.SetLayout); ok {
+			logf("undo: ignoring layout failure while restoring close event %d: %v", eventID, failure.Err)
+			continue
+		}
+		fatal = append(fatal, failure.Err)
+	}
+	return fatal
 }
 
 // partitionRecoverable splits close events into those with a recoverable entity

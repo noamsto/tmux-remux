@@ -188,6 +188,9 @@ func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	if len(failed) != 1 {
 		t.Errorf("expected 1 reported failure, got %d: %v", len(failed), failed)
 	}
+	if _, ok := failed[0].Action.(restore.SplitPane); !ok {
+		t.Errorf("failed action = %T, want restore.SplitPane", failed[0].Action)
+	}
 }
 
 func TestApplySetOptionRunsSetWindowOption(t *testing.T) {
