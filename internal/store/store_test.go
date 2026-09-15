@@ -826,3 +826,91 @@ func TestMigration0002ClearsPopulatedV1Database(t *testing.T) {
 		t.Errorf("user_version = %d, want 2", version)
 	}
 }
+
+func TestPruneIsScopedByServerKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	// Same day so the per-day retention floor cannot rescue anything, and
+	// older than a week so it does not apply at all.
+	base := now - 30*24*int64(time.Hour/time.Millisecond)
+	for i := 0; i < 5; i++ {
+		snap := store.Event{Ts: base + int64(i), Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}
+		if _, err := a.InsertEvent(ctx, snap); err != nil {
+			t.Fatalf("insert a snapshot: %v", err)
+		}
+		if _, err := b.InsertEvent(ctx, snap); err != nil {
+			t.Fatalf("insert b snapshot: %v", err)
+		}
+	}
+
+	if err := a.PruneSnapshots(ctx, 2, now); err != nil {
+		t.Fatalf("PruneSnapshots: %v", err)
+	}
+
+	aEvs, err := a.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents a: %v", err)
+	}
+	if len(aEvs) != 2 {
+		t.Errorf("lane a kept %d snapshots, want 2", len(aEvs))
+	}
+	bEvs, err := b.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents b: %v", err)
+	}
+	if len(bEvs) != 5 {
+		t.Errorf("lane b kept %d snapshots, want 5 — pruning lane a must not touch lane b", len(bEvs))
+	}
+}
+
+func TestPruneCloseEventsIsScopedByServerKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	// Lane a's snapshot floor sits above every one of lane b's closes. Unscoped,
+	// PruneUnresolvableCloseEvents would delete all of lane b's history.
+	if _, err := a.InsertEvent(ctx, store.Event{Ts: 9000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}); err != nil {
+		t.Fatalf("insert a snapshot: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := b.InsertEvent(ctx, store.Event{Ts: int64(100 + i), Kind: "pane-died", Scope: "pane", Host: "h", ManifestJSON: "{}"}); err != nil {
+			t.Fatalf("insert b close: %v", err)
+		}
+	}
+
+	if _, err := a.PruneCloseEvents(ctx, 50); err != nil {
+		t.Fatalf("PruneCloseEvents: %v", err)
+	}
+
+	bEvs, err := b.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents b: %v", err)
+	}
+	if len(bEvs) != 3 {
+		t.Errorf("lane b kept %d close events, want 3", len(bEvs))
+	}
+}

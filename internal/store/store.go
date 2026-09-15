@@ -18,12 +18,13 @@ import (
 )
 
 // Store wraps a *sql.DB connection to the tmux-remux SQLite database, scoped
-// to one tmux server. InsertEvent, LatestSnapshot, LatestSnapshotBefore and
-// ListEvents filter on serverKey, so a second server sharing the file cannot
-// read or overwrite this one's events. The prune methods and the meta table
-// are not yet scoped — they still act across all servers sharing the file.
-// The scrollback tables are the deliberate exception — blobs are
-// content-addressed and shared across servers by refcount.
+// to one tmux server. InsertEvent, LatestSnapshot, LatestSnapshotBefore,
+// ListEvents, DeleteEvents and the prune methods filter on serverKey, so a
+// second server sharing the file cannot read, overwrite, or delete this
+// one's events. The meta table is not yet scoped — it still acts across all
+// servers sharing the file. The scrollback tables are the deliberate
+// exception — blobs are content-addressed and shared across servers by
+// refcount.
 type Store struct {
 	db        *sql.DB
 	serverKey string
@@ -252,23 +253,24 @@ func (s *Store) PruneSnapshots(ctx context.Context, keep int, nowMs int64) error
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind = 'snapshot'
+		  AND server_key = ?
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind = 'snapshot'
+		      WHERE kind = 'snapshot' AND server_key = ?
 		      ORDER BY ts DESC
 		      LIMIT ?
 		  )
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind = 'snapshot' AND ts >= ?
+		      WHERE kind = 'snapshot' AND server_key = ? AND ts >= ?
 		        AND ts IN (
 		            SELECT max(ts)
 		            FROM events
-		            WHERE kind = 'snapshot' AND ts >= ?
+		            WHERE kind = 'snapshot' AND server_key = ? AND ts >= ?
 		            GROUP BY date(ts/1000, 'unixepoch')
 		        )
 		  )
-	`, keep, weekAgo, weekAgo)
+	`, s.serverKey, s.serverKey, keep, s.serverKey, weekAgo, s.serverKey, weekAgo)
 	if err != nil {
 		return fmt.Errorf("prune snapshots: %w", err)
 	}
@@ -288,8 +290,9 @@ func (s *Store) PruneUnresolvableCloseEvents(ctx context.Context) (int64, error)
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind != 'snapshot'
-		  AND ts <= (SELECT MIN(ts) FROM events WHERE kind = 'snapshot')
-	`)
+		  AND server_key = ?
+		  AND ts <= (SELECT MIN(ts) FROM events WHERE kind = 'snapshot' AND server_key = ?)
+	`, s.serverKey, s.serverKey)
 	if err != nil {
 		return 0, fmt.Errorf("prune unresolvable close events: %w", err)
 	}
@@ -307,13 +310,14 @@ func (s *Store) PruneCloseEvents(ctx context.Context, keep int) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE kind != 'snapshot'
+		  AND server_key = ?
 		  AND id NOT IN (
 		      SELECT id FROM events
-		      WHERE kind != 'snapshot'
+		      WHERE kind != 'snapshot' AND server_key = ?
 		      ORDER BY ts DESC
 		      LIMIT ?
 		  )
-	`, keep)
+	`, s.serverKey, s.serverKey, keep)
 	if err != nil {
 		return 0, fmt.Errorf("prune close events: %w", err)
 	}
