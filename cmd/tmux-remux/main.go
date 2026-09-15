@@ -445,12 +445,11 @@ func currentSession(ctx context.Context, t *tmux.Client, flag string) string {
 }
 
 func deleteEvents(ctx context.Context, db *store.Store, evs []store.Event) error {
-	for _, ev := range evs {
-		if _, err := db.DB().ExecContext(ctx, "DELETE FROM events WHERE id = ?", ev.ID); err != nil {
-			return err
-		}
+	ids := make([]int64, len(evs))
+	for i, ev := range evs {
+		ids[i] = ev.ID
 	}
-	return nil
+	return db.DeleteEvents(ctx, ids)
 }
 
 // discardSummary explains why undo restored nothing this press. `more` reports

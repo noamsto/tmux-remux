@@ -243,6 +243,28 @@ func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) 
 	return out, rows.Err()
 }
 
+// DeleteEvents removes the given event ids belonging to this Store's server.
+// Ids from another server are silently not deleted: the caller's list comes
+// from a scoped read, so an id outside this lane is a bug upstream, not a
+// request to reach across servers.
+func (s *Store) DeleteEvents(ctx context.Context, ids []int64) error {
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids), len(ids)+1)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	args = append(args, s.serverKey)
+	var b strings.Builder
+	b.WriteString("DELETE FROM events WHERE id IN (")
+	b.WriteString(strings.Join(placeholders, ","))
+	b.WriteString(") AND server_key = ?")
+	if _, err := s.db.ExecContext(ctx, b.String(), args...); err != nil {
+		return fmt.Errorf("delete events: %w", err)
+	}
+	return nil
+}
+
 // PruneSnapshots deletes snapshot events beyond the keep newest, except that
 // the newest snapshot of each UTC calendar day in the 7 days before nowMs
 // also survives. The per-day floor is the retention safety net: with 60s

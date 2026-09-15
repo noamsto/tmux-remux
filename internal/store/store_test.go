@@ -743,8 +743,9 @@ func TestMigration0002ClearsPopulatedV1Database(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
 
-	// Same DSN pragmas as store.Open: foreign_keys must be ON or the
-	// event_scrollbacks cascade (and its refcount trigger) won't fire.
+	// Same DSN pragmas as store.Open, so the rows seeded here are genuinely
+	// FK-valid — the cascade that fires on Open's own connection during the
+	// migration depends on Open's pragmas, not this handle's.
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", dbPath)
 	v1db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -912,5 +913,40 @@ func TestPruneCloseEventsIsScopedByServerKey(t *testing.T) {
 	}
 	if len(bEvs) != 3 {
 		t.Errorf("lane b kept %d close events, want 3", len(bEvs))
+	}
+}
+
+func TestDeleteEventsIsScopedByServerKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	bID, err := b.InsertEvent(ctx, store.Event{Ts: 1000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"})
+	if err != nil {
+		t.Fatalf("insert b event: %v", err)
+	}
+
+	// Lane a deliberately passes lane b's id — DeleteEvents must not reach
+	// across lanes even when handed one.
+	if err := a.DeleteEvents(ctx, []int64{bID}); err != nil {
+		t.Fatalf("DeleteEvents: %v", err)
+	}
+
+	bEvs, err := b.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents b: %v", err)
+	}
+	if len(bEvs) != 1 {
+		t.Errorf("lane b kept %d events, want 1 — lane a must not delete lane b's event", len(bEvs))
 	}
 }
