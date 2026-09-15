@@ -157,10 +157,12 @@ Two things stay deliberately unpartitioned:
   `refcount` already models that. Partitioning them would store the same bytes
   twice and break the refcount invariant.
 - **Cross-lane operations**, which gc needs and a lane-bound `Store` cannot
-  express. These get their own explicitly global names —
-  `ListServerKeys(ctx)` and `ReapAbsentServers(ctx, maxAge)` — rather than an
-  escape hatch on the scoped methods. Every other method stays scoped, and the
-  naming is what tells a reader which kind they are calling.
+  express. These get their own explicitly global names — `ListServerLanes(ctx)`
+  and `DeleteServerLane(ctx, serverKey)` — rather than an escape hatch on the
+  scoped methods. Every other method stays scoped, and the naming is what tells
+  a reader which kind they are calling. The store exposes the two primitives
+  only; which lanes qualify is gc's decision, so no filesystem knowledge leaks
+  into a package that otherwise speaks nothing but SQL.
 
 ### Visibility
 
@@ -175,11 +177,12 @@ Per-server pruning means N servers cost N x (20 snapshots + 50 close events).
 Bounded, but a lane belonging to a socket that will never come back never
 shrinks to zero.
 
-`gc` gains one step, via the cross-lane `ReapAbsentServers`: delete events
-whose `server_key` names a socket path that is **absent from disk** *and* whose
-newest event is older than `RestoreMaxSnapshotAge`. The existing
-zero-refcount sweep then collects whatever blobs that orphans, so scrollback
-cleanup needs no new machinery.
+`gc` gains one step: `ListServerLanes` reports every lane with its newest
+timestamp, gc selects the ones whose socket path is **absent from disk** *and*
+whose newest event is older than `RestoreMaxSnapshotAge`, and `DeleteServerLane`
+removes each. The existing zero-refcount sweep then collects whatever blobs that
+orphans, so scrollback cleanup needs no new machinery — which is why lane
+reaping must run before the sweep, not after.
 
 A socket file that exists with no server behind it is deliberately left alone.
 That is the normal state between a server dying and restore running, and
