@@ -23,7 +23,9 @@ import (
 // serverKey, so a second server sharing the file cannot read, overwrite, or
 // delete this one's events or meta. The scrollback tables are the deliberate
 // exception — blobs are content-addressed and shared across servers by
-// refcount.
+// refcount. ListServerLanes and DeleteServerLane are the other exception:
+// gc needs to see and remove lanes belonging to servers other than this one,
+// so those two deliberately operate across all serverKeys.
 type Store struct {
 	db        *sql.DB
 	serverKey string
@@ -454,10 +456,10 @@ func (s *Store) SnapshotsBefore(ctx context.Context, before, since int64, limit 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot' AND ts < ? AND ts >= ?
+		WHERE server_key = ? AND kind = 'snapshot' AND ts < ? AND ts >= ?
 		ORDER BY ts DESC, id DESC
 		LIMIT ?
-	`, before, since, limit)
+	`, s.serverKey, before, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query snapshots before %d: %w", before, err)
 	}
@@ -471,4 +473,48 @@ func (s *Store) SnapshotsBefore(ctx context.Context, before, since int64, limit 
 		out = append(out, ev)
 	}
 	return out, rows.Err()
+}
+
+// ServerLane is one partition of the events table, keyed by tmux socket path.
+type ServerLane struct {
+	Key      string
+	NewestTs int64
+}
+
+// ListServerLanes returns every server_key present in events with its newest
+// event timestamp. Cross-lane: unlike every other read, it is not scoped to
+// this Store's server. Used by gc to find lanes whose server is gone.
+func (s *Store) ListServerLanes(ctx context.Context) ([]ServerLane, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT server_key, MAX(ts) FROM events GROUP BY server_key`)
+	if err != nil {
+		return nil, fmt.Errorf("list server lanes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ServerLane
+	for rows.Next() {
+		var lane ServerLane
+		if err := rows.Scan(&lane.Key, &lane.NewestTs); err != nil {
+			return nil, fmt.Errorf("scan server lane: %w", err)
+		}
+		out = append(out, lane)
+	}
+	return out, rows.Err()
+}
+
+// DeleteServerLane removes every event and every server_state row belonging to
+// serverKey, returning the event count. Cross-lane, like ListServerLanes.
+// Orphaned scrollback blobs are left to the caller's zero-refcount sweep.
+func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE server_key = ?`, serverKey)
+	if err != nil {
+		return 0, fmt.Errorf("delete server lane events: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete server lane events: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM server_state WHERE server_key = ?`, serverKey); err != nil {
+		return 0, fmt.Errorf("delete server lane state: %w", err)
+	}
+	return n, nil
 }

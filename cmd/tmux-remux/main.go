@@ -906,6 +906,22 @@ func (PruneCmd) Run() error {
 // GCCmd reaps orphan scrollback files.
 type GCCmd struct{}
 
+// lanesToReap returns the server keys whose events gc should delete: not this
+// server's own lane, no events newer than cutoff, and no socket file left on
+// disk. A socket that still exists with no server behind it is the normal
+// state between a server dying and restore running, so reaping it would
+// delete exactly what restore needs.
+func lanesToReap(lanes []store.ServerLane, self string, cutoff int64, exists func(string) bool) []string {
+	var out []string
+	for _, lane := range lanes {
+		if lane.Key == self || lane.NewestTs > cutoff || exists(lane.Key) {
+			continue
+		}
+		out = append(out, lane.Key)
+	}
+	return out
+}
+
 func (GCCmd) Run() error {
 	return withStore(func(ctx context.Context, cfg config.Config, db *store.Store) error {
 		log, err := applog.Open(cfg.LogPath)
@@ -914,6 +930,23 @@ func (GCCmd) Run() error {
 		}
 		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
+		lanes, err := db.ListServerLanes(ctx)
+		if err != nil {
+			return err
+		}
+		cutoff := time.Now().Add(-cfg.RestoreMaxSnapshotAge).UnixMilli()
+		socketExists := func(path string) bool {
+			_, err := os.Stat(path)
+			return err == nil
+		}
+		for _, key := range lanesToReap(lanes, db.ServerKey(), cutoff, socketExists) {
+			n, err := db.DeleteServerLane(ctx, key)
+			if err != nil {
+				log.Logf("gc: reap lane %s: %v", key, err)
+				continue
+			}
+			log.Logf("gc: reaped lane %s (%d events)", key, n)
+		}
 		orphans, err := db.ScrollbacksWithZeroRef(ctx)
 		if err != nil {
 			return err

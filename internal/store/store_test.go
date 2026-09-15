@@ -994,3 +994,62 @@ func TestMetaIsScopedByServerKey(t *testing.T) {
 		t.Errorf("lane a last_save_ts = %q, want %q", got, "1000")
 	}
 }
+
+func TestListAndDeleteServerLanes(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	if _, err := a.InsertEvent(ctx, store.Event{Ts: 1000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}); err != nil {
+		t.Fatalf("insert a: %v", err)
+	}
+	if _, err := b.InsertEvent(ctx, store.Event{Ts: 2000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}); err != nil {
+		t.Fatalf("insert b: %v", err)
+	}
+	if err := b.SetMeta(ctx, "last_save_ts", "2000"); err != nil {
+		t.Fatalf("SetMeta b: %v", err)
+	}
+
+	lanes, err := a.ListServerLanes(ctx)
+	if err != nil {
+		t.Fatalf("ListServerLanes: %v", err)
+	}
+	want := map[string]int64{"/sock/a": 1000, "/sock/b": 2000}
+	if len(lanes) != len(want) {
+		t.Fatalf("ListServerLanes returned %d lanes, want %d", len(lanes), len(want))
+	}
+	for _, lane := range lanes {
+		if ts, ok := want[lane.Key]; !ok || ts != lane.NewestTs {
+			t.Errorf("lane %q newest = %d, want %d", lane.Key, lane.NewestTs, want[lane.Key])
+		}
+	}
+
+	// Reaping from lane a must clear lane b's events and its server_state.
+	n, err := a.DeleteServerLane(ctx, "/sock/b")
+	if err != nil {
+		t.Fatalf("DeleteServerLane: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("DeleteServerLane removed %d events, want 1", n)
+	}
+	got, err := b.GetMeta(ctx, "last_save_ts")
+	if err != nil {
+		t.Fatalf("GetMeta b: %v", err)
+	}
+	if got != "" {
+		t.Errorf("lane b last_save_ts = %q after reaping, want empty", got)
+	}
+	if evs, err := a.ListEvents(ctx, store.ListOpts{}); err != nil || len(evs) != 1 {
+		t.Errorf("lane a has %d events (err %v), want 1 — reaping b must not touch a", len(evs), err)
+	}
+}
