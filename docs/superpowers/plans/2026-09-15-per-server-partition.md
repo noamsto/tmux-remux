@@ -32,7 +32,7 @@ The default-socket rule is currently inlined in `withSynthesizedTmuxEnv`. Nothin
 - Consumes: nothing.
 - Produces: `func SocketPath(env []string) string` in package `tmux`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/tmux/client_test.go`:
 
@@ -81,7 +81,7 @@ func TestSocketPath(t *testing.T) {
 
 Add `"fmt"` and `"os"` to that file's imports if absent.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd ~/Data/git/.worktrees/noamsto/tmux-remux/fix-130-partition-state-by-tmux-server
@@ -90,7 +90,7 @@ nix develop -c go test ./internal/tmux/ -run TestSocketPath -v
 
 Expected: FAIL, `undefined: tmux.SocketPath`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `withSynthesizedTmuxEnv` in `internal/tmux/client.go` (currently lines 75-93) with:
 
@@ -132,7 +132,7 @@ func withSynthesizedTmuxEnv(env []string) []string {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 nix develop -c go test ./internal/tmux/ -v
@@ -140,7 +140,7 @@ nix develop -c go test ./internal/tmux/ -v
 
 Expected: PASS, including the pre-existing `withSynthesizedTmuxEnv` tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tmux/client.go internal/tmux/client_test.go
@@ -163,7 +163,7 @@ Adds the column, the index, the `server_state` table, and binds the key to `Stor
 - Consumes: nothing.
 - Produces: `func Open(ctx context.Context, path, serverKey string) (*Store, error)`; `func (s *Store) ServerKey() string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/store/store_test.go`:
 
@@ -229,7 +229,7 @@ Update the existing `TestOpenAppliesMigrations` assertion in the same file from 
 	}
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 nix develop -c go test ./internal/store/ -run TestEventsAreScopedByServerKey
@@ -237,7 +237,7 @@ nix develop -c go test ./internal/store/ -run TestEventsAreScopedByServerKey
 
 Expected: FAIL to build — `too many arguments in call to store.Open`.
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 Create `internal/store/migrations/0002_server_partition.sql`:
 
@@ -263,7 +263,7 @@ CREATE TABLE server_state (
 ) STRICT;
 ```
 
-- [ ] **Step 4: Bind the key to Store and scope the reads**
+- [x] **Step 4: Bind the key to Store and scope the reads**
 
 In `internal/store/store.go`, change the struct and `Open`:
 
@@ -368,7 +368,7 @@ func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
 
 The rest of `ListEvents` is unchanged.
 
-- [ ] **Step 5: Update every existing call site mechanically**
+- [x] **Step 5: Update every existing call site mechanically**
 
 All pre-existing callers are tests plus the one production site in `withStore`. Give them a fixed literal; Task 6 replaces the production one.
 
@@ -386,7 +386,7 @@ grep -rn 'store\.Open(' --include='*.go' . | grep -v 'tmux-test' | grep -v 'func
 
 Expected: exactly one line, `cmd/tmux-remux/main.go`, which the sed also rewrote — leave it for now.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 nix develop -c go test ./internal/store/ -v
@@ -394,7 +394,7 @@ nix develop -c go test ./internal/store/ -v
 
 Expected: PASS, including `TestEventsAreScopedByServerKey` and `TestOpenAppliesMigrations` at `user_version = 2`.
 
-- [ ] **Step 7: Add the close-resolution regression test**
+- [x] **Step 7: Add the close-resolution regression test**
 
 `internal/closeevent` needs no code change — `resolveAtCapture` calls
 `db.LatestSnapshot`, which Step 4 just scoped. Pin that, because it is the
@@ -467,7 +467,7 @@ func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
 Add `"encoding/json"`, `"path/filepath"` and the `snapshot` import to that
 file if absent.
 
-- [ ] **Step 8: Run it**
+- [x] **Step 8: Run it**
 
 ```bash
 nix develop -c go test ./internal/closeevent/ -run TestCaptureResolvesWithinItsOwnServer -v
@@ -475,7 +475,7 @@ nix develop -c go test ./internal/closeevent/ -run TestCaptureResolvesWithinItsO
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/store cmd integration_test.go internal/closeevent
@@ -496,7 +496,7 @@ Every prune subquery is a second place the lane must appear. A `NOT IN (SELECT .
 - Consumes: `Open(ctx, path, serverKey)`, `InsertEvent` from Task 2.
 - Produces: no signature changes.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/store/store_test.go`:
 
@@ -590,7 +590,7 @@ func TestPruneCloseEventsIsScopedByServerKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 nix develop -c go test ./internal/store/ -run 'TestPrune.*ScopedByServerKey' -v
@@ -598,7 +598,7 @@ nix develop -c go test ./internal/store/ -run 'TestPrune.*ScopedByServerKey' -v
 
 Expected: FAIL. `TestPruneIsScopedByServerKey` reports lane b kept 2, not 5; `TestPruneCloseEventsIsScopedByServerKey` reports lane b kept 0, not 3.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `PruneSnapshots` body:
 
@@ -654,7 +654,7 @@ Expected: FAIL. `TestPruneIsScopedByServerKey` reports lane b kept 2, not 5; `Te
 	`, s.serverKey, s.serverKey, keep)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 nix develop -c go test ./internal/store/ -v
@@ -662,7 +662,7 @@ nix develop -c go test ./internal/store/ -v
 
 Expected: PASS, all pre-existing prune tests included.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store
@@ -683,7 +683,7 @@ Moves the three save-throttle keys off the global `meta` table. This is the fix 
 - Consumes: `Open(ctx, path, serverKey)` from Task 2.
 - Produces: no signature changes. `GetMeta`/`SetMeta` now read and write `server_state`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/store/store_test.go`:
 
@@ -787,7 +787,7 @@ func TestSaveThrottleDoesNotCrossServers(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 nix develop -c go test ./internal/store/ -run TestMetaIsScopedByServerKey -v
@@ -796,7 +796,7 @@ nix develop -c go test ./internal/snapshot/ -run TestSaveThrottleDoesNotCrossSer
 
 Expected: `TestMetaIsScopedByServerKey` FAILs with `lane a last_save_ts = "2000"`. `TestSaveThrottleDoesNotCrossServers` FAILs with `lane b skipped scrollback`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `SetMeta` and `GetMeta` in `internal/store/store.go`:
 
@@ -831,7 +831,7 @@ func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 nix develop -c go test ./internal/store/ ./internal/snapshot/ -v
@@ -839,7 +839,7 @@ nix develop -c go test ./internal/store/ ./internal/snapshot/ -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store internal/snapshot
@@ -861,7 +861,7 @@ Per-server pruning bounds each lane but never empties a lane whose socket will n
 - Consumes: `Open(ctx, path, serverKey)`, `ServerKey()` from Task 2.
 - Produces: `type ServerLane struct { Key string; NewestTs int64 }`; `func (s *Store) ListServerLanes(ctx context.Context) ([]ServerLane, error)`; `func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, error)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/store/store_test.go`:
 
@@ -926,7 +926,7 @@ func TestListAndDeleteServerLanes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 nix develop -c go test ./internal/store/ -run TestListAndDeleteServerLanes
@@ -934,7 +934,7 @@ nix develop -c go test ./internal/store/ -run TestListAndDeleteServerLanes
 
 Expected: FAIL to build — `a.ListServerLanes undefined`.
 
-- [ ] **Step 3: Implement the store methods**
+- [x] **Step 3: Implement the store methods**
 
 Append to `internal/store/store.go`:
 
@@ -984,7 +984,7 @@ func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, 
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 nix develop -c go test ./internal/store/ -run TestListAndDeleteServerLanes -v
@@ -992,7 +992,7 @@ nix develop -c go test ./internal/store/ -run TestListAndDeleteServerLanes -v
 
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing test for the reaping decision**
+- [x] **Step 5: Write the failing test for the reaping decision**
 
 The three reaping rules are the part worth testing, and they are untestable
 buried in a loop that calls `os.Stat`. They go in a pure helper.
@@ -1029,7 +1029,7 @@ func TestLanesToReap(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Run it to verify it fails**
+- [x] **Step 6: Run it to verify it fails**
 
 ```bash
 nix develop -c go test ./cmd/tmux-remux/ -run TestLanesToReap
@@ -1037,7 +1037,7 @@ nix develop -c go test ./cmd/tmux-remux/ -run TestLanesToReap
 
 Expected: FAIL to build — `undefined: lanesToReap`.
 
-- [ ] **Step 7: Implement the helper and wire gc**
+- [x] **Step 7: Implement the helper and wire gc**
 
 Add to `cmd/tmux-remux/main.go`:
 
@@ -1083,7 +1083,7 @@ In `GCCmd.Run`, insert this after `sb := scrollback.New(cfg.ScrollbackDir)` and 
 
 `os`, `time` and the `store` import are already present in that file.
 
-- [ ] **Step 8: Run the full suite**
+- [x] **Step 8: Run the full suite**
 
 ```bash
 nix develop -c go build ./... && nix develop -c go test ./...
@@ -1091,7 +1091,7 @@ nix develop -c go build ./... && nix develop -c go test ./...
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/store cmd/tmux-remux/main.go cmd/tmux-remux/gc_test.go
@@ -1114,7 +1114,7 @@ Until this task, `withStore` passes the test literal the Task 2 sed left behind.
 - Consumes: `tmux.SocketPath` (Task 1), `store.Open(ctx, path, serverKey)` (Task 2).
 - Produces: `func serverKey() string` in package `main`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `cmd/tmux-remux/server_key_test.go`:
 
@@ -1148,7 +1148,7 @@ func TestServerKeyFallsBackToDefaultSocket(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 nix develop -c go test ./cmd/tmux-remux/ -run TestServerKey -v
@@ -1156,7 +1156,7 @@ nix develop -c go test ./cmd/tmux-remux/ -run TestServerKey -v
 
 Expected: FAIL to build — `undefined: serverKey`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add to `cmd/tmux-remux/main.go`, above `withStore`:
 
@@ -1177,7 +1177,7 @@ And in `withStore`, replace the literal the Task 2 sed left behind:
 
 Confirm `github.com/noamsto/tmux-remux/internal/tmux` is in that file's import block; add it if not.
 
-- [ ] **Step 4: Verify the literal is gone and everything passes**
+- [x] **Step 4: Verify the literal is gone and everything passes**
 
 ```bash
 grep -rn 'tmux-test/default' cmd/ internal/ integration_test.go | grep -v '_test.go'
@@ -1191,7 +1191,7 @@ nix develop -c go build ./... && nix develop -c go test ./...
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/tmux-remux/main.go cmd/tmux-remux/server_key_test.go
