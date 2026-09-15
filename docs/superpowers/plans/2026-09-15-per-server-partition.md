@@ -1104,54 +1104,75 @@ nix develop -c git commit -m "feat(gc): reap event lanes whose tmux socket is go
 
 Until this task, `withStore` passes the test literal the Task 2 sed left behind. This replaces it with the real socket path.
 
+`withStore` cannot be called from a test — it takes a signal context, loads the real config and takes the lockfile. The testable seam is the key derivation itself, so that gets its own function and `withStore` calls it.
+
 **Files:**
-- Modify: `cmd/tmux-remux/main.go:78-96` (`withStore`)
-- Test: `integration_test.go`
+- Modify: `cmd/tmux-remux/main.go:78-96` (`withStore`, plus the new `serverKey`)
+- Test: `cmd/tmux-remux/server_key_test.go`
 
 **Interfaces:**
 - Consumes: `tmux.SocketPath` (Task 1), `store.Open(ctx, path, serverKey)` (Task 2).
-- Produces: nothing.
+- Produces: `func serverKey() string` in package `main`.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `integration_test.go`:
+Create `cmd/tmux-remux/server_key_test.go`:
 
 ```go
-// TestStoreUsesSocketPathAsServerKey pins the production wiring: the key a
-// command's store is opened with must be the socket its tmux calls target,
-// or hooks and timer saves land in different lanes on the same server.
-func TestStoreUsesSocketPathAsServerKey(t *testing.T) {
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "test.db")
+package main
 
-	socket := tmux.SocketPath([]string{"TMUX=/run/user/1000/tmux-1000/default,123,4"})
-	db, err := store.Open(ctx, dbPath, socket)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+import (
+	"fmt"
+	"os"
+	"testing"
+)
+
+// TestServerKeyFollowsTmuxEnv pins the production key derivation: the store
+// partition must be the socket this process's tmux calls target. A constant
+// here puts a hook's close events and a timer's snapshots in different lanes
+// on one server, which is the bug this branch exists to fix.
+func TestServerKeyFollowsTmuxEnv(t *testing.T) {
+	t.Setenv("TMUX", "/run/user/1000/tmux-1000/default,123,4")
+	if got := serverKey(); got != "/run/user/1000/tmux-1000/default" {
+		t.Errorf("serverKey() = %q, want the socket from TMUX", got)
 	}
-	defer db.Close()
+}
 
-	if got := db.ServerKey(); got != "/run/user/1000/tmux-1000/default" {
-		t.Errorf("ServerKey() = %q, want the socket path", got)
+func TestServerKeyFallsBackToDefaultSocket(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_TMPDIR", "/run/user/1000")
+	want := fmt.Sprintf("/run/user/1000/tmux-%d/default", os.Getuid())
+	if got := serverKey(); got != want {
+		t.Errorf("serverKey() = %q, want %q", got, want)
 	}
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it passes the plumbing but the wiring is absent**
+- [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-nix develop -c go test . -run TestStoreUsesSocketPathAsServerKey -v
-grep -n 'store.Open' cmd/tmux-remux/main.go
+nix develop -c go test ./cmd/tmux-remux/ -run TestServerKey -v
 ```
 
-Expected: the test PASSes (it exercises the API directly), and the grep shows `cmd/tmux-remux/main.go` still passing `"/tmp/tmux-test/default"` — the defect this step fixes.
+Expected: FAIL to build — `undefined: serverKey`.
 
 - [ ] **Step 3: Implement**
 
-In `cmd/tmux-remux/main.go`, inside `withStore`:
+Add to `cmd/tmux-remux/main.go`, above `withStore`:
 
 ```go
-	db, err := store.Open(ctx, cfg.DBPath, tmux.SocketPath(os.Environ()))
+// serverKey returns the store partition for the tmux server this process
+// targets. Every command must derive it the same way, or a hook's close
+// events and a timer's snapshots land in different lanes on one server.
+func serverKey() string {
+	return tmux.SocketPath(os.Environ())
+}
+```
+
+And in `withStore`, replace the literal the Task 2 sed left behind:
+
+```go
+	db, err := store.Open(ctx, cfg.DBPath, serverKey())
 ```
 
 Confirm `github.com/noamsto/tmux-remux/internal/tmux` is in that file's import block; add it if not.
@@ -1173,7 +1194,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/tmux-remux/main.go integration_test.go
+git add cmd/tmux-remux/main.go cmd/tmux-remux/server_key_test.go
 nix develop -c git commit -m "feat(cli): key the store by the tmux socket path (#130)"
 ```
 
