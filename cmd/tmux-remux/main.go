@@ -72,6 +72,13 @@ func main() {
 	}
 }
 
+// serverKey returns the store partition for the tmux server this process
+// targets. Every command must derive it the same way, or a hook's close
+// events and a timer's snapshots land in different lanes on one server.
+func serverKey() string {
+	return tmux.SocketPath(os.Environ())
+}
+
 // withStore opens the DB after ensuring storage directories exist, takes an
 // exclusive flock on cfg.LockPath to serialize writers, runs fn, and closes
 // the DB. Used by every subcommand's Run.
@@ -87,7 +94,7 @@ func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) 
 		return err
 	}
 	defer func() { _ = lock.Release() }()
-	db, err := store.Open(ctx, cfg.DBPath, "/tmp/tmux-test/default")
+	db, err := store.Open(ctx, cfg.DBPath, serverKey())
 	if err != nil {
 		return err
 	}
