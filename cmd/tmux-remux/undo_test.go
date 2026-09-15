@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,24 @@ import (
 	"github.com/noamsto/tmux-remux/internal/store"
 	"github.com/noamsto/tmux-remux/internal/tmux"
 )
+
+func TestUndoFailuresDemotesOnlySetLayout(t *testing.T) {
+	layoutErr := errors.New("invalid layout")
+	splitErr := errors.New("split failed")
+	var logs []string
+	fatal := undoFailures(42, []restore.FailedAction{
+		{Action: restore.SetLayout{Window: "s:1", Layout: "bad"}, Err: layoutErr},
+		{Action: restore.SplitPane{Target: "s:1"}, Err: splitErr},
+	}, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+	if len(fatal) != 1 || !errors.Is(fatal[0], splitErr) {
+		t.Errorf("fatal = %v, want only split failure", fatal)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "close event 42") || !strings.Contains(logs[0], layoutErr.Error()) {
+		t.Errorf("logs = %v, want layout warning for close event", logs)
+	}
+}
 
 // seedStore returns an open store with a single snapshot capturing one window
 // (mono:4, id @9) plus whatever close events the test inserts on top.

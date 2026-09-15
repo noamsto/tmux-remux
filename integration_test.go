@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	return tmux.ParseWindows(out, nil)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
-	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}"})
+	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
@@ -444,6 +445,110 @@ func TestTriggersWindowCloseCarriesSession(t *testing.T) {
 	if m.SessionName != "work" {
 		t.Errorf("window-unlinked SessionName = %q, want \"work\"", m.SessionName)
 	}
+}
+
+func TestUndoDropsFloatingPane(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dbPath := remuxEnv(t)
+	bin := buildRemux(t)
+	srv := testutil.StartServer(t)
+	t.Setenv("TMUX", srv.Socket+",0,0")
+
+	if out, err := srv.Tmux("new-session", "-d", "-s", "work", "/bin/sh"); err != nil {
+		t.Fatalf("new-session: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("new-window", "-d", "-t", "work", "-n", "doomed", "/bin/sh"); err != nil {
+		t.Fatalf("new-window: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("split-window", "-d", "-h", "-t", "work:doomed", "/bin/sh"); err != nil {
+		t.Fatalf("split-window: %v\n%s", err, out)
+	}
+	if out, err := srv.Tmux("new-pane", "-d", "-t", "work:doomed", "/bin/sh"); err != nil {
+		t.Skipf("tmux server does not support new-pane: %v\n%s", err, out)
+	}
+
+	wantGeometry := tiledPaneGeometry(t, srv, "work:doomed")
+	if len(wantGeometry) != 2 {
+		t.Fatalf("tiled panes before close = %v, want 2", wantGeometry)
+	}
+	identity, err := srv.Tmux("display-message", "-p", "-t", "work:doomed", "#{session_id}\x1f#{window_id}")
+	if err != nil {
+		t.Fatalf("display target identity: %v\n%s", err, identity)
+	}
+	fields := strings.Split(strings.TrimSpace(identity), "\x1f")
+	if len(fields) != 2 {
+		t.Fatalf("target identity = %q, want session and window id", identity)
+	}
+	if out, err := exec.Command(bin, "save", "--reason=test").CombinedOutput(); err != nil { //nolint:gosec
+		t.Fatalf("save: %v\n%s", err, out)
+	}
+	// Capture events resolve against snapshots strictly before their timestamp.
+	time.Sleep(time.Millisecond)
+	if out, err := srv.Tmux("kill-window", "-t", "work:doomed"); err != nil {
+		t.Fatalf("kill-window: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(bin, "capture-event", "window-unlinked", "--session", fields[0], "--session-name", "work", "--window", fields[1]).CombinedOutput(); err != nil { //nolint:gosec
+		t.Fatalf("capture-event: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(bin, "undo", "--pop", "--session", "work").CombinedOutput(); err != nil { //nolint:gosec
+		t.Fatalf("undo --pop: %v\n%s", err, out)
+	}
+	if got := tiledPaneGeometry(t, srv, "work:doomed"); !reflect.DeepEqual(got, wantGeometry) {
+		t.Errorf("restored tiled pane geometry = %v, want %v", got, wantGeometry)
+	}
+	assertOnlyTiledPanes(t, srv, "work:doomed", 2)
+	db, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	events, err := db.ListEvents(context.Background(), store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Errorf("close events after undo = %v, want restored event popped", events)
+	}
+}
+
+func assertOnlyTiledPanes(t *testing.T, srv *testutil.Server, target string, want int) {
+	t.Helper()
+	out, err := srv.Tmux("list-panes", "-t", target, "-F", "#{pane_floating_flag}")
+	if err != nil {
+		t.Fatalf("list panes: %v\n%s", err, out)
+	}
+	flags := strings.Fields(out)
+	if len(flags) != want {
+		t.Fatalf("restored panes = %v, want exactly %d", flags, want)
+	}
+	for _, flag := range flags {
+		if flag != "0" {
+			t.Errorf("restored pane floating flag = %q, want all panes tiled", flag)
+		}
+	}
+}
+
+func tiledPaneGeometry(t *testing.T, srv *testutil.Server, target string) []string {
+	t.Helper()
+	out, err := srv.Tmux("list-panes", "-t", target, "-F", "#{pane_floating_flag}\x1f#{pane_width}x#{pane_height},#{pane_left},#{pane_top}")
+	if err != nil {
+		t.Fatalf("list panes: %v\n%s", err, out)
+	}
+	var geometry []string
+	for _, line := range strings.Fields(out) {
+		floating, pane, ok := strings.Cut(line, "\x1f")
+		if !ok {
+			t.Fatalf("pane geometry row = %q", line)
+		}
+		if floating == "0" {
+			geometry = append(geometry, pane)
+		}
+	}
+	slices.Sort(geometry)
+	return geometry
 }
 
 // prefix+x runs `kill-pane`, and no tmux release gives that command hook the

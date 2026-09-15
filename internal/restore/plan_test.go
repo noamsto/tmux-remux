@@ -41,6 +41,27 @@ func TestBuildPlanForFreshServer(t *testing.T) {
 	}
 }
 
+func TestBuildPlanRepairsLegacyFloatingLayout(t *testing.T) {
+	m := snapshot.Manifest{Sessions: []snapshot.Session{{
+		Name: "s1",
+		Windows: []snapshot.Window{{
+			Index: 1, Layout: "aaee,80x24,0,0{40x24,0,0,0,30x7,9,3,2,39x24,41,0,1}<30x7,9,3,2>",
+			Panes: []snapshot.Pane{{Index: 0, Cwd: "/a"}, {Index: 1, Cwd: "/b"}},
+		}},
+	}}}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	for _, action := range plan {
+		if set, ok := action.(restore.SetLayout); ok {
+			const want = "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
+			if set.Layout != want {
+				t.Errorf("SetLayout.Layout = %q, want %q", set.Layout, want)
+			}
+			return
+		}
+	}
+	t.Fatal("BuildPlan did not emit SetLayout")
+}
+
 func TestBuildPlanWithScrollbackProducesCatThenExec(t *testing.T) {
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{{
