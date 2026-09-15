@@ -828,6 +828,62 @@ func TestMigration0002ClearsPopulatedV1Database(t *testing.T) {
 	}
 }
 
+// TestMigration0002IndexesParentEventID confirms the index that makes bulk
+// deletes on events non-quadratic (see 0002_server_partition.sql) actually
+// exists after migration, rather than timing the delete — a timing
+// assertion would be flaky.
+func TestMigration0002IndexesParentEventID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	s, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	rows, err := s.DB().QueryContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type = 'index' AND tbl_name = 'events'
+	`)
+	if err != nil {
+		t.Fatalf("query sqlite_master: %v", err)
+	}
+	defer rows.Close()
+
+	var found bool
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan index name: %v", err)
+		}
+		// PRAGMA doesn't accept bind parameters; name comes from
+		// sqlite_master, not external input.
+		indexInfo, err := s.DB().QueryContext(ctx, fmt.Sprintf("PRAGMA index_info('%s')", name))
+		if err != nil {
+			t.Fatalf("PRAGMA index_info(%s): %v", name, err)
+		}
+		for indexInfo.Next() {
+			var seqno, cid int
+			var colName string
+			if err := indexInfo.Scan(&seqno, &cid, &colName); err != nil {
+				indexInfo.Close()
+				t.Fatalf("scan index_info row: %v", err)
+			}
+			if colName == "parent_event_id" {
+				found = true
+			}
+		}
+		indexInfo.Close()
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate sqlite_master: %v", err)
+	}
+	if !found {
+		t.Error("no index on events(parent_event_id) after migration")
+	}
+}
+
 func TestPruneIsScopedByServerKey(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()

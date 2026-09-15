@@ -51,8 +51,8 @@ func Open(ctx context.Context, path, serverKey string) (*Store, error) {
 // ServerKey returns the tmux socket path this Store is scoped to.
 func (s *Store) ServerKey() string { return s.serverKey }
 
-// DB returns the underlying *sql.DB. Callers may use it for ad-hoc queries
-// not yet wrapped by typed methods.
+// DB returns the underlying *sql.DB, for tests only. Queries through it
+// bypass the server-key partition every typed method enforces.
 func (s *Store) DB() *sql.DB { return s.db }
 
 // Close closes the underlying database connection.
