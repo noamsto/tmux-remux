@@ -941,6 +941,9 @@ func (GCCmd) Run() error {
 		if err != nil {
 			return err
 		}
+		// Reused from restore rather than a dedicated knob: both ask the same
+		// question, "how old is too old to still matter", so a dead lane and a
+		// stale snapshot age out together.
 		cutoff := time.Now().Add(-cfg.RestoreMaxSnapshotAge).UnixMilli()
 		socketExists := func(path string) bool {
 			_, err := os.Stat(path)

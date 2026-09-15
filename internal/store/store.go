@@ -504,8 +504,18 @@ func (s *Store) ListServerLanes(ctx context.Context) ([]ServerLane, error) {
 // DeleteServerLane removes every event and every server_state row belonging to
 // serverKey, returning the event count. Cross-lane, like ListServerLanes.
 // Orphaned scrollback blobs are left to the caller's zero-refcount sweep.
+//
+// Both deletes run in one transaction: ListServerLanes only surfaces keys
+// still present in events, so a partial delete that dropped the events but
+// not the server_state row would strand that row — gc could never see the
+// key again to finish the cleanup.
 func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE server_key = ?`, serverKey)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `DELETE FROM events WHERE server_key = ?`, serverKey)
 	if err != nil {
 		return 0, fmt.Errorf("delete server lane events: %w", err)
 	}
@@ -513,8 +523,11 @@ func (s *Store) DeleteServerLane(ctx context.Context, serverKey string) (int64, 
 	if err != nil {
 		return 0, fmt.Errorf("delete server lane events: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM server_state WHERE server_key = ?`, serverKey); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_state WHERE server_key = ?`, serverKey); err != nil {
 		return 0, fmt.Errorf("delete server lane state: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
 	}
 	return n, nil
 }
