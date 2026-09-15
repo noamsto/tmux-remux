@@ -931,15 +931,28 @@ func TestDeleteEventsIsScopedByServerKey(t *testing.T) {
 	}
 	defer b.Close()
 
+	aID, err := a.InsertEvent(ctx, store.Event{Ts: 1000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"})
+	if err != nil {
+		t.Fatalf("insert a event: %v", err)
+	}
 	bID, err := b.InsertEvent(ctx, store.Event{Ts: 1000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"})
 	if err != nil {
 		t.Fatalf("insert b event: %v", err)
 	}
 
-	// Lane a deliberately passes lane b's id — DeleteEvents must not reach
-	// across lanes even when handed one.
-	if err := a.DeleteEvents(ctx, []int64{bID}); err != nil {
+	// Lane a deliberately passes lane b's id alongside its own — DeleteEvents
+	// must not reach across lanes even when handed one, but must still
+	// delete the id that is actually lane a's.
+	if err := a.DeleteEvents(ctx, []int64{aID, bID}); err != nil {
 		t.Fatalf("DeleteEvents: %v", err)
+	}
+
+	aEvs, err := a.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents a: %v", err)
+	}
+	if len(aEvs) != 0 {
+		t.Errorf("lane a kept %d events, want 0 — DeleteEvents must delete lane a's own id", len(aEvs))
 	}
 
 	bEvs, err := b.ListEvents(ctx, store.ListOpts{})
@@ -948,5 +961,36 @@ func TestDeleteEventsIsScopedByServerKey(t *testing.T) {
 	}
 	if len(bEvs) != 1 {
 		t.Errorf("lane b kept %d events, want 1 — lane a must not delete lane b's event", len(bEvs))
+	}
+}
+
+func TestMetaIsScopedByServerKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	if err := a.SetMeta(ctx, "last_save_ts", "1000"); err != nil {
+		t.Fatalf("SetMeta a: %v", err)
+	}
+	if err := b.SetMeta(ctx, "last_save_ts", "2000"); err != nil {
+		t.Fatalf("SetMeta b: %v", err)
+	}
+
+	got, err := a.GetMeta(ctx, "last_save_ts")
+	if err != nil {
+		t.Fatalf("GetMeta a: %v", err)
+	}
+	if got != "1000" {
+		t.Errorf("lane a last_save_ts = %q, want %q", got, "1000")
 	}
 }

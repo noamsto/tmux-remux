@@ -19,10 +19,9 @@ import (
 
 // Store wraps a *sql.DB connection to the tmux-remux SQLite database, scoped
 // to one tmux server. InsertEvent, LatestSnapshot, LatestSnapshotBefore,
-// ListEvents, DeleteEvents and the prune methods filter on serverKey, so a
-// second server sharing the file cannot read, overwrite, or delete this
-// one's events. The meta table is not yet scoped — it still acts across all
-// servers sharing the file. The scrollback tables are the deliberate
+// ListEvents, DeleteEvents, SetMeta, GetMeta and the prune methods filter on
+// serverKey, so a second server sharing the file cannot read, overwrite, or
+// delete this one's events or meta. The scrollback tables are the deliberate
 // exception — blobs are content-addressed and shared across servers by
 // refcount.
 type Store struct {
@@ -391,22 +390,26 @@ func (s *Store) LinkEventScrollback(ctx context.Context, eventID int64, paneKey,
 	return nil
 }
 
-// SetMeta upserts a key/value into the meta table.
+// SetMeta upserts a key/value for this Store's server. Keys live in
+// server_state, not meta: a value like last_save_ts describes one tmux
+// server's history and sharing it lets a second server's save throttle this
+// one's.
 func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO meta (key, value) VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, key, value)
+		INSERT INTO server_state (server_key, key, value) VALUES (?, ?, ?)
+		ON CONFLICT(server_key, key) DO UPDATE SET value = excluded.value
+	`, s.serverKey, key, value)
 	if err != nil {
 		return fmt.Errorf("set meta: %w", err)
 	}
 	return nil
 }
 
-// GetMeta returns the value for key, or "" if absent.
+// GetMeta returns the value for key in this Store's server, or "" if absent.
 func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM server_state WHERE server_key = ? AND key = ?`, s.serverKey, key).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

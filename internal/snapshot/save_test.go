@@ -270,3 +270,66 @@ func TestSaveSkipsWhenNoSessions(t *testing.T) {
 		t.Errorf("expected 0 snapshot events, got %d", len(all))
 	}
 }
+
+// TestSaveThrottleDoesNotCrossServers reproduces the 2026-09-15 incident: two
+// tmux servers sharing one state.db saved inside the same second, and the
+// second one measured the first one's last_save_ts, came back throttled, and
+// dropped its scrollback.
+func TestSaveThrottleDoesNotCrossServers(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	ctx := context.Background()
+	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
+
+	newSaver := func(serverKey, sessionName string) (*snapshot.Saver, *store.Store) {
+		t.Helper()
+		db, err := store.Open(ctx, dbPath, serverKey)
+		if err != nil {
+			t.Fatalf("Open %s: %v", serverKey, err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		cc := &captureClient{
+			fakeClient: &fakeClient{
+				sessions: []tmux.SessionRow{{Name: sessionName, LastAttached: 100}},
+				windows:  []tmux.WindowRow{{Session: sessionName, Index: 1, Name: "w1", Layout: "L"}},
+				panes:    []tmux.PaneRow{{Session: sessionName, WindowIndex: 1, PaneIndex: 1, Cwd: "/x", Command: "nvim", PID: 1, LastUsed: 1}},
+			},
+			captured: map[string][]byte{sessionName + ":1.1": []byte("hello " + sessionName)},
+		}
+		return snapshot.NewSaver(db, sb, cc, snapshot.SaverOptions{
+			Host: "test", CaptureScrollback: true, MinSaveInterval: 30 * time.Second,
+		}), db
+	}
+
+	saverA, dbA := newSaver("/sock/a", "alpha")
+	saverB, dbB := newSaver("/sock/b", "bravo")
+
+	if err := saverA.Save(ctx, "timer"); err != nil {
+		t.Fatalf("save a: %v", err)
+	}
+	// No sleep: B saves inside A's MinSaveInterval, exactly as the three
+	// same-second timer hooks did.
+	if err := saverB.Save(ctx, "timer"); err != nil {
+		t.Fatalf("save b: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		db   *store.Store
+	}{{"a", dbA}, {"b", dbB}} {
+		snap, err := tc.db.LatestSnapshot(ctx)
+		if err != nil {
+			t.Fatalf("LatestSnapshot %s: %v", tc.name, err)
+		}
+		if snap == nil {
+			t.Fatalf("lane %s has no snapshot", tc.name)
+		}
+		var m snapshot.Manifest
+		if err := json.Unmarshal([]byte(snap.ManifestJSON), &m); err != nil {
+			t.Fatalf("unmarshal %s: %v", tc.name, err)
+		}
+		if m.ScrollbackSkipped {
+			t.Errorf("lane %s skipped scrollback — the other server's save throttled it", tc.name)
+		}
+	}
+}
