@@ -695,6 +695,8 @@ func TestCaptureDropsBridgedOnTheLiveAnswerNotTheSnapshot(t *testing.T) {
 // TestCaptureResolvesWithinItsOwnServer pins the second half of the
 // 2026-09-15 incident: a close event must resolve against its own server's
 // latest snapshot, never a newer one written by a different tmux server.
+// Lane b's snapshot is newer and empty; unscoped, resolveAtCapture would read
+// it as lane a's latest, find no pane ids in it, and embed nothing.
 func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "t.db")
@@ -730,8 +732,6 @@ func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
 		t.Fatalf("insert a snapshot: %v", err)
 	}
 
-	// Lane b's snapshot is newer and shares no pane ids. Unscoped,
-	// LatestSnapshot would return this and resolution would find nothing.
 	bJSON, err := json.Marshal(snapshot.Manifest{V: 1, Host: "h", SavedAt: 5000})
 	if err != nil {
 		t.Fatal(err)
@@ -742,11 +742,35 @@ func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
 		t.Fatalf("insert b snapshot: %v", err)
 	}
 
-	snap, err := a.LatestSnapshot(ctx)
+	// Close %1 on lane a. Post-close, window @1 survives with no panes.
+	id, err := closeevent.Capture(ctx, a, closeevent.Args{
+		Kind: "pane-died", PaneID: "%1", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "alpha", Index: 1, ID: "@1"}},
+		},
+	})
 	if err != nil {
-		t.Fatalf("LatestSnapshot: %v", err)
+		t.Fatal(err)
 	}
-	if snap == nil || snap.Ts != 1000 {
-		t.Fatalf("lane a LatestSnapshot = %+v, want the ts-1000 snapshot", snap)
+	if id == 0 {
+		t.Fatal("expected the closed pane to be recorded")
+	}
+
+	all, err := a.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.Resolved == nil {
+		t.Fatal("expected Resolved to be set from lane a's own snapshot")
+	}
+	if man.Resolved.Item.Pane == nil || man.Resolved.Item.Pane.ID != "%1" {
+		t.Errorf("resolved pane = %+v, want %%1", man.Resolved.Item.Pane)
+	}
+	if man.Resolved.Item.SessionName != "alpha" {
+		t.Errorf("resolved session = %q, want alpha (lane b's snapshot has no sessions)", man.Resolved.Item.SessionName)
 	}
 }

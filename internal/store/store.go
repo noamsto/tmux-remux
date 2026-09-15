@@ -18,10 +18,12 @@ import (
 )
 
 // Store wraps a *sql.DB connection to the tmux-remux SQLite database, scoped
-// to one tmux server. Every method filters on serverKey, so a second server
-// sharing the file cannot read or overwrite this one's rows. The scrollback
-// tables are the deliberate exception — blobs are content-addressed and
-// shared across servers by refcount.
+// to one tmux server. InsertEvent, LatestSnapshot, LatestSnapshotBefore and
+// ListEvents filter on serverKey, so a second server sharing the file cannot
+// read or overwrite this one's events. The prune methods and the meta table
+// are not yet scoped — they still act across all servers sharing the file.
+// The scrollback tables are the deliberate exception — blobs are
+// content-addressed and shared across servers by refcount.
 type Store struct {
 	db        *sql.DB
 	serverKey string

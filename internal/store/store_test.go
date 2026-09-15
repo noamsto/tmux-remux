@@ -2,13 +2,16 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/noamsto/tmux-remux/internal/store"
+	"github.com/noamsto/tmux-remux/internal/store/migrations"
 )
 
 func TestOpenAppliesMigrations(t *testing.T) {
@@ -727,5 +730,99 @@ func TestEventsAreScopedByServerKey(t *testing.T) {
 	}
 	if len(evs) != 1 {
 		t.Fatalf("lane a ListEvents returned %d events, want 1", len(evs))
+	}
+}
+
+// TestMigration0002ClearsPopulatedV1Database builds a v1 database with real
+// rows, then confirms Open's 0002 migration deletes events and lets the
+// event_scrollbacks cascade drive scrollback refcounts to zero — the chain
+// gc depends on to collect orphaned blob files. Every other test opens a
+// fresh, empty file, so this is the only test that exercises the DELETE FROM
+// events statement against data.
+func TestMigration0002ClearsPopulatedV1Database(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	// Same DSN pragmas as store.Open: foreign_keys must be ON or the
+	// event_scrollbacks cascade (and its refcount trigger) won't fire.
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", dbPath)
+	v1db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open v1 db: %v", err)
+	}
+
+	body, err := fs.ReadFile(migrations.FS, "0001_initial.sql")
+	if err != nil {
+		t.Fatalf("read 0001_initial.sql: %v", err)
+	}
+	if _, err := v1db.ExecContext(ctx, string(body)); err != nil {
+		t.Fatalf("apply 0001_initial.sql: %v", err)
+	}
+	if _, err := v1db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+		t.Fatalf("set user_version=1: %v", err)
+	}
+
+	res, err := v1db.ExecContext(ctx, `
+		INSERT INTO events (ts, kind, scope, host, manifest_json)
+		VALUES (1000, 'snapshot', 'session', 'h', '{}')
+	`)
+	if err != nil {
+		t.Fatalf("insert v1 event: %v", err)
+	}
+	eventID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("event LastInsertId: %v", err)
+	}
+	if _, err := v1db.ExecContext(ctx, `
+		INSERT INTO scrollbacks (sha256, bytes, refcount, last_used_ts) VALUES ('sha1', 10, 1, 1)
+	`); err != nil {
+		t.Fatalf("insert v1 scrollback: %v", err)
+	}
+	if _, err := v1db.ExecContext(ctx, `
+		INSERT INTO event_scrollbacks (event_id, pane_key, scrollback_sha) VALUES (?, 's:1:1', 'sha1')
+	`, eventID); err != nil {
+		t.Fatalf("insert v1 event_scrollback: %v", err)
+	}
+
+	if err := v1db.Close(); err != nil {
+		t.Fatalf("close v1 db: %v", err)
+	}
+
+	s, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open (applies 0002): %v", err)
+	}
+	defer s.Close()
+
+	var eventCount int
+	if err := s.DB().QueryRowContext(ctx, "SELECT count(*) FROM events").Scan(&eventCount); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if eventCount != 0 {
+		t.Errorf("events count = %d, want 0", eventCount)
+	}
+
+	var linkCount int
+	if err := s.DB().QueryRowContext(ctx, "SELECT count(*) FROM event_scrollbacks").Scan(&linkCount); err != nil {
+		t.Fatalf("count event_scrollbacks: %v", err)
+	}
+	if linkCount != 0 {
+		t.Errorf("event_scrollbacks count = %d, want 0", linkCount)
+	}
+
+	var refcount int
+	if err := s.DB().QueryRowContext(ctx, "SELECT refcount FROM scrollbacks WHERE sha256 = 'sha1'").Scan(&refcount); err != nil {
+		t.Fatalf("read refcount: %v", err)
+	}
+	if refcount != 0 {
+		t.Errorf("scrollback refcount = %d, want 0", refcount)
+	}
+
+	var version int
+	if err := s.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("user_version = %d, want 2", version)
 	}
 }
