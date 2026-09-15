@@ -15,7 +15,7 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
 
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -25,8 +25,8 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	if err := db.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("user_version = %d, want 1", version)
+	if version != 2 {
+		t.Errorf("user_version = %d, want 2", version)
 	}
 }
 
@@ -35,7 +35,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		db, err := store.Open(ctx, dbPath)
+		db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 		if err != nil {
 			t.Fatalf("Open #%d: %v", i, err)
 		}
@@ -47,8 +47,8 @@ func TestMigrateRespectsUserVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
 
-	// First open creates the schema and sets user_version=1.
-	db, err := store.Open(ctx, dbPath)
+	// First open creates the schema and sets user_version=2.
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
@@ -56,13 +56,13 @@ func TestMigrateRespectsUserVersion(t *testing.T) {
 	if err := db.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if v != 1 {
-		t.Errorf("after first open: user_version = %d, want 1", v)
+	if v != 2 {
+		t.Errorf("after first open: user_version = %d, want 2", v)
 	}
 	db.Close()
 
 	// Second open is a no-op for migrations.
-	db, err = store.Open(ctx, dbPath)
+	db, err = store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
@@ -70,15 +70,15 @@ func TestMigrateRespectsUserVersion(t *testing.T) {
 	if err := db.DB().QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
-	if v != 1 {
-		t.Errorf("after second open: user_version = %d, want 1", v)
+	if v != 2 {
+		t.Errorf("after second open: user_version = %d, want 2", v)
 	}
 }
 
 func TestInsertEventReturnsID(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestInsertEventReturnsID(t *testing.T) {
 func TestLatestSnapshotReturnsMostRecent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestLatestSnapshotReturnsMostRecent(t *testing.T) {
 func TestLatestSnapshotReturnsNilWhenEmpty(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestLatestSnapshotReturnsNilWhenEmpty(t *testing.T) {
 func TestListEventsByKind(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestListEventsByKind(t *testing.T) {
 func TestPruneSnapshotsKeepsNewest(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestPruneSnapshotsKeepsNewest(t *testing.T) {
 func TestPruneCloseEventsKeepsNewest(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestPruneCloseEventsKeepsNewest(t *testing.T) {
 func TestPruneCloseEventsDropsUnresolvable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestPruneCloseEventsDropsUnresolvable(t *testing.T) {
 func TestPruneCloseEventsKeepsAllWhenNoSnapshots(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestPruneCloseEventsKeepsAllWhenNoSnapshots(t *testing.T) {
 func TestPruneUnresolvableCloseEventsKeepsResolvable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestPruneUnresolvableCloseEventsKeepsResolvable(t *testing.T) {
 func TestPruneUnresolvableCloseEventsSurvivesAboveFloorWithEmbeddedEntity(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestPruneUnresolvableCloseEventsSurvivesAboveFloorWithEmbeddedEntity(t *tes
 func TestPruneUnresolvableCloseEventsPrunesAtFloorEvenWithEmbeddedEntity(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestPruneUnresolvableCloseEventsPrunesAtFloorEvenWithEmbeddedEntity(t *test
 func TestPruneUnresolvableCloseEventsDecrementsRefcount(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +480,7 @@ func TestPruneUnresolvableCloseEventsDecrementsRefcount(t *testing.T) {
 func TestUpsertScrollbackIncrementsRefcount(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +515,7 @@ func TestUpsertScrollbackIncrementsRefcount(t *testing.T) {
 func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
 func TestLinkEventScrollbackBumpsRefcount(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +591,7 @@ func TestLinkEventScrollbackBumpsRefcount(t *testing.T) {
 func TestDeletingEventDecrementsRefcount(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestDeletingEventDecrementsRefcount(t *testing.T) {
 func TestSetGetMeta(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,7 +647,7 @@ func TestSetGetMeta(t *testing.T) {
 func TestLatestSnapshotBeforeIgnoresNewerSnapshots(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,5 +675,57 @@ func TestLatestSnapshotBeforeIgnoresNewerSnapshots(t *testing.T) {
 	}
 	if ev != nil {
 		t.Errorf("LatestSnapshotBefore(100) = %+v, want nil", ev)
+	}
+}
+
+func TestEventsAreScopedByServerKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+
+	a, err := store.Open(ctx, dbPath, "/run/user/1000/tmux-1000/default")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/tmp/tmux-1000/default")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	ev := func(ts int64) store.Event {
+		return store.Event{Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}
+	}
+	if _, err := a.InsertEvent(ctx, ev(1000)); err != nil {
+		t.Fatalf("insert into a: %v", err)
+	}
+	// Newer, and in the other lane: the bug this partition exists to stop is
+	// lane a resolving a close against this row.
+	if _, err := b.InsertEvent(ctx, ev(2000)); err != nil {
+		t.Fatalf("insert into b: %v", err)
+	}
+
+	snap, err := a.LatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("LatestSnapshot: %v", err)
+	}
+	if snap == nil || snap.Ts != 1000 {
+		t.Fatalf("lane a LatestSnapshot = %+v, want ts 1000", snap)
+	}
+
+	before, err := a.LatestSnapshotBefore(ctx, 3000)
+	if err != nil {
+		t.Fatalf("LatestSnapshotBefore: %v", err)
+	}
+	if before == nil || before.Ts != 1000 {
+		t.Fatalf("lane a LatestSnapshotBefore = %+v, want ts 1000", before)
+	}
+
+	evs, err := a.ListEvents(ctx, store.ListOpts{})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("lane a ListEvents returned %d events, want 1", len(evs))
 	}
 }

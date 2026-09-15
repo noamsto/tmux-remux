@@ -14,7 +14,7 @@ import (
 
 func TestCaptureSessionInsertsRow(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestCaptureSessionInsertsRow(t *testing.T) {
 
 func TestCaptureStoresProvidedPostCloseIndex(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCaptureStoresProvidedPostCloseIndex(t *testing.T) {
 
 func TestCaptureSkipsMovedWindow(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestCaptureSkipsMovedWindow(t *testing.T) {
 
 func TestCaptureSkipsLivePane(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestCaptureSkipsLivePane(t *testing.T) {
 
 func TestCascadeDedup_WindowSkipsAfterSession(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func seedSnapshot(ctx context.Context, t *testing.T, db *store.Store) {
 // dead pane has to be identified by diffing the survivors against the snapshot.
 func TestCaptureResolvesIDLessPaneFromSnapshot(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestCaptureResolvesIDLessPaneFromSnapshot(t *testing.T) {
 // that same recovered pane, not the surviving sibling (%1).
 func TestCaptureEmbedsResolvedPaneForIDLessPane(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestCaptureDropsIDLessPaneWhenAmbiguous(t *testing.T) {
 	}
 	for name, post := range cases {
 		t.Run(name, func(t *testing.T) {
-			db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+			db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -284,7 +284,7 @@ func TestCaptureDropsIDLessPaneWhenAmbiguous(t *testing.T) {
 
 func TestCaptureStoresSessionName(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestParseManifestWithoutSessionNameLeavesItEmpty(t *testing.T) {
 
 func TestCaptureEmbedsResolvedPaneFromLatestSnapshot(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestCaptureEmbedsResolvedPaneFromLatestSnapshot(t *testing.T) {
 // at capture time.
 func TestResolveFallsBackToEmbeddedWhenNoSnapshotSurvives(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestResolveFallsBackToEmbeddedWhenNoSnapshotSurvives(t *testing.T) {
 // embedded copy rather than reporting unresolvable.
 func TestResolveFallsBackToEmbeddedWhenOlderSnapshotLacksEntity(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestResolveFallsBackToEmbeddedWhenOlderSnapshotLacksEntity(t *testing.T) {
 // embedded — the close must still be recorded rather than dropped.
 func TestCaptureRecordsUnresolvableCloseWithNilResolved(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +492,7 @@ func TestCaptureRecordsUnresolvableCloseWithNilResolved(t *testing.T) {
 // session-closed is excluded outright.
 func TestCaptureSessionClosedHasNoEmbeddedEntity(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestCaptureSessionClosedHasNoEmbeddedEntity(t *testing.T) {
 // surviving window under renumber-windows. Not safe to embed.
 func TestCaptureIDLessWindowUnlinkedHasNoEmbeddedEntity(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ func TestCaptureIDLessWindowUnlinkedHasNoEmbeddedEntity(t *testing.T) {
 // keyed to the close event, not the snapshot event.
 func TestCaptureLinksResolvedPaneScrollback(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestCaptureDropsBridgedOnTheLiveAnswerNotTheSnapshot(t *testing.T) {
 	}}
 
 	t.Run("live tmux says mirror, snapshot does not", func(t *testing.T) {
-		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -661,7 +661,7 @@ func TestCaptureDropsBridgedOnTheLiveAnswerNotTheSnapshot(t *testing.T) {
 	// The bridge is gone, the session is an ordinary one now, and losing a
 	// window in it is as undoable as anywhere else.
 	t.Run("snapshot says mirror, live tmux does not", func(t *testing.T) {
-		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+		db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -690,4 +690,63 @@ func TestCaptureDropsBridgedOnTheLiveAnswerNotTheSnapshot(t *testing.T) {
 			t.Error("Capture dropped a close in a session that is no longer a mirror")
 		}
 	})
+}
+
+// TestCaptureResolvesWithinItsOwnServer pins the second half of the
+// 2026-09-15 incident: a close event must resolve against its own server's
+// latest snapshot, never a newer one written by a different tmux server.
+func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "t.db")
+
+	a, err := store.Open(ctx, dbPath, "/sock/a")
+	if err != nil {
+		t.Fatalf("Open lane a: %v", err)
+	}
+	defer a.Close()
+	b, err := store.Open(ctx, dbPath, "/sock/b")
+	if err != nil {
+		t.Fatalf("Open lane b: %v", err)
+	}
+	defer b.Close()
+
+	aManifest := snapshot.Manifest{
+		V: 1, Host: "h", SavedAt: 1000,
+		Sessions: []snapshot.Session{{
+			Name: "alpha",
+			Windows: []snapshot.Window{{
+				Index: 1, Name: "w1", ID: "@1",
+				Panes: []snapshot.Pane{{Index: 1, ID: "%1", Cwd: "/x", Command: "nvim"}},
+			}},
+		}},
+	}
+	aJSON, err := json.Marshal(aManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.InsertEvent(ctx, store.Event{
+		Ts: 1000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(aJSON),
+	}); err != nil {
+		t.Fatalf("insert a snapshot: %v", err)
+	}
+
+	// Lane b's snapshot is newer and shares no pane ids. Unscoped,
+	// LatestSnapshot would return this and resolution would find nothing.
+	bJSON, err := json.Marshal(snapshot.Manifest{V: 1, Host: "h", SavedAt: 5000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.InsertEvent(ctx, store.Event{
+		Ts: 5000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(bJSON),
+	}); err != nil {
+		t.Fatalf("insert b snapshot: %v", err)
+	}
+
+	snap, err := a.LatestSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("LatestSnapshot: %v", err)
+	}
+	if snap == nil || snap.Ts != 1000 {
+		t.Fatalf("lane a LatestSnapshot = %+v, want the ts-1000 snapshot", snap)
+	}
 }

@@ -38,7 +38,7 @@ func TestSaveInsertsEventAndScrollbacks(t *testing.T) {
 	scrollDir := filepath.Join(dir, "scrollbacks")
 	ctx := context.Background()
 
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestSaveCapturePaneErrorIsNonFatal(t *testing.T) {
 	scrollDir := filepath.Join(dir, "scrollbacks")
 	ctx := context.Background()
 
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestSaveCapturePaneErrorIsNonFatal(t *testing.T) {
 func TestSaveSkipsWhenFingerprintUnchangedAndThrottled(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"))
+	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"), "/tmp/tmux-test/default")
 	defer db.Close()
 	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
 	cc := &captureClient{
@@ -187,7 +187,7 @@ func TestSaveSkipsWhenFingerprintUnchangedAndThrottled(t *testing.T) {
 func TestSaveThrottleNeverDropsANewWindow(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"))
+	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"), "/tmp/tmux-test/default")
 	defer db.Close()
 	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
 	cc := &captureClient{
@@ -255,7 +255,7 @@ func TestSaveThrottleNeverDropsANewWindow(t *testing.T) {
 func TestSaveSkipsWhenNoSessions(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"))
+	db, _ := store.Open(ctx, filepath.Join(dir, "test.db"), "/tmp/tmux-test/default")
 	defer db.Close()
 	sb := scrollback.New(filepath.Join(dir, "scrollbacks"))
 

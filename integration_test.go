@@ -90,7 +90,7 @@ func TestSaveRestoreRoundtrip(t *testing.T) {
 	scrollDir := filepath.Join(dir, "sb")
 	ctx := context.Background()
 
-	db, err := store.Open(ctx, dbPath)
+	db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPaneRestoreSplitsIntoLiveWindow(t *testing.T) {
 
 	dir := t.TempDir()
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(dir, "test.db"))
+	db, err := store.Open(ctx, filepath.Join(dir, "test.db"), "/tmp/tmux-test/default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func waitForEvent(t *testing.T, dbPath, kind string, match func(closeevent.Close
 	var seen []string
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, "/tmp/tmux-test/default")
 		if err != nil {
 			continue // hook may not have created the DB yet
 		}
@@ -611,7 +611,7 @@ func TestTriggersMonitorSaveTick(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(250 * time.Millisecond)
-		db, err := store.Open(context.Background(), dbPath)
+		db, err := store.Open(context.Background(), dbPath, "/tmp/tmux-test/default")
 		if err != nil {
 			continue
 		}

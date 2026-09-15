@@ -17,26 +17,35 @@ import (
 	"github.com/noamsto/tmux-remux/internal/store/migrations"
 )
 
-// Store wraps a *sql.DB connection to the tmux-remux SQLite database.
+// Store wraps a *sql.DB connection to the tmux-remux SQLite database, scoped
+// to one tmux server. Every method filters on serverKey, so a second server
+// sharing the file cannot read or overwrite this one's rows. The scrollback
+// tables are the deliberate exception — blobs are content-addressed and
+// shared across servers by refcount.
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	serverKey string
 }
 
 // Open opens (or creates) the SQLite database at path, runs any pending
-// migrations, and returns a *Store. WAL is enabled, foreign keys are on.
-func Open(ctx context.Context, path string) (*Store, error) {
+// migrations, and returns a *Store scoped to serverKey — the tmux socket
+// path, from [tmux.SocketPath].
+func Open(ctx context.Context, path, serverKey string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, serverKey: serverKey}
 	if err := s.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
 }
+
+// ServerKey returns the tmux socket path this Store is scoped to.
+func (s *Store) ServerKey() string { return s.serverKey }
 
 // DB returns the underlying *sql.DB. Callers may use it for ad-hoc queries
 // not yet wrapped by typed methods.
@@ -122,9 +131,9 @@ type Event struct {
 // InsertEvent inserts a new event row and returns its id.
 func (s *Store) InsertEvent(ctx context.Context, ev Event) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO events (ts, kind, scope, reason, host, parent_event_id, manifest_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, ev.Ts, ev.Kind, ev.Scope, ev.Reason, ev.Host, ev.ParentEventID, ev.ManifestJSON)
+		INSERT INTO events (ts, kind, scope, reason, host, parent_event_id, manifest_json, server_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, ev.Ts, ev.Kind, ev.Scope, ev.Reason, ev.Host, ev.ParentEventID, ev.ManifestJSON, s.serverKey)
 	if err != nil {
 		return 0, fmt.Errorf("insert event: %w", err)
 	}
@@ -140,10 +149,10 @@ func (s *Store) LatestSnapshotBefore(ctx context.Context, ts int64) (*Event, err
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot' AND ts < ?
+		WHERE server_key = ? AND kind = 'snapshot' AND ts < ?
 		ORDER BY ts DESC, id DESC
 		LIMIT 1
-	`, ts)
+	`, s.serverKey, ts)
 	var ev Event
 	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
 	if err != nil {
@@ -162,10 +171,10 @@ func (s *Store) LatestSnapshot(ctx context.Context) (*Event, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json
 		FROM events
-		WHERE kind = 'snapshot'
+		WHERE server_key = ? AND kind = 'snapshot'
 		ORDER BY ts DESC, id DESC
 		LIMIT 1
-	`)
+	`, s.serverKey)
 	var ev Event
 	err := row.Scan(&ev.ID, &ev.Ts, &ev.Kind, &ev.Scope, &ev.Reason, &ev.Host, &ev.ParentEventID, &ev.ManifestJSON)
 	if err != nil {
@@ -188,8 +197,8 @@ type ListOpts struct {
 func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) {
 	var b strings.Builder
 	b.WriteString(`SELECT id, ts, kind, scope, reason, host, parent_event_id, manifest_json FROM events`)
-	var clauses []string
-	var args []any
+	clauses := []string{"server_key = ?"}
+	args := []any{s.serverKey}
 	if len(opts.Kinds) > 0 {
 		placeholders := make([]string, len(opts.Kinds))
 		for i, k := range opts.Kinds {
@@ -206,10 +215,8 @@ func (s *Store) ListEvents(ctx context.Context, opts ListOpts) ([]Event, error) 
 		}
 		clauses = append(clauses, "kind NOT IN ("+strings.Join(placeholders, ",")+")")
 	}
-	if len(clauses) > 0 {
-		b.WriteString(" WHERE ")
-		b.WriteString(strings.Join(clauses, " AND "))
-	}
+	b.WriteString(" WHERE ")
+	b.WriteString(strings.Join(clauses, " AND "))
 	b.WriteString(" ORDER BY ts DESC, id DESC")
 	if opts.Limit > 0 {
 		b.WriteString(" LIMIT ?")

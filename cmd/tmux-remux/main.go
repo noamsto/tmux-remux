@@ -87,7 +87,7 @@ func withStore(fn func(ctx context.Context, cfg config.Config, db *store.Store) 
 		return err
 	}
 	defer func() { _ = lock.Release() }()
-	db, err := store.Open(ctx, cfg.DBPath)
+	db, err := store.Open(ctx, cfg.DBPath, "/tmp/tmux-test/default")
 	if err != nil {
 		return err
 	}
