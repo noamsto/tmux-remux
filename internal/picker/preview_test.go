@@ -1305,7 +1305,9 @@ func TestRenderClosePreview_PaneWithoutScrollbackSaysSo(t *testing.T) {
 }
 
 // A pane the close took down whose sub-manifest carries ScrollbackSkipped
-// reads the throttle explanation, not the unqualified no-capture message.
+// reads the never-captured message, not the unqualified no-capture one — and
+// never blames min_save_interval, which FillScrollback's lookback has already
+// ruled out by the time a close is stored.
 func TestRenderClosePreview_ScrollbackSkippedSaysSo(t *testing.T) {
 	applyTheme(NewTheme())
 	sub := snapshot.Manifest{V: 1, ScrollbackSkipped: true, Sessions: []snapshot.Session{{
@@ -1329,11 +1331,14 @@ func TestRenderClosePreview_ScrollbackSkippedSaysSo(t *testing.T) {
 	m.width, m.height = 120, 30
 
 	got := stripANSI(m.renderClosePreview(120))
-	if !strings.Contains(got, "min_save_interval") {
-		t.Errorf("expected throttle explanation, got:\n%s", got)
+	if !strings.Contains(got, "nothing captured for this pane before it closed") {
+		t.Errorf("expected the never-captured message, got:\n%s", got)
+	}
+	if strings.Contains(got, "min_save_interval") {
+		t.Errorf("blamed the save throttle, which the close's scrollback lookback already ruled out:\n%s", got)
 	}
 	if strings.Contains(got, "no scrollback captured") {
-		t.Errorf("got the unqualified no-capture message instead of the throttle explanation:\n%s", got)
+		t.Errorf("got the unqualified no-capture message instead of the never-captured one:\n%s", got)
 	}
 }
 

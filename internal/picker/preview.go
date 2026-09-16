@@ -324,9 +324,14 @@ func (m PickerModel) closePaneContent(p snapshot.Pane, width, height int, skippe
 		return []string{style.Render(ansi.Truncate(text, width, "…"))}
 	}
 	var lines []string
+	// The skipped branch cannot blame min_save_interval the way the snapshot
+	// tree's does: FillScrollback has already looked back past the downgraded
+	// snapshot for an earlier capture of this same pane and come back empty,
+	// so what is left to say is that nothing ever reached the pane in time —
+	// usually a pane born and closed between two saves.
 	switch sha := p.ScrollbackSHA; {
 	case sha == "" && skipped:
-		lines = note(rowDim, "(scrollback skipped — saved within min_save_interval)")
+		lines = note(rowDim, "(nothing captured for this pane before it closed)")
 	case sha == "":
 		lines = note(rowDim, "(no scrollback captured for this pane)")
 	case m.scrollbackErrors[sha] != nil:

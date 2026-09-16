@@ -69,6 +69,16 @@ func (t Theme) Red() color.Color { return t.color("@thm_red", "#f38ba8", "#d20f3
 // Lavender returns the Catppuccin lavender accent used for footer key labels.
 func (t Theme) Lavender() color.Color { return t.color("@thm_lavender", "#b4befe", "#7287fd") }
 
+// ASCIIGlyphs reports whether the scope glyphs should fall back to geometric
+// shapes, for a terminal whose font has no Nerd Font icons. Any value but
+// "off" turns it on: the option exists only to ask for the fallback, so
+// honouring "on" alone would leave `set -g @remux_ascii_glyphs 1` silently
+// doing nothing.
+func (t Theme) ASCIIGlyphs() bool {
+	v := t.tmuxOpts["@remux_ascii_glyphs"]
+	return v != "" && v != "off"
+}
+
 func readTmuxOpts() map[string]string {
 	out, err := exec.Command("tmux", "show", "-g").Output()
 	if err != nil {

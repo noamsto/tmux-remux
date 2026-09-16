@@ -43,6 +43,8 @@ var (
 func init() { applyTheme(Theme{}) }
 
 func applyTheme(t Theme) {
+	applyGlyphs(t)
+
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Surface1()).
@@ -81,4 +83,17 @@ func applyTheme(t Theme) {
 		closeRailStyles[i] = lipgloss.NewStyle().Foreground(a)
 		closeLabelStyles[i] = lipgloss.NewStyle().Foreground(t.Base()).Background(a).Bold(true)
 	}
+}
+
+// applyGlyphs picks the scope glyph set. Lives here rather than beside the
+// glyphs themselves because it shares applyTheme's lifecycle: both are the
+// tmux options read once at startup, and a test that pins one pins the other.
+func applyGlyphs(t Theme) {
+	if t.ASCIIGlyphs() {
+		glyphPane, glyphWindow = asciiGlyphPane, asciiGlyphWindow
+		glyphSession, glyphOther = asciiGlyphSession, asciiGlyphOther
+		return
+	}
+	glyphPane, glyphWindow = nerdGlyphPane, nerdGlyphWindow
+	glyphSession, glyphOther = nerdGlyphSession, nerdGlyphOther
 }
