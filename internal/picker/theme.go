@@ -71,9 +71,8 @@ func (t Theme) Lavender() color.Color { return t.color("@thm_lavender", "#b4befe
 
 // ASCIIGlyphs reports whether the scope glyphs should fall back to geometric
 // shapes, for a terminal whose font has no Nerd Font icons. Any value but
-// "off" turns it on: the option exists only to ask for the fallback, so
-// honouring "on" alone would leave `set -g @remux_ascii_glyphs 1` silently
-// doing nothing.
+// "off" counts — the option exists only to ask for the fallback, so there is
+// no spelling of it that should quietly do nothing.
 func (t Theme) ASCIIGlyphs() bool {
 	v := t.tmuxOpts["@remux_ascii_glyphs"]
 	return v != "" && v != "off"

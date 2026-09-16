@@ -85,9 +85,8 @@ func applyTheme(t Theme) {
 	}
 }
 
-// applyGlyphs picks the scope glyph set. Lives here rather than beside the
-// glyphs themselves because it shares applyTheme's lifecycle: both are the
-// tmux options read once at startup, and a test that pins one pins the other.
+// applyGlyphs picks the scope glyph set, read from the same tmux options as
+// the colours and pinned by the same applyTheme call a test makes.
 func applyGlyphs(t Theme) {
 	if t.ASCIIGlyphs() {
 		glyphPane, glyphWindow = asciiGlyphPane, asciiGlyphWindow

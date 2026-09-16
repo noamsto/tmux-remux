@@ -1308,7 +1308,7 @@ func TestRenderClosePreview_PaneWithoutScrollbackSaysSo(t *testing.T) {
 // reads the never-captured message, not the unqualified no-capture one — and
 // never blames min_save_interval, which FillScrollback's lookback has already
 // ruled out by the time a close is stored.
-func TestRenderClosePreview_ScrollbackSkippedSaysSo(t *testing.T) {
+func TestRenderClosePreview_SkippedPaneSaysNothingWasCaptured(t *testing.T) {
 	applyTheme(NewTheme())
 	sub := snapshot.Manifest{V: 1, ScrollbackSkipped: true, Sessions: []snapshot.Session{{
 		Name: "halo-nix-amd-ai",

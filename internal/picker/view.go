@@ -711,10 +711,9 @@ func columnAge(d time.Duration) string {
 // to spell out, and two title the list's sections. All are one cell wide, so
 // the columns after them line up down the list.
 //
-// Set by applyTheme, which picks the geometric set when @remux_ascii_glyphs
-// is on. The codicons carry the meaning far better, so they are the default;
-// the shapes are the escape hatch for a terminal with no Nerd Font, where
-// every one of them would otherwise paint as a tofu box.
+// Set by applyTheme, which swaps the codicons for the geometric set when
+// @remux_ascii_glyphs is on — on a terminal with no Nerd Font every one of
+// them paints as a tofu box.
 var (
 	glyphPane    string
 	glyphWindow  string

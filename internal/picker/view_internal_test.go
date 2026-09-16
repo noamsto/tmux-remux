@@ -1318,11 +1318,7 @@ func TestApplyGlyphs_ASCIIFallbackIsOptIn(t *testing.T) {
 func TestScopeGlyphs_AreOneCellWide(t *testing.T) {
 	t.Cleanup(func() { applyTheme(Theme{}) })
 
-	for _, ascii := range []bool{false, true} {
-		opt := "off"
-		if ascii {
-			opt = "on"
-		}
+	for _, opt := range []string{"off", "on"} {
 		applyGlyphs(Theme{tmuxOpts: map[string]string{"@remux_ascii_glyphs": opt}})
 		for _, g := range []string{glyphPane, glyphWindow, glyphSession, glyphOther} {
 			if w := lipgloss.Width(g); w != 1 {
