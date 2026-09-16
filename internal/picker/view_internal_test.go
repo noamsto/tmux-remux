@@ -1077,7 +1077,7 @@ func TestView_CloseListFrameGeometry(t *testing.T) {
 func TestRenderCloseList_PinsTheActiveSectionHeader(t *testing.T) {
 	m := closeListModel(t, 40)
 	m.width, m.height = 60, 20
-	header := sectionOther
+	header := sectionOther()
 
 	m.SetCursor(30)
 	lines := innerLines(t, renderCloseList(m, 60, 18))
@@ -1285,6 +1285,44 @@ func TestRenderCloseList_NeverOverflowsFrame(t *testing.T) {
 					t.Errorf("w=%d h=%d cursor=%d: height %d, want %d", size.w, size.h, cursor, got, size.h)
 				}
 				assertFrameCloses(t, out)
+			}
+		}
+	}
+}
+
+// The scope glyphs are Nerd Font codicons unless @remux_ascii_glyphs asks for
+// the geometric set, so a terminal with no Nerd Font gets shapes rather than a
+// column of tofu. Any value but "off" counts as asking.
+func TestApplyGlyphs_ASCIIFallbackIsOptIn(t *testing.T) {
+	t.Cleanup(func() { applyTheme(Theme{}) })
+
+	for _, tc := range []struct {
+		opt  string
+		want string
+	}{
+		{"", nerdGlyphPane},
+		{"off", nerdGlyphPane},
+		{"on", asciiGlyphPane},
+		{"1", asciiGlyphPane},
+	} {
+		applyGlyphs(Theme{tmuxOpts: map[string]string{"@remux_ascii_glyphs": tc.opt}})
+		if glyphPane != tc.want {
+			t.Errorf("@remux_ascii_glyphs=%q: pane glyph = %q, want %q", tc.opt, glyphPane, tc.want)
+		}
+	}
+}
+
+// Every glyph measures one cell, which is what lets the columns after the
+// scope column line up down the list. A two-cell glyph would shift every row
+// it appears on and push the age column past the frame.
+func TestScopeGlyphs_AreOneCellWide(t *testing.T) {
+	t.Cleanup(func() { applyTheme(Theme{}) })
+
+	for _, opt := range []string{"off", "on"} {
+		applyGlyphs(Theme{tmuxOpts: map[string]string{"@remux_ascii_glyphs": opt}})
+		for _, g := range []string{glyphPane, glyphWindow, glyphSession, glyphOther} {
+			if w := lipgloss.Width(g); w != 1 {
+				t.Errorf("@remux_ascii_glyphs=%q: glyph %q measures %d cells, want 1", opt, g, w)
 			}
 		}
 	}

@@ -43,6 +43,8 @@ var (
 func init() { applyTheme(Theme{}) }
 
 func applyTheme(t Theme) {
+	applyGlyphs(t)
+
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Surface1()).
@@ -81,4 +83,16 @@ func applyTheme(t Theme) {
 		closeRailStyles[i] = lipgloss.NewStyle().Foreground(a)
 		closeLabelStyles[i] = lipgloss.NewStyle().Foreground(t.Base()).Background(a).Bold(true)
 	}
+}
+
+// applyGlyphs picks the scope glyph set, read from the same tmux options as
+// the colours and pinned by the same applyTheme call a test makes.
+func applyGlyphs(t Theme) {
+	if t.ASCIIGlyphs() {
+		glyphPane, glyphWindow = asciiGlyphPane, asciiGlyphWindow
+		glyphSession, glyphOther = asciiGlyphSession, asciiGlyphOther
+		return
+	}
+	glyphPane, glyphWindow = nerdGlyphPane, nerdGlyphWindow
+	glyphSession, glyphOther = nerdGlyphSession, nerdGlyphOther
 }

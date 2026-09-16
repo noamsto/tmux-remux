@@ -50,7 +50,7 @@ func (r CloseRow) Selectable() bool {
 // Section titles. The current session is titled by its own name — the reader
 // already knows which session they are in, so the glyph is what says "this
 // one" — and everything else falls under one glyphed heading.
-const sectionOther = glyphOther + " other sessions"
+func sectionOther() string { return glyphOther + " other sessions" }
 
 func sectionThis(current string) string {
 	return glyphSession + " " + current
@@ -155,7 +155,7 @@ func BuildCloseList(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		out = append(out, finishCloseGroups(thisGroups)...)
 	}
 	if len(otherGroups) > 0 {
-		out = append(out, CloseRow{Kind: RowSectionHeader, Section: sectionOther})
+		out = append(out, CloseRow{Kind: RowSectionHeader, Section: sectionOther()})
 		out = append(out, finishCloseGroups(otherGroups)...)
 	}
 	return out

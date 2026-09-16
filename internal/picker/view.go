@@ -709,14 +709,29 @@ func columnAge(d time.Duration) string {
 
 // Scope glyphs. One opens every close row in place of the scope word it used
 // to spell out, and two title the list's sections. All are one cell wide, so
-// the columns after them line up down the list. The values are stand-ins for
-// the Nerd Font icons named beside them, which the picker cannot yet assume
-// the terminal has.
+// the columns after them line up down the list.
+//
+// Set by applyTheme, which swaps the codicons for the geometric set when
+// @remux_ascii_glyphs is on — on a terminal with no Nerd Font every one of
+// them paints as a tofu box.
+var (
+	glyphPane    string
+	glyphWindow  string
+	glyphSession string
+	glyphOther   string
+)
+
+// The two sets applyTheme chooses between, named by their Nerd Font glyph.
 const (
-	glyphPane    = "▪" // nerd: nf-cod-terminal
-	glyphWindow  = "◫" // nerd: nf-cod-window
-	glyphSession = "▣" // nerd: nf-cod-multiple_windows
-	glyphOther   = "◇" // nerd: nf-cod-layers
+	nerdGlyphPane    = "\uea85" // nf-cod-terminal
+	nerdGlyphWindow  = "\ueb7f" // nf-cod-window
+	nerdGlyphSession = "\ueb23" // nf-cod-multiple_windows
+	nerdGlyphOther   = "\uebd2" // nf-cod-layers
+
+	asciiGlyphPane    = "▪"
+	asciiGlyphWindow  = "◫"
+	asciiGlyphSession = "▣"
+	asciiGlyphOther   = "◇"
 )
 
 // scopeGlyph is the glyph for what a close row would restore, matching the
