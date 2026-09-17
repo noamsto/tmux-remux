@@ -22,3 +22,7 @@ coverage.txt
 # Worktrees
 /.worktrees/
 demo/bin/
+
+# Local tool output
+.superpowers/
+/.playwright-mcp/
