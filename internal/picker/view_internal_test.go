@@ -1339,3 +1339,32 @@ func TestRenderRow_DividerIsAFullWidthRule(t *testing.T) {
 		t.Errorf("divider = %q, want %q", got, want)
 	}
 }
+
+// The cursor row marks itself with a background, so it has to span the pane's
+// inner width — an unpadded row tints only as far as its text and reads as a
+// ragged tag rather than a selected row. Unfocused rows are left long for the
+// render loop to truncate, so this row is the only one that must arrive at
+// exactly the budget. Checked at a width that forces a cut and one that
+// does not.
+func TestAppendNodeRows_FocusedRowFillsInnerWidth(t *testing.T) {
+	applyTheme(Theme{})
+	tree := &TreeNode{Kind: NodeSession, Label: "session-one", Expanded: true, Children: []*TreeNode{
+		{Kind: NodeWindow, Label: "a-window-label-long-enough-to-be-cut", Expanded: true},
+		{Kind: NodeWindow, Label: "w2"},
+	}}
+
+	for _, innerWidth := range []int{12, 40} {
+		for focus := 0; focus < 3; focus++ {
+			var rows []string
+			idx := 0
+			appendNodeRows(&rows, tree, 0, &idx, focus, "s:skip", innerWidth)
+			if len(rows) != 3 {
+				t.Fatalf("width %d: got %d rows, want 3", innerWidth, len(rows))
+			}
+			if w := ansi.StringWidth(rows[focus]); w != innerWidth {
+				t.Errorf("width %d: focused row %d spans %d cells, want exactly %d:\n%q",
+					innerWidth, focus, w, innerWidth, rows[focus])
+			}
+		}
+	}
+}
