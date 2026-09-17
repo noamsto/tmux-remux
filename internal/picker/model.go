@@ -160,25 +160,12 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleKey(msg)
 	case tea.MouseWheelMsg:
-		if m.mode != ModeSnapshot {
+		return m, (&m).handleWheel(msg.Button, msg.X, msg.Y)
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			inner := m.paneScrollbackHeight()
-			maxScroll := m.previewMaxScroll(inner)
-			m.previewScroll += 3
-			if m.previewScroll > maxScroll {
-				m.previewScroll = maxScroll
-			}
-			return m, nil
-		case tea.MouseWheelDown:
-			m.previewScroll -= 3
-			if m.previewScroll < 0 {
-				m.previewScroll = 0
-			}
-			return m, nil
-		}
+		return m, (&m).handleClick(msg.X, msg.Y)
 	}
 	return m, nil
 }

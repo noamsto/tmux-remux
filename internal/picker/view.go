@@ -86,6 +86,25 @@ func (m PickerModel) View() tea.View {
 // renderFooter renders the footer bar with the keys that act on the current
 // mode and an optional transient warning note. Format: `key:value` pairs in lavender +
 // state color, separated by a dim "·" so the eye can lock onto each pair.
+// previewHintKey renders the four preview-pan bindings as one key label
+// ("M-hjkl") in h,j,k,l order, or "" when they are not all alt-bindings — a
+// rebind moved one — so the footer can fall back to naming a single direction.
+func previewHintKey(keys keyMap) string {
+	letters := make([]string, 0, 4)
+	for _, b := range []key.Binding{keys.PreviewLeft, keys.PreviewDown, keys.PreviewUp, keys.PreviewRight} {
+		for _, k := range b.Keys() {
+			if strings.HasPrefix(k, "alt+") {
+				letters = append(letters, strings.TrimPrefix(k, "alt+"))
+				break
+			}
+		}
+	}
+	if len(letters) != 4 {
+		return ""
+	}
+	return "M-" + strings.Join(letters, "")
+}
+
 func (m PickerModel) renderFooter(width int) string {
 	// Key/desc come from the bindings themselves, so a rebind can't leave the
 	// footer advertising a stale key.
@@ -102,6 +121,17 @@ func (m PickerModel) renderFooter(width int) string {
 		return footerKey.Render(h.Key) + footerSep.Render(":"+h.Desc)
 	}
 	sep := footerSep.Render(" · ")
+
+	// The four preview-pan directions are one gesture, so the footer spends a
+	// single slot on them ("M-hjkl:preview") instead of four; the per-direction
+	// list, PgUp/PgDn included, stays in the `?` overlay. The letters are read
+	// from the bindings, so a rebind can't leave the footer stale.
+	previewHint := func() string {
+		if label := previewHintKey(m.keys); label != "" {
+			return footerKey.Render(label) + footerSep.Render(":preview")
+		}
+		return hint(m.keys.PreviewUp)
+	}
 
 	var parts []string
 	// The three filter toggles and the pane counter are snapshot mode's alone;
@@ -125,7 +155,7 @@ func (m PickerModel) renderFooter(width int) string {
 		if m.mode == ModeSnapshot {
 			parts = append(parts, hint(m.keys.Tab))
 		}
-		parts = append(parts, hint(m.keys.PreviewUp))
+		parts = append(parts, previewHint())
 	}
 	line := strings.Join(parts, sep)
 	if m.footerNote != "" {
@@ -262,6 +292,23 @@ const closeListMin = 71
 // while a clipped row of the list has no such escape hatch.
 const closePreviewMax = closePreviewMin + 20
 
+// listWindow computes the snapshot list's scroll window and whether the
+// hidden-count footer is showing. renderList draws from it and mouse
+// hit-testing maps a clicked row through it, so the two cannot disagree.
+func (m PickerModel) listWindow(height int) (start, end, eventRows int, showFooter bool) {
+	rows := height - 2
+	if rows < 1 {
+		rows = 1
+	}
+	showFooter = m.hiddenCount > 0 && rows > 1
+	eventRows = rows
+	if showFooter {
+		eventRows--
+	}
+	start, end = scrollWindow(m.cursor, len(m.events), eventRows)
+	return start, end, eventRows, showFooter
+}
+
 func renderList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height).MaxHeight(height)
 	if len(m.events) == 0 {
@@ -277,16 +324,7 @@ func renderList(m PickerModel, width, height int) string {
 	// Inner content height = frame height − 2 (top+bottom border). Reserve the
 	// bottom line for the hidden-count footer, but only when there is more than
 	// one row — at the minimum height the lone row goes to events.
-	rows := height - 2
-	if rows < 1 {
-		rows = 1
-	}
-	showFooter := m.hiddenCount > 0 && rows > 1
-	eventRows := rows
-	if showFooter {
-		eventRows--
-	}
-	start, end := scrollWindow(m.cursor, len(m.events), eventRows)
+	start, end, eventRows, showFooter := m.listWindow(height)
 
 	var b strings.Builder
 	now := time.Now()
@@ -321,6 +359,31 @@ func renderList(m PickerModel, width, height int) string {
 	return frame.Render(b.String())
 }
 
+// closeListWindow computes renderCloseList's scroll window, pinned header and
+// row budget. Mouse hit-testing maps a clicked row through the same values.
+// Shrinking the window can only push start further down, so the pinned header
+// cannot come back into view and this settles in one pass.
+func (m PickerModel) closeListWindow(height int) (start, end, pin, rowBudget int, showFooter bool) {
+	rows := height - 2
+	if rows < 1 {
+		rows = 1
+	}
+	showFooter = m.hiddenCount > 0 && rows > 1
+	rowBudget = rows
+	if showFooter {
+		rowBudget--
+	}
+	start, end = scrollWindow(m.cursor, len(m.closeRows), rowBudget)
+	pin = sectionHeaderIdx(m.closeRows, m.cursor)
+	if pin >= start || rowBudget < 2 {
+		pin = -1
+	} else {
+		rowBudget--
+		start, end = scrollWindow(m.cursor, len(m.closeRows), rowBudget)
+	}
+	return start, end, pin, rowBudget, showFooter
+}
+
 // renderCloseList renders the flat close list into the list pane: one physical
 // row per CloseRow, the hidden-count footer pinned to the bottom, and — once
 // the cursor's own section header has scrolled off the top — that header
@@ -340,26 +403,7 @@ func renderCloseList(m PickerModel, width, height int) string {
 		return frame.Render(rowDim.Render(msg))
 	}
 
-	rows := height - 2
-	if rows < 1 {
-		rows = 1
-	}
-	showFooter := m.hiddenCount > 0 && rows > 1
-	rowBudget := rows
-	if showFooter {
-		rowBudget--
-	}
-
-	start, end := scrollWindow(m.cursor, len(m.closeRows), rowBudget)
-	// Shrinking the window can only push start further down, so the pinned
-	// header cannot come back into view and this settles in one pass.
-	pin := sectionHeaderIdx(m.closeRows, m.cursor)
-	if pin >= start || rowBudget < 2 {
-		pin = -1
-	} else {
-		rowBudget--
-		start, end = scrollWindow(m.cursor, len(m.closeRows), rowBudget)
-	}
+	start, end, pin, rowBudget, showFooter := m.closeListWindow(height)
 
 	v := newCloseListView(m.closeRows, m.closeContexts, m.runningSet, time.Now())
 	var b strings.Builder

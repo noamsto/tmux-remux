@@ -367,15 +367,15 @@ func TestPaneWidths_SnapshotModeKeepsThreeColumns(t *testing.T) {
 func TestRenderFooter_TabHintIsSnapshotOnly(t *testing.T) {
 	applyTheme(NewTheme())
 	tabKey := defaultKeys().Tab.Help().Key
-	scrollKey := defaultKeys().PreviewUp.Help().Key
+	scrollHint := previewHintKey(defaultKeys())
 
 	closeM := PickerModel{mode: ModeClose, keys: defaultKeys(), width: 160, height: 40}
 	foot := stripANSI(closeM.renderFooter(closeM.width))
 	if strings.Contains(foot, tabKey+":") {
 		t.Errorf("close footer advertises Tab (%q):\n%s", tabKey, foot)
 	}
-	if !strings.Contains(foot, scrollKey+":") {
-		t.Errorf("close footer dropped the preview-scroll hint (%q):\n%s", scrollKey, foot)
+	if !strings.Contains(foot, scrollHint+":") {
+		t.Errorf("close footer dropped the preview-scroll hint (%q):\n%s", scrollHint, foot)
 	}
 
 	snapM := PickerModel{mode: ModeSnapshot, keys: defaultKeys(), width: 160, height: 40}
@@ -383,8 +383,8 @@ func TestRenderFooter_TabHintIsSnapshotOnly(t *testing.T) {
 	if !strings.Contains(foot, tabKey+":") {
 		t.Errorf("snapshot footer dropped the Tab hint (%q):\n%s", tabKey, foot)
 	}
-	if !strings.Contains(foot, scrollKey+":") {
-		t.Errorf("snapshot footer dropped the preview-scroll hint (%q):\n%s", scrollKey, foot)
+	if !strings.Contains(foot, scrollHint+":") {
+		t.Errorf("snapshot footer dropped the preview-scroll hint (%q):\n%s", scrollHint, foot)
 	}
 }
 
@@ -1250,12 +1250,12 @@ func withHelpShown(m PickerModel) PickerModel {
 // widths where the flat list has no preview column beside it.
 func TestRenderFooter_StackedCloseListKeepsTheScrollHint(t *testing.T) {
 	applyTheme(NewTheme())
-	scrollKey := defaultKeys().PreviewUp.Help().Key
+	scrollHint := previewHintKey(defaultKeys())
 	m := closeListModel(t, 4)
 	m.width, m.height = 100, 40
 	foot := stripANSI(m.renderFooter(m.width))
-	if !strings.Contains(foot, scrollKey+":") {
-		t.Errorf("stacked close footer dropped the preview-scroll hint (%q):\n%s", scrollKey, foot)
+	if !strings.Contains(foot, scrollHint+":") {
+		t.Errorf("stacked close footer dropped the preview-scroll hint (%q):\n%s", scrollHint, foot)
 	}
 }
 
@@ -1303,6 +1303,7 @@ func TestApplyGlyphs_ASCIIFallbackIsOptIn(t *testing.T) {
 		{"", nerdGlyphPane},
 		{"off", nerdGlyphPane},
 		{"on", asciiGlyphPane},
+		{"ON", asciiGlyphPane},
 		{"1", asciiGlyphPane},
 	} {
 		applyGlyphs(Theme{tmuxOpts: map[string]string{"@remux_ascii_glyphs": tc.opt}})
