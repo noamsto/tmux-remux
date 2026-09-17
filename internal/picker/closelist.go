@@ -22,11 +22,13 @@ type ClosePlacement struct {
 // CloseRowKind identifies what a CloseRow represents in the flat list.
 type CloseRowKind int
 
-// Close-row kinds. RowSectionHeader introduces a section; RowClose is one
-// close event (or a collapsed run of duplicates).
+// Close-row kinds. RowSectionHeader introduces a section, RowDivider is the
+// rule between two sections, and RowClose is one close event (or a collapsed
+// run of duplicates).
 const (
 	RowSectionHeader CloseRowKind = iota
 	RowClose
+	RowDivider
 )
 
 // CloseRow is one row of the flat close list.
@@ -155,6 +157,12 @@ func BuildCloseList(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		out = append(out, finishCloseGroups(thisGroups)...)
 	}
 	if len(otherGroups) > 0 {
+		// The two sections are cut by one dim rule, so a reader scanning down
+		// the list sees where the current session's closes end instead of
+		// walking into another session's rows under a heading easy to miss.
+		if len(thisGroups) > 0 {
+			out = append(out, CloseRow{Kind: RowDivider})
+		}
 		out = append(out, CloseRow{Kind: RowSectionHeader, Section: sectionOther()})
 		out = append(out, finishCloseGroups(otherGroups)...)
 	}

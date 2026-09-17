@@ -1328,3 +1328,14 @@ func TestScopeGlyphs_AreOneCellWide(t *testing.T) {
 		}
 	}
 }
+
+// A row divider paints a dim rule across the whole pane, so the boundary
+// between two sections is visible without reading the header under it.
+func TestRenderRow_DividerIsAFullWidthRule(t *testing.T) {
+	applyTheme(NewTheme())
+	v := newCloseListView(nil, nil, nil, time.Now())
+	got := stripANSI(v.renderRow(CloseRow{Kind: RowDivider}, 40, false))
+	if want := strings.Repeat("─", 40); got != want {
+		t.Errorf("divider = %q, want %q", got, want)
+	}
+}
