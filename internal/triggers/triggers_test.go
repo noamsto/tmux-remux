@@ -117,6 +117,20 @@ func TestRender38EmitsMonitorSaveTick(t *testing.T) {
 	}
 }
 
+func TestRender39DropsTheInvalidSessionScope(t *testing.T) {
+	got := triggers.Render(triggers.Params{
+		Bin:         "tmux-remux",
+		Version:     tmux.Version{Major: 3, Minor: 9},
+		AutoRestore: true,
+	})
+	if !strings.Contains(got, `set-hook -g -B '@remux-save::#{T:@remux_save_tick}'`) {
+		t.Errorf("3.9 render missing the scope-less monitor hook:\n%s", got)
+	}
+	if strings.Contains(got, `@remux-save:session:`) {
+		t.Error("3.9 render kept the invalid `session` scope, which tmux rejects")
+	}
+}
+
 func TestRenderLegacyHasNoMonitor(t *testing.T) {
 	got := triggers.Render(triggers.Params{
 		Bin:         "tmux-remux",

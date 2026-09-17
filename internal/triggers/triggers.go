@@ -119,6 +119,15 @@ set-hook -g -B '@remux-save:session:#{T:@remux_save_tick}' 'run-shell -b "@BIN@ 
 
 `
 
+// monitorSave39 is the tmux 3.9+ spelling: a monitor's `what` field no longer
+// takes the bare `session` token (it takes an empty value, a pane id, or a
+// window id). The empty what keeps the global-monitor behaviour above.
+const monitorSave39 = `# Periodic snapshot floor (tmux 3.9 monitor hook — replaces an external timer)
+set -g @remux_save_tick '%M'
+set-hook -g -B '@remux-save::#{T:@remux_save_tick}' 'run-shell -b "@BIN@ save --reason=timer"'
+
+`
+
 const autoRestore = `# Auto-restore on tmux start
 run-shell -b '@BIN@ restore --auto'
 
@@ -143,7 +152,11 @@ func Render(p Params) string {
 	}
 	s.WriteString(saveHooks)
 	if modern {
-		s.WriteString(monitorSave)
+		if p.Version.AtLeast(3, 9) {
+			s.WriteString(monitorSave39)
+		} else {
+			s.WriteString(monitorSave)
+		}
 	}
 	s.WriteString(closeHooks)
 	if p.AutoRestore {
