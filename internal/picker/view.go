@@ -791,10 +791,14 @@ func scopeGlyph(scope string) string {
 }
 
 // renderRow renders one flat close row as a single line of exactly innerWidth
-// cells. Section headers render their text alone.
+// cells. Section headers render their text alone; a divider renders as a dim
+// rule across the pane.
 func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string {
 	if innerWidth < 1 {
 		innerWidth = 1
+	}
+	if r.Kind == RowDivider {
+		return rowDim.Render(strings.Repeat("─", innerWidth))
 	}
 	if !r.Selectable() {
 		return previewHeader.Width(innerWidth).Render(ansi.Truncate(r.Section, innerWidth, "…"))

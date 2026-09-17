@@ -332,3 +332,34 @@ func TestBuildCloseList_UnattributedCloseFallsBackToUnknownSession(t *testing.T)
 		t.Errorf("Session = %q, want %q", got, closeevent.UnknownSession)
 	}
 }
+
+// The two sections are cut by one dim rule, and only when both exist — a
+// divider above a lone section would separate it from nothing.
+func TestBuildCloseList_DividerOnlyBetweenTwoSections(t *testing.T) {
+	both := map[int64]picker.CloseContext{
+		1: windowCtx("mono", 1, "main", "claude", "/home/mono"),
+		2: windowCtx("lazytmux", 1, "shell", "fish", "/home/lazytmux"),
+	}
+	rows := picker.BuildCloseList([]store.Event{{ID: 1, Ts: 100}, {ID: 2, Ts: 200}}, both, "mono")
+
+	divs := 0
+	for i, r := range rows {
+		if r.Kind != picker.RowDivider {
+			continue
+		}
+		divs++
+		if i == 0 || i == len(rows)-1 || rows[i+1].Kind != picker.RowSectionHeader {
+			t.Errorf("divider at %d is not between a section's rows and the next header", i)
+		}
+	}
+	if divs != 1 {
+		t.Fatalf("dividers = %d, want exactly 1 between two sections", divs)
+	}
+
+	other := map[int64]picker.CloseContext{1: windowCtx("lazytmux", 1, "shell", "fish", "/home/lazytmux")}
+	for _, r := range picker.BuildCloseList([]store.Event{{ID: 1, Ts: 100}}, other, "mono") {
+		if r.Kind == picker.RowDivider {
+			t.Error("divider above a lone section")
+		}
+	}
+}
