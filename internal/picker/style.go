@@ -14,7 +14,6 @@ var (
 	treeFrame    lipgloss.Style
 	previewFrame lipgloss.Style
 
-	rowActive   lipgloss.Style
 	rowDefault  lipgloss.Style
 	rowDim      lipgloss.Style
 	nodeSession lipgloss.Style
@@ -38,7 +37,16 @@ var (
 	// told apart by colour without reading their labels.
 	closeRailStyles  []lipgloss.Style
 	closeLabelStyles []lipgloss.Style
+
+	rowFocusBg color.Color
 )
+
+// rowFocus marks a row as the cursor row, leaving its foreground alone: hue
+// says what a row is, weight says where the cursor is. An accent fill would
+// make that accent mean "selected" as well as whatever role it already names.
+func rowFocus(s lipgloss.Style) lipgloss.Style {
+	return s.Background(rowFocusBg).Bold(true)
+}
 
 func init() { applyTheme(Theme{}) }
 
@@ -53,7 +61,7 @@ func applyTheme(t Theme) {
 	treeFrame = border
 	previewFrame = border
 
-	rowActive = lipgloss.NewStyle().Foreground(t.Base()).Background(t.Mauve()).Bold(true)
+	rowFocusBg = t.Surface0()
 	rowDefault = lipgloss.NewStyle().Foreground(t.Text())
 	rowDim = lipgloss.NewStyle().Foreground(t.Overlay())
 
