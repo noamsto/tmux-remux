@@ -1,16 +1,26 @@
 version: 2
 builds:
-  - id: tmux-state
-    main: ./cmd/tmux-state
-    binary: tmux-state
+  - id: tmux-remux
+    main: ./cmd/tmux-remux
+    binary: tmux-remux
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
+      - -X main.Version={{ .Version }}
 archives:
-  - name_template: "tmux-state_{{ .Os }}_{{ .Arch }}"
+  - # load-bearing: tmux-remux.tmux builds its download URL from this exact
+    # pattern, and unpacks a `tmux-remux` binary out of the archive root.
+    name_template: "tmux-remux_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
 checksum:
   name_template: checksums.txt
+changelog:
+  # release-please owns the release notes; don't compute one we'd discard.
+  disable: true
+release:
+  # release-please creates the tag and GitHub release (with the changelog)
+  # before this runs; keep its notes and just attach the built archives.
+  mode: keep-existing

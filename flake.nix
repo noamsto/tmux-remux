@@ -40,6 +40,10 @@
           ++ pkgs.lib.optionals pkgs.stdenv.isDarwin ["--enable-jemalloc"];
         buildInputs = old.buildInputs ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [pkgs.jemalloc];
       });
+
+    # Single source of truth for the version, bumped by release-please on each
+    # release; goreleaser stamps the same tag into the release archives.
+    releaseVersion = (builtins.fromJSON (builtins.readFile ./.release-please-manifest.json)).".";
   in
     flake-parts.lib.mkFlake {inherit inputs;} {
       imports = [inputs.git-hooks-nix.flakeModule];
@@ -77,6 +81,7 @@
             pkgs.gopls
             pkgs.gotools
             pkgs.golangci-lint
+            pkgs.goreleaser
             (mkTmux pkgs)
             pkgs.fzf
             pkgs.sqlite
@@ -86,8 +91,9 @@
         packages = {
           default = pkgs.buildGoModule {
             pname = "tmux-remux";
-            version = "0.4.0";
+            version = releaseVersion;
             src = ./.;
+            ldflags = ["-s" "-w" "-X main.Version=${releaseVersion}"];
             vendorHash = "sha256-X4lsBbgkJ/81XHIXEVpp4Wy10cb6hbP//J3txGPvpJ4=";
             subPackages = ["cmd/tmux-remux"];
             doCheck = true;

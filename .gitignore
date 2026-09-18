@@ -1,6 +1,7 @@
 # Binaries
-/tmux-state
+/tmux-remux
 /result
+/dist/
 
 # Go
 *.test
