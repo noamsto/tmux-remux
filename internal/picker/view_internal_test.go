@@ -653,16 +653,13 @@ func TestCloseListRow_SubMinuteAgeIsStatic(t *testing.T) {
 }
 
 // TestCloseListRow_WidthLadder walks one row down the widths a real pane
-// passes through, pinning what survives at each step: the cwd column is
-// truncated from the left into its budget (the tail is what discriminates),
-// then dropped whole, then the command column goes, and the name is clipped
-// only down to a floor that still identifies a window.
+// passes through, pinning what survives at each step.
 //
-// #142 reordered the middle of the ladder. The columns are now padded to
-// widths the whole list shares, and the title pays for that padding first: it
-// is clipped down to its floor before the cwd is dropped, where the old
-// layout dropped the cwd before taking a cell from the name. The two ends are
-// unchanged.
+// #142 rewrote the ladder. The old layout truncated the cwd column from the
+// left into a quarter-row budget before giving it up; the grid shows a cwd
+// whole or not at all, so the title absorbs the pressure down to its floor
+// first, then the cwd goes — which hands the title its width back — then the
+// command column, and only past that does the title give ground again.
 func TestCloseListRow_WidthLadder(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -683,16 +680,15 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 		width int
 		want  string
 	}{
-		// 20-cell tail, quarter-row budget 30 capped at 24: the tail fits whole.
+		// The 20-cell tail is shown whole, and the title pads out the surplus.
 		{120, glyphPane + " wt/topic-branch-long release-notes-editor"},
-		// Quarter-row budget 19: one cell short, so the head goes, not the tail.
-		{76, glyphPane + " …/topic-branch-long release-notes-editor"},
-		// The title is what pays next, down to a floor of twelve cells.
-		{50, glyphPane + " …branch-long release-notes-e… claude → solo:1"},
-		// Only then does the column yield whole, handing the title its width
-		// back: at 44 the name is intact again in a row four cells narrower.
-		{44, glyphPane + " release-notes-editor"},
-		{40, glyphPane + " release-notes-edit… claude → solo:1"},
+		{76, glyphPane + " wt/topic-branch-long release-notes-editor"},
+		// The title is what pays first, down to a floor of twelve cells.
+		{60, glyphPane + " wt/topic-branch-long release-notes-edi… claude → solo:1"},
+		// Only then does the cwd yield, and it yields whole — never as a
+		// fragment. That hands the title back more width than it had at 60.
+		{50, glyphPane + " release-notes-editor"},
+		{34, glyphPane + " release-note… claude → solo:1"},
 		// The command column goes before the name is cut past its floor.
 		{28, glyphPane + " release-notes… → solo:1"},
 	}
@@ -707,9 +703,14 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 	}
 }
 
-// TestCloseListRow_CwdColumnNeedsRoomToMeanAnything: below eight cells a path
-// fragment says nothing a reader can act on, so the column is dropped rather
-// than shown as an ellipsis and a syllable.
+// TestCloseListRow_CwdColumnNeedsRoomToMeanAnything: the cwd column is the
+// first thing the row gives up, and it goes whole — a path shown as an
+// ellipsis and a syllable says nothing a reader can act on.
+//
+// #142 changed what triggers the drop. The old layout dropped the column once
+// a quarter of the row fell under eight cells; the grid drops it once keeping
+// it would push the title under its floor. The boundary for this fixture is
+// the same either way, which is what the two widths below pin.
 func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -730,13 +731,13 @@ func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 		return ansi.Strip(v.renderRow(r, w, false))
 	}
 
-	// A quarter of 32 is exactly the floor, and the whole 8-cell tail fits.
-	// #142 pads the title column, so the target no longer abuts the name.
+	// At 32 the 8-cell tail and a title at its exact floor both fit. #142 pads
+	// the title column, so the target no longer abuts the name.
 	if got := at(32); !strings.HasPrefix(got, glyphPane+" wt/topic a") || !strings.Contains(got, "→ s:1") {
 		t.Errorf("at 32 the column should hold the tail, got %q", got)
 	}
-	// A quarter of 30 is under it. The row has room to spare, so this is the
-	// floor talking, not the layout running out of width.
+	// Two cells narrower the title would go under the floor, so the column
+	// goes instead of the title being cut to make room for it.
 	if got := at(30); strings.Contains(got, "wt/topic") {
 		t.Errorf("at 30 the column should be dropped, got %q", got)
 	} else if !strings.HasPrefix(got, glyphPane+" a") || !strings.Contains(got, "→ s:1") {
@@ -844,7 +845,9 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 // before taking a single cell from the name; the grid lets the title absorb
 // the pressure down to its floor first, so at 50 the name is the column that
 // has been clipped and the cwd is still there. The cwd goes at 40, where
-// keeping it would push the title under that floor.
+// keeping it would push the title under that floor. This fixture's tail is
+// short enough to survive on its own merits — TestCloseListRow_WidthLadder
+// walks a tail long enough to be shed early.
 func TestCloseListRow_CwdYieldsBeforeTheName(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -1000,22 +1003,20 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 }
 
 // The narrowest side-by-side width is where the list is tightest, so it is
-// what sets the list's floor. A row there must still carry every column that
-// changes what Enter does: the cwd tail that says which of a session's
-// several directories this close was in, the name, the reopen target, and the
-// "(gone)" tag that says the target session has to be recreated rather than
-// reopened. The grid sheds columns in order as a row runs out of room, so a
+// what sets the list's floor. A row there must still carry the columns that
+// change what Enter does: the name, the "(gone)" tag that says the target
+// session has to be recreated rather than reopened, and the reopen target
+// itself. The grid sheds columns in order as a row runs out of room, so a
 // floor set a few cells lower silently drops one of them and the row reads as
-// a live session, or as the only close in its directory.
+// a live session. The check is on the longest row in the fixture, since that
+// is the one that sheds first.
 //
-// #142 put the "(gone)" tag inside the flex title column, and aligning the
-// columns costs the width the old flowing layout handed to whichever row
-// needed it. At this floor that buys alignment at the price of the tag on the
-// two longest-named rows, whose titles are clipped; it survives on the rest,
-// which is what the last check below pins. Giving the tag a column of its own
-// would hold it on every row — the grid has a badge column for exactly that
-// shape — and is worth weighing against the decoration columns competing for
-// the same slot.
+// #142 took the cwd tail off that list. The grid sizes a column to its widest
+// value and then shows it whole or sheds it, so the deepest path decides for
+// every row: this list's is 34 cells, which leaves the title under its floor
+// here and sheds the column — it needs 80 to survive. The old layout squeezed
+// long tails into a quarter-row budget instead, keeping a fragment at every
+// width. The preview still shows the cwd in full.
 func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	m.width, m.height = closeSideBySideMin, 40
@@ -1024,12 +1025,10 @@ func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.
 	for _, want := range []string{
 		// The command still sits against the arrow it belongs to.
 		"claude → mono:2",
-		// The longest-named row keeps the tail that says which of the
-		// session's directories it was in, and the target it reopens into.
-		"rvices/document test-runner-long-5",
+		// The longest-named row keeps its name and the tag that says its
+		// session has to be recreated, and it names the target it reopens into.
+		"test-runner-long-5  (gone)",
 		"→ nix-config:11",
-		// The tag survives wherever the name leaves room for it.
-		"(gone)",
 	} {
 		found := false
 		for _, l := range lines {
@@ -1039,51 +1038,6 @@ func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.
 		}
 		if !found {
 			t.Errorf("no row reads %q in a %d-cell list:\n%s", want, listW, strings.Join(lines, "\n"))
-		}
-	}
-}
-
-// The cwd column is cut from the left, since the end of a path is what
-// discriminates. A cut that lands mid-segment reads as a mangled word rather
-// than a path, so it is nudged forward to the next "/" — but only while that
-// is cheap: giving up a long leading segment whole costs more than the ragged
-// edge does. Either way the column is exactly as wide as it was asked for,
-// which is what keeps the row's other columns where layoutRow put them.
-func TestFitCwd_PrefersAPathBoundary(t *testing.T) {
-	for _, tc := range []struct {
-		tail  string
-		width int
-		want  string
-	}{
-		{"noamsto/tmux-remux", 22, "noamsto/tmux-remux    "},
-		{"noamsto/tmux-remux", 14, "…/tmux-remux  "},
-		{"noamsto/tmux-remux/internal/picker", 18, "…/internal/picker "},
-		// Snapping here would drop "services" as well — eight of eighteen
-		// cells — so the ragged cut is the lesser loss.
-		{"factify/services/document", 18, "…services/document"},
-	} {
-		if got := fitCwd(tc.tail, tc.width); got != tc.want {
-			t.Errorf("fitCwd(%q, %d) = %q, want %q", tc.tail, tc.width, got, tc.want)
-		}
-	}
-}
-
-// A double-width rune straddling the truncation cut can leave the cut one
-// cell over budget; fitCwd must still land on exactly width cells rather than
-// panicking on a negative strings.Repeat count. Covers cwdColumnWidth's whole
-// production range (8-24) against tails with CJK and emoji runes.
-func TestFitCwd_ExactWidthAcrossWideRunes(t *testing.T) {
-	for _, tail := range []string{
-		"git/日本語プロジェクト/internal",
-		"emoji/📁folder/sub",
-		"noamsto/tmux-remux/internal/picker",
-		"factify/services/document",
-	} {
-		for width := 8; width <= 24; width++ {
-			got := fitCwd(tail, width)
-			if w := lipgloss.Width(got); w != width {
-				t.Errorf("fitCwd(%q, %d) = %q, width %d, want %d", tail, width, got, w, width)
-			}
 		}
 	}
 }

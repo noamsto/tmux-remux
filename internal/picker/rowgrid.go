@@ -185,6 +185,6 @@ func clipLeft(s string, width int) string {
 		return s
 	}
 	// A double-width rune straddling the cut can leave TruncateLeft one cell
-	// over budget; the re-truncate clamps it back, as fitCwd does.
+	// over budget; the re-truncate clamps it back, as clipName does.
 	return ansi.Truncate(ansi.TruncateLeft(s, w-width+1, "…"), width, "")
 }

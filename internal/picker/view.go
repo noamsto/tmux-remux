@@ -279,15 +279,16 @@ func closeListWidth(width int) int {
 }
 
 // closeListMin is the close list's floor, read off rendered output for a list
-// whose rows carry every column — including the cwd tail, which only appears
-// when a session's closes are not all in one directory. Below it the grid
-// starts shedding those columns and a row reads as a live session, or as the
-// only close in its directory: on the list
+// whose rows carry every column. Below it the grid starts shedding them and a
+// row reads as a live session rather than one whose target has to be
+// recreated: on the list
 // TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit measures,
-// the longest row holds its cwd down to 62 and its reopen target down to 40.
-// Aligning the columns costs width the flowing layout used to hand to
-// whichever row needed it, so the margin here is thinner than the four cells
-// this was set with.
+// the "(gone)" tag holds down to 38 and the reopen target below that.
+//
+// #142 put the cwd tail out of this floor's reach. The grid shows a tail
+// whole or sheds it, and that list's deepest path needs 80 cells to survive,
+// where the old layout squeezed it into a quarter of the row at any width. A
+// close's directory is now the preview's to show, not the floor's to promise.
 const closeListMin = 71
 
 // closePreviewMax is the widest the close preview grows before its surplus is
@@ -665,23 +666,12 @@ func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[str
 		modal[session] = modalCwd(byCwd)
 		base[session] = commonPathPrefix(byCwd)
 	}
-	// The grid sizes a column to its widest value and then takes it whole or
-	// not at all, so a tail is capped here rather than left to the grid: one
-	// deep path would otherwise be the reason every row loses its cwd. A
-	// quarter of the row and never more than 24 cells, and below eight a path
-	// fragment says nothing a reader can act on, so no tail is emitted at all
-	// and the column vanishes.
-	budget := min(innerWidth/4, 24)
 	for _, r := range rows {
 		cwd, ok := cwds[r.EventID]
-		if !ok || cwd == modal[r.Session] || budget < 8 {
+		if !ok || cwd == modal[r.Session] {
 			continue
 		}
-		tail := cwdTail(cwd, base[r.Session])
-		if lipgloss.Width(tail) > budget {
-			tail = fitCwd(tail, budget)
-		}
-		v.tails[r.EventID] = tail
+		v.tails[r.EventID] = cwdTail(cwd, base[r.Session])
 	}
 
 	cells := make([]closeCells, 0, len(rows))
@@ -910,7 +900,7 @@ func clipName(name string, width int) string {
 		return ansi.Truncate(name, width, "…")
 	}
 	// A double-width rune straddling the cut can leave TruncateLeft one cell
-	// over budget; the re-truncate clamps it back, as fitCwd does.
+	// over budget; the re-truncate clamps it back, as clipLeft does.
 	return ansi.Truncate(ansi.TruncateLeft(name, w-width+1, "…"), width, "")
 }
 
@@ -924,31 +914,6 @@ func hasGlyphRun(name string) bool {
 		}
 	}
 	return false
-}
-
-// fitCwd pads or left-truncates a tail to exactly width cells. Truncation is
-// from the left, since the tail is what discriminates. A cut that lands
-// mid-segment ("…sto/tmux-remux") reads as a mangled word rather than a path,
-// so the cut is nudged forward to the next "/" when that costs only a few
-// more cells — past that the segment is long enough that losing it whole
-// gives up more than the ragged edge does.
-func fitCwd(tail string, width int) string {
-	w := lipgloss.Width(tail)
-	if w <= width {
-		return tail + strings.Repeat(" ", width-w)
-	}
-	cut := ansi.TruncateLeft(tail, w-width+1, "…")
-	if i := strings.IndexByte(cut, '/'); i > 0 && lipgloss.Width(cut[:i]) <= 6 {
-		cut = "…" + cut[i:]
-	}
-	// A double-width rune straddling the TruncateLeft cut can leave it one
-	// cell over width; clamp before padding so the Repeat count never goes
-	// negative.
-	cut = ansi.Truncate(cut, width, "")
-	if pad := width - lipgloss.Width(cut); pad > 0 {
-		cut += strings.Repeat(" ", pad)
-	}
-	return cut
 }
 
 // closeRowScopeStyle colours a close row by what it would restore, matching
