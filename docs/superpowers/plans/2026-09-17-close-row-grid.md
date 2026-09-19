@@ -528,17 +528,26 @@ func TestCloseGrid_ReportsCommandRange(t *testing.T) {
 	}
 }
 
-// A row whose command was shed reports no range, or StyleRanges would recolour
-// whatever slid into those cells.
-func TestCloseGrid_NoCommandRangeWhenShed(t *testing.T) {
+// A row whose command was shed must report no range, or StyleRanges would
+// recolour whatever slid into those cells. Swept across widths rather than
+// probed at one: a single width that happens to keep the command would make
+// this assert nothing, so the sweep also proves the shed case occurred.
+func TestCloseGrid_CommandRangeOnlyWhenCommandRendered(t *testing.T) {
 	rows := sampleRows()
-	g := newCloseGrid(rows, 24)
-	line, start, _ := g.render(rows[0])
-	if strings.Contains(ansi.Strip(line), "claude") {
-		t.Skip("command survived at this width; nothing to assert")
+	sawShed := false
+	for w := 20; w <= 160; w++ {
+		g := newCloseGrid(rows, w)
+		line, start, _ := g.render(rows[0])
+		if strings.Contains(ansi.Strip(line), "claude") {
+			continue
+		}
+		sawShed = true
+		if start >= 0 {
+			t.Errorf("width %d: range %d reported for a shed command", w, start)
+		}
 	}
-	if start >= 0 {
-		t.Errorf("command range %d reported for a shed command", start)
+	if !sawShed {
+		t.Fatal("command never shed across the sweep — widen it so this test has teeth")
 	}
 }
 ```
@@ -797,7 +806,7 @@ Expected: FAIL — the arrow column differs per row under the current `layoutRow
 
 - [ ] **Step 3: Write the implementation**
 
-In `internal/picker/view.go`, replace the `widest` field on `closeListView` with the row's extracted cells. The grid itself is *not* stored: column widths depend on `innerWidth`, which is not known until render time, so `renderRow` resolves the grid per width from these cells.
+In `internal/picker/view.go`, replace the `widest` field on `closeListView` with the grid, resolved once for the whole list. `newCloseListView` gains an `innerWidth` parameter — the sole caller at `view.go:408` already has it in scope, and resolving per row instead would rescan every row's cells for every row drawn.
 
 ```go
 type closeListView struct {
@@ -805,22 +814,30 @@ type closeListView struct {
 	live  map[string]bool
 	now   time.Time
 	tails map[int64]string // EventID → cwd tail; absent when elided
-	// allCells is every selectable row's column values, so the grid can size
-	// each column to the widest value in the whole list rather than per row.
-	allCells []closeCells
+	// grid is resolved once for the list, so every row shares one set of
+	// column widths — that shared resolution is what makes the columns align.
+	grid closeGrid
 }
 ```
 
-At the end of `newCloseListView`, after the `tails` loop, delete the `widest` tracking and extract the cells instead:
+Change the signature to `newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time, cols []config.DecorationColumn, innerWidth int) closeListView`. The `cols` parameter is unused until Task 5; accept it now so the signature churn happens once.
+
+At the end of `newCloseListView`, after the `tails` loop, delete the `widest` tracking and resolve the grid:
 
 ```go
+	cells := make([]closeCells, 0, len(rows))
 	for _, r := range rows {
 		if r.Selectable() {
-			v.allCells = append(v.allCells, v.cells(r))
+			cells = append(cells, v.cells(r))
 		}
 	}
+	v.grid = newCloseGrid(cells, innerWidth)
 	return v
 ```
+
+Update the call site at `view.go:408` to `newCloseListView(m.closeRows, m.closeContexts, m.runningSet, time.Now(), m.decorationColumns, innerWidth)` — add the `decorationColumns` field to `PickerModel` now (Task 5 adds its setter), defaulting to nil.
+
+Every existing `newCloseListView(...)` call in `view_internal_test.go` (about ten of them) needs the two new arguments. Pass `nil` for `cols` and a width matching what that test renders at.
 
 Add the extraction function and rewrite `renderRow`:
 
@@ -879,8 +896,7 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 		return previewHeader.Width(innerWidth).Render(ansi.Truncate(r.Section, innerWidth, "…"))
 	}
 
-	g := newCloseGrid(v.allCells, innerWidth)
-	line, cmdStart, cmdEnd := g.render(v.cells(r))
+	line, cmdStart, cmdEnd := v.grid.render(v.cells(r))
 
 	// One flat style over plain text, then StyleRanges punches in the
 	// command's own colour: lipgloss v2 resets to the terminal default (not
@@ -1285,4 +1301,8 @@ Then run the `/deslop` skill over the branch before pushing (the pre-push hook e
 
 **Type consistency:** `closeCells` field names (`glyph`, `cwd`, `id`, `title`, `badge`, `cmd`, `target`, `age`) are used identically in Tasks 3, 4 and 5. `config.RoleID`/`RoleBadge`/`RoleText` are spelled the same in Tasks 1 and 5. `newCloseGrid(rows, innerWidth)` and `render(c) (string, int, int)` match between definition (3) and both call sites (4, 5). `CaptureOptions()` is defined in 1 and called in 2.
 
-**Note on grid lifetime:** `closeListView` stores `allCells`, never a resolved `closeGrid`. Column widths depend on `innerWidth`, which the view does not know until `renderRow` is called, so the grid is resolved per render from the cells. `newCloseGrid` is a pure width calculation over a slice the view already holds, so this is cheap.
+**Note on grid lifetime:** the grid is resolved exactly once per list, in `newCloseListView`, and every row renders against it. That shared resolution is what makes columns align; resolving per row would both cost a rescan of all cells per row drawn and, worse, let a column's width differ between rows.
+
+**Pre-flight corrections to this plan** (made before execution, after the drafted code was checked against the call sites):
+- `newCloseListView` takes `innerWidth` and stores the resolved grid. An earlier draft stored raw cells and re-resolved inside `renderRow`, which was O(rows²) per frame for no benefit — `view.go:408` already has `innerWidth` in scope.
+- `TestCloseGrid_CommandRangeOnlyWhenCommandRendered` replaced a single-width probe that called `t.Skip` when the command survived. A test that can skip its only assertion asserts nothing; the sweep asserts at every width and fails loudly if the shed case never occurs.
