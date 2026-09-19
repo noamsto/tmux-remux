@@ -276,7 +276,9 @@ func TestModel_CloseModeShowsHiddenCountLine(t *testing.T) {
 	if !strings.Contains(out, "14 unrecoverable closes hidden") {
 		t.Errorf("expected hidden-count line, got:\n%s", out)
 	}
-	if !strings.Contains(out, "win → mono:4") {
+	// #142 pads the title column to the list's flex width, so the name no
+	// longer abuts its reopen target.
+	if !strings.Contains(out, "win") || !strings.Contains(out, "→ mono:4") {
 		t.Errorf("recoverable row should still render, got:\n%s", out)
 	}
 }

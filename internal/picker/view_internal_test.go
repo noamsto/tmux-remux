@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -267,7 +268,7 @@ func TestCloseListRow_CommandHasItsOwnColour(t *testing.T) {
 	applyTheme(Theme{}) // deterministic Mocha fallback colors
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
-	v := newCloseListView(rows, ctxs, live, now)
+	v := newCloseListView(rows, ctxs, live, now, nil, 76)
 	row := rowByEvent(t, rows, 1) // pane close: window "main", command "claude".
 
 	for _, active := range []bool{false, true} {
@@ -500,13 +501,26 @@ func rowByEvent(t *testing.T, rows []CloseRow, id int64) CloseRow {
 // is what the close was in), name, extra, target, then a right-aligned count
 // and age. The cwd column is as wide as the widest tail in the list — 11 for
 // "wt/feat-104" — so a row that elides it still pads to keep names aligned.
+//
+// #142 changed the arrangement: every column is now padded to one width shared
+// by the whole list rather than joined with single spaces, so the name, the
+// command and the target each start at the same cell on every row. The command
+// is right-aligned against the arrow, which is what keeps the "claude → mono:2"
+// pairing the old flowing layout produced.
 func TestCloseListRow_Columns(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
-	v := newCloseListView(rows, ctxs, live, now)
+	v := newCloseListView(rows, ctxs, live, now, nil, 76)
 
+	// The list's shared widths at 76: 11 for the cwd ("wt/feat-104"), 26 for
+	// the flex title, 6 for the command ("claude"), 18 for the target
+	// ("→ tp-g6-nix-config"), 6 for the age ("×2 18h").
 	blankCwd := strings.Repeat(" ", 11)
+	title := func(s string) string { return s + strings.Repeat(" ", 29-lipgloss.Width(s)) }
+	cmd := func(s string) string { return strings.Repeat(" ", 6-len(s)) + s }
+	target := func(s string) string { return s + strings.Repeat(" ", 18-lipgloss.Width(s)) }
+	age := func(s string) string { return strings.Repeat(" ", 6-lipgloss.Width(s)) + s }
 	tests := []struct {
 		name string
 		id   int64
@@ -515,22 +529,22 @@ func TestCloseListRow_Columns(t *testing.T) {
 		{
 			name: "pane close in the session's modal cwd",
 			id:   1,
-			want: glyphPane + " " + blankCwd + " main claude → mono:2" + strings.Repeat(" ", 40) + "4m",
+			want: glyphPane + " " + blankCwd + " " + title("main") + " " + cmd("claude") + " " + target("→ mono:2") + " " + age("4m"),
 		},
 		{
 			name: "collapsed two-pane window close",
 			id:   2,
-			want: glyphWindow + " " + blankCwd + " docs 2p → mono:3" + strings.Repeat(" ", 40) + "×2 18h",
+			want: glyphWindow + " " + blankCwd + " " + title("docs  2p") + " " + cmd("") + " " + target("→ mono:3") + " " + age("×2 18h"),
 		},
 		{
 			name: "worktree close shows the discriminating tail",
 			id:   4,
-			want: glyphPane + " wt/feat-104 code claude → mono:4" + strings.Repeat(" ", 40) + "2d",
+			want: glyphPane + " wt/feat-104 " + title("code") + " " + cmd("claude") + " " + target("→ mono:4") + " " + age("2d"),
 		},
 		{
 			name: "session close names its window count and targets the session",
 			id:   5,
-			want: glyphSession + " " + blankCwd + " 3w (gone) → tp-g6-nix-config" + strings.Repeat(" ", 31) + "45m",
+			want: glyphSession + " " + blankCwd + " " + title("3w  (gone)") + " " + cmd("") + " " + target("→ tp-g6-nix-config") + " " + age("45m"),
 		},
 	}
 	for _, tt := range tests {
@@ -550,7 +564,7 @@ func TestCloseListRow_HeaderIsItsTitleAlone(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
-	v := newCloseListView(rows, ctxs, live, now)
+	v := newCloseListView(rows, ctxs, live, now, nil, 76)
 	got := strings.TrimRight(ansi.Strip(v.renderRow(rows[0], 76, false)), " ")
 	if want := glyphSession + " mono"; got != want {
 		t.Errorf("header row = %q, want %q", got, want)
@@ -571,7 +585,7 @@ func TestCloseListRow_ModalCwdIsNotTheSessionName(t *testing.T) {
 		2: paneCloseCtx("tp-g6-nix-config", 2, "shell", "claude", "/home/noams/nix-config"),
 	}
 	rows := BuildCloseList(evs, ctxs, "tp-g6-nix-config")
-	v := newCloseListView(rows, ctxs, map[string]bool{"tp-g6-nix-config": true}, now)
+	v := newCloseListView(rows, ctxs, map[string]bool{"tp-g6-nix-config": true}, now, nil, 76)
 	for _, r := range rows {
 		if !r.Selectable() {
 			continue
@@ -597,15 +611,20 @@ func TestCloseListRow_TieHasNoModalCwd(t *testing.T) {
 		2: paneCloseCtx("duo", 2, "feat", "claude", "/home/noams/git/wt/feat-104"),
 	}
 	rows := BuildCloseList(evs, ctxs, "duo")
-	v := newCloseListView(rows, ctxs, map[string]bool{"duo": true}, now)
+	v := newCloseListView(rows, ctxs, map[string]bool{"duo": true}, now, nil, 76)
+	// #142 pads the title column, so the name no longer abuts its command and
+	// target; the cwd tail and the name are still the row's opening columns.
 	want := map[int64]string{
-		1: glyphPane + " tmux-remux  main claude → duo:1",
-		2: glyphPane + " wt/feat-104 feat claude → duo:2",
+		1: glyphPane + " tmux-remux  main",
+		2: glyphPane + " wt/feat-104 feat",
 	}
 	for id, prefix := range want {
 		got := ansi.Strip(v.renderRow(rowByEvent(t, rows, id), 76, false))
 		if !strings.HasPrefix(got, prefix) {
 			t.Errorf("row %d = %q, want prefix %q", id, got, prefix)
+		}
+		if reopen := fmt.Sprintf("claude → duo:%d", id); !strings.Contains(got, reopen) {
+			t.Errorf("row %d = %q, want it to contain %q", id, got, reopen)
 		}
 		if strings.Contains(got, "/home/noams") {
 			t.Errorf("row %d spends the column on the shared prefix: %q", id, got)
@@ -626,7 +645,7 @@ func TestCloseListRow_SubMinuteAgeIsStatic(t *testing.T) {
 	evs := []store.Event{{ID: 1, Ts: now.Add(-47 * time.Second).UnixMilli()}}
 	ctxs := map[int64]CloseContext{1: paneCloseCtx("mono", 1, "edit", "nvim", "/home/noams")}
 	rows := BuildCloseList(evs, ctxs, "mono")
-	v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now)
+	v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now, nil, 76)
 	got := ansi.Strip(v.renderRow(rowByEvent(t, rows, 1), 76, false))
 	if !strings.HasSuffix(got, "<1m") || strings.Contains(got, "just") {
 		t.Errorf("age column = %q, want it to end in %q", got, "<1m")
@@ -635,9 +654,15 @@ func TestCloseListRow_SubMinuteAgeIsStatic(t *testing.T) {
 
 // TestCloseListRow_WidthLadder walks one row down the widths a real pane
 // passes through, pinning what survives at each step: the cwd column is
-// truncated from the left (the tail is what discriminates), then dropped
-// whole, then the extra column goes, and the name is clipped only after that
-// — never below the eight cells that still identify a window.
+// truncated from the left into its budget (the tail is what discriminates),
+// then dropped whole, then the command column goes, and the name is clipped
+// only down to a floor that still identifies a window.
+//
+// #142 reordered the middle of the ladder. The columns are now padded to
+// widths the whole list shares, and the title pays for that padding first: it
+// is clipped down to its floor before the cwd is dropped, where the old
+// layout dropped the cwd before taking a cell from the name. The two ends are
+// unchanged.
 func TestCloseListRow_WidthLadder(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -652,7 +677,6 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 		3: paneCloseCtx("solo", 3, "sh", "claude", "/srv/app/main"),
 	}
 	rows := BuildCloseList(evs, ctxs, "solo")
-	v := newCloseListView(rows, ctxs, map[string]bool{"solo": true}, now)
 	r := rowByEvent(t, rows, 1)
 
 	tests := []struct {
@@ -660,17 +684,21 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 		want  string
 	}{
 		// 20-cell tail, quarter-row budget 30 capped at 24: the tail fits whole.
-		{120, glyphPane + " wt/topic-branch-long release-notes-editor claude → solo:1"},
+		{120, glyphPane + " wt/topic-branch-long release-notes-editor"},
 		// Quarter-row budget 19: one cell short, so the head goes, not the tail.
-		{76, glyphPane + " …/topic-branch-long release-notes-editor claude → solo:1"},
-		// The column no longer fits beside the name, and yields whole.
-		{50, glyphPane + " release-notes-editor claude → solo:1"},
+		{76, glyphPane + " …/topic-branch-long release-notes-editor"},
+		// The title is what pays next, down to a floor of twelve cells.
+		{50, glyphPane + " …branch-long release-notes-e… claude → solo:1"},
+		// Only then does the column yield whole, handing the title its width
+		// back: at 44 the name is intact again in a row four cells narrower.
+		{44, glyphPane + " release-notes-editor"},
 		{40, glyphPane + " release-notes-edit… claude → solo:1"},
-		// The extra column goes before the name is cut past its floor.
-		{28, glyphPane + " release… → solo:1"},
+		// The command column goes before the name is cut past its floor.
+		{28, glyphPane + " release-notes… → solo:1"},
 	}
 	for _, tt := range tests {
 		t.Run(strconv.Itoa(tt.width), func(t *testing.T) {
+			v := newCloseListView(rows, ctxs, map[string]bool{"solo": true}, now, nil, tt.width)
 			got := strings.TrimRight(ansi.Strip(v.renderRow(r, tt.width, false)), " ")
 			if !strings.HasPrefix(got, tt.want) {
 				t.Errorf("w=%d:\n got %q\nwant prefix %q", tt.width, got, tt.want)
@@ -696,17 +724,23 @@ func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 		3: paneCloseCtx("s", 3, "c", "fish", "/srv/app/main"),
 	}
 	rows := BuildCloseList(evs, ctxs, "s")
-	v := newCloseListView(rows, ctxs, map[string]bool{"s": true}, now)
 	r := rowByEvent(t, rows, 1)
+	at := func(w int) string {
+		v := newCloseListView(rows, ctxs, map[string]bool{"s": true}, now, nil, w)
+		return ansi.Strip(v.renderRow(r, w, false))
+	}
 
 	// A quarter of 32 is exactly the floor, and the whole 8-cell tail fits.
-	if got := ansi.Strip(v.renderRow(r, 32, false)); !strings.HasPrefix(got, glyphPane+" wt/topic a → s:1") {
+	// #142 pads the title column, so the target no longer abuts the name.
+	if got := at(32); !strings.HasPrefix(got, glyphPane+" wt/topic a") || !strings.Contains(got, "→ s:1") {
 		t.Errorf("at 32 the column should hold the tail, got %q", got)
 	}
 	// A quarter of 30 is under it. The row has room to spare, so this is the
 	// floor talking, not the layout running out of width.
-	if got := ansi.Strip(v.renderRow(r, 30, false)); !strings.HasPrefix(got, glyphPane+" a → s:1") {
+	if got := at(30); strings.Contains(got, "wt/topic") {
 		t.Errorf("at 30 the column should be dropped, got %q", got)
+	} else if !strings.HasPrefix(got, glyphPane+" a") || !strings.Contains(got, "→ s:1") {
+		t.Errorf("at 30 the row should still name its window and target, got %q", got)
 	}
 }
 
@@ -720,9 +754,9 @@ func TestCloseListRow_GlyphDenseNameTruncatesCleanly(t *testing.T) {
 	evs := []store.Event{{ID: 1, Ts: now.UnixMilli()}}
 	ctxs := map[int64]CloseContext{1: paneCloseCtx("mono", 7, glyphy, "claude", "/home/noams/git/tmux-remux")}
 	rows := BuildCloseList(evs, ctxs, "mono")
-	v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now)
 	r := rowByEvent(t, rows, 1)
 	for _, w := range []int{30, 40, 50, 76} {
+		v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now, nil, w)
 		out := v.renderRow(r, w, false)
 		plain := ansi.Strip(out)
 		if strings.Contains(plain, "#[") {
@@ -749,8 +783,8 @@ func TestCloseListRow_AlwaysOneLineOfExactWidth(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
-	v := newCloseListView(rows, ctxs, live, now)
 	for _, w := range []int{8, 12, 20, 30, 46, 60, 76, 120} {
+		v := newCloseListView(rows, ctxs, live, now, nil, w)
 		for _, r := range rows {
 			for _, active := range []bool{false, true} {
 				out := v.renderRow(r, w, active)
@@ -777,7 +811,7 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 		2: windowCloseCtx("gone-one", 2, "work", "claude", "/home/noams", 2),
 	}
 	rows := BuildCloseList(evs, ctxs, "mono")
-	v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now)
+	v := newCloseListView(rows, ctxs, map[string]bool{"mono": true}, now, nil, 76)
 
 	defaults := ansi.Strip(v.renderRow(rowByEvent(t, rows, 1), 76, false))
 	for _, unwanted := range []string{"fish", "1p", "(gone)"} {
@@ -785,8 +819,12 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 			t.Errorf("default %q should be elided, got %q", unwanted, defaults)
 		}
 	}
-	if want := glyphWindow + " shell → mono:1"; !strings.HasPrefix(defaults, want) {
+	// #142 pads the title column, so the target no longer abuts the name.
+	if want := glyphWindow + " shell"; !strings.HasPrefix(defaults, want) {
 		t.Errorf("row = %q, want prefix %q", defaults, want)
+	}
+	if !strings.Contains(defaults, "→ mono:1") {
+		t.Errorf("row = %q, want it to name its reopen target", defaults)
 	}
 
 	notable := ansi.Strip(v.renderRow(rowByEvent(t, rows, 2), 76, false))
@@ -798,9 +836,15 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 }
 
 // TestCloseListRow_CwdYieldsBeforeTheName: when the row will not fit, the cwd
-// column is given up whole before a single cell is taken from the name. A
-// name clipped mid-glyph-run loses the words that identify the window; a
-// dropped cwd column loses a path the preview still shows.
+// column is given up whole rather than squeezed into a fragment. A path shown
+// as an ellipsis and a syllable loses what it was there to say, and the
+// preview shows it in full anyway.
+//
+// #142 changed when it yields, not how. The old layout dropped the column
+// before taking a single cell from the name; the grid lets the title absorb
+// the pressure down to its floor first, so at 50 the name is the column that
+// has been clipped and the cwd is still there. The cwd goes at 40, where
+// keeping it would push the title under that floor.
 func TestCloseListRow_CwdYieldsBeforeTheName(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -816,20 +860,34 @@ func TestCloseListRow_CwdYieldsBeforeTheName(t *testing.T) {
 		3: paneCloseCtx("solo", 3, "sh", "claude", "/srv/app/main"),
 	}
 	rows := BuildCloseList(evs, ctxs, "solo")
-	v := newCloseListView(rows, ctxs, map[string]bool{"solo": true}, now)
 	r := rowByEvent(t, rows, 1)
+	at := func(w int) string {
+		v := newCloseListView(rows, ctxs, map[string]bool{"solo": true}, now, nil, w)
+		return ansi.Strip(v.renderRow(r, w, false))
+	}
 
-	wide := ansi.Strip(v.renderRow(r, 76, false))
+	wide := at(76)
 	if !strings.Contains(wide, "wt/topic") || !strings.Contains(wide, name) {
 		t.Fatalf("at 76 both columns fit; got %q", wide)
 	}
-	// At 50 they do not both fit. The cwd column is the one that goes.
-	tight := ansi.Strip(v.renderRow(r, 50, false))
-	if strings.Contains(tight, "wt/topic") {
-		t.Errorf("cwd column should be dropped at 50, got %q", tight)
+	// At 50 the title has given up a cell and the cwd is still there to say
+	// which of the session's directories this close was in — the reverse of
+	// the order the old layout shed in.
+	mid := at(50)
+	if !strings.Contains(mid, "wt/topic") {
+		t.Errorf("cwd column should survive at 50, got %q", mid)
 	}
-	if !strings.Contains(tight, name) {
-		t.Errorf("name should survive intact at 50, got %q", tight)
+	if strings.Contains(mid, name) {
+		t.Errorf("at 50 the title should be the column that yielded, got %q", mid)
+	}
+	// At 40 keeping the cwd would push the title under its floor, so the
+	// column goes whole — never as a fragment.
+	tight := at(40)
+	if strings.Contains(tight, "wt/") || strings.Contains(tight, "topic") {
+		t.Errorf("cwd column should be dropped whole at 40, got %q", tight)
+	}
+	if !strings.Contains(tight, "release-notes-") {
+		t.Errorf("name should still identify the window at 40, got %q", tight)
 	}
 }
 
@@ -946,21 +1004,32 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 // changes what Enter does: the cwd tail that says which of a session's
 // several directories this close was in, the name, the reopen target, and the
 // "(gone)" tag that says the target session has to be recreated rather than
-// reopened. layoutRow sheds columns in order as a row runs out of room, so a
+// reopened. The grid sheds columns in order as a row runs out of room, so a
 // floor set a few cells lower silently drops one of them and the row reads as
-// a live session, or as the only close in its directory. Widths narrower than
-// this were rendered and looked at: the longest-named row keeps every column
-// down to 67, loses its cwd at 66, starts clipping its name at 50, loses
-// "(gone)" at 40 and its target at 27. The check is on the longest row in the
-// fixture, since that is the one that sheds first.
+// a live session, or as the only close in its directory.
+//
+// #142 put the "(gone)" tag inside the flex title column, and aligning the
+// columns costs the width the old flowing layout handed to whichever row
+// needed it. At this floor that buys alignment at the price of the tag on the
+// two longest-named rows, whose titles are clipped; it survives on the rest,
+// which is what the last check below pins. Giving the tag a column of its own
+// would hold it on every row — the grid has a badge column for exactly that
+// shape — and is worth weighing against the decoration columns competing for
+// the same slot.
 func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	m.width, m.height = closeSideBySideMin, 40
 	listW, _, _ := m.paneWidthsThree()
 	lines := innerLines(t, renderCloseList(m, listW, 38))
 	for _, want := range []string{
-		"main claude → mono:2",
-		"document test-runner-long-5 (gone) → nix-config:11",
+		// The command still sits against the arrow it belongs to.
+		"claude → mono:2",
+		// The longest-named row keeps the tail that says which of the
+		// session's directories it was in, and the target it reopens into.
+		"rvices/document test-runner-long-5",
+		"→ nix-config:11",
+		// The tag survives wherever the name leaves room for it.
+		"(gone)",
 	} {
 		found := false
 		for _, l := range lines {
@@ -1333,9 +1402,36 @@ func TestScopeGlyphs_AreOneCellWide(t *testing.T) {
 // between two sections is visible without reading the header under it.
 func TestRenderRow_DividerIsAFullWidthRule(t *testing.T) {
 	applyTheme(NewTheme())
-	v := newCloseListView(nil, nil, nil, time.Now())
+	v := newCloseListView(nil, nil, nil, time.Now(), nil, 40)
 	got := stripANSI(v.renderRow(CloseRow{Kind: RowDivider}, 40, false))
 	if want := strings.Repeat("─", 40); got != want {
 		t.Errorf("divider = %q, want %q", got, want)
+	}
+}
+
+// TestRenderCloseList_ArrowColumnIsStable: the grid is resolved once per list,
+// so two rows rendered from the same view agree on where the arrow sits. The
+// old layoutRow joined fields with single spaces and let the arrow land
+// wherever the name ended.
+func TestRenderCloseList_ArrowColumnIsStable(t *testing.T) {
+	applyTheme(NewTheme())
+	now := time.Now()
+	rows, ctxs, live := closeListFixture(now)
+	v := newCloseListView(rows, ctxs, live, now, nil, 100)
+	var at []int
+	for _, r := range rows {
+		if !r.Selectable() {
+			continue
+		}
+		line := v.renderRow(r, 100, false)
+		at = append(at, strings.Index(ansi.Strip(line), "→"))
+	}
+	if len(at) < 2 {
+		t.Fatal("fixture needs at least two selectable rows")
+	}
+	for i := 1; i < len(at); i++ {
+		if at[i] != at[0] {
+			t.Errorf("arrow drifts: row 0 at %d, row %d at %d", at[0], i, at[i])
+		}
 	}
 }

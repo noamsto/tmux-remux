@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/noamsto/tmux-remux/internal/config"
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -76,6 +77,10 @@ type PickerModel struct {
 	// When the mode is ModeClose, m.cursor indexes closeRows rather than
 	// m.events. Empty when nothing recoverable was closed.
 	closeRows []CloseRow
+	// decorationColumns declares the close list's extra columns, sourced from
+	// captured tmux window options. Nil when @remux_columns is unset, which is
+	// the default: remux ships no schema of its own.
+	decorationColumns []config.DecorationColumn
 	// hiddenCount is the number of unrecoverable close events the caller
 	// filtered out before constructing the model. Rendered as a footer line so
 	// the user knows the list is pruned. Close mode only.
