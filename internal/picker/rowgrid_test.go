@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -18,17 +19,47 @@ func sampleRows() []closeCells {
 	}
 }
 
+// wideAgeRows makes the age wider than the row at plausible widths: a grouped
+// close list prefixes the age with its repeat count, so "×12 1234m" is a real
+// value and the sweep must reach widths below it.
+func wideAgeRows() []closeCells {
+	return []closeCells{
+		{glyph: "▣", cwd: "noamsto/hookyard", id: "ENG-8224", title: "effort lever",
+			badge: "#3511", cmd: "claude", target: "→ mono:2", age: "×12 1234m"},
+		{glyph: "□", id: "#56", title: "doctor report",
+			cmd: "codex", target: "→ hookyard:2", age: "×3 34m"},
+	}
+}
+
+// wideRuneRows makes bytes, runes and display cells disagree: CJK is two cells
+// per rune, and a Private Use Area Nerd Font glyph is one cell across three
+// bytes. An offset that is secretly byte- or rune-based survives the ASCII
+// fixture and dies here.
+func wideRuneRows() []closeCells {
+	return []closeCells{
+		{glyph: "\ue0a0", cwd: "noamsto/世界", id: "ENG-8224", title: "\uf07b 日本語のタイトル",
+			badge: "#3511", cmd: "claude", target: "→ セッション:12", age: "34m"},
+		{glyph: "\ue0a0", cwd: "noamsto/dispatcher", id: "#56", title: "doctor report",
+			cmd: "codex", target: "→ hookyard:2", age: "27m"},
+	}
+}
+
 // Every rendered line must be exactly innerWidth: the frame pads short content
 // but does not clip overflow, so a long line pushes the border out and desyncs
 // the sibling panes.
 func TestCloseGrid_EveryLineIsExactlyInnerWidth(t *testing.T) {
-	rows := sampleRows()
-	for w := 20; w <= 160; w++ {
-		g := newCloseGrid(rows, w)
-		for i, c := range rows {
-			line, _, _ := g.render(c)
-			if got := ansi.StringWidth(line); got != w {
-				t.Fatalf("width %d row %d: line is %d cells:\n%q", w, i, got, line)
+	for name, rows := range map[string][]closeCells{
+		"sample":   sampleRows(),
+		"wideAge":  wideAgeRows(),
+		"wideRune": wideRuneRows(),
+	} {
+		for w := 0; w <= 160; w++ {
+			g := newCloseGrid(rows, w)
+			for i, c := range rows {
+				line, _, _ := g.render(c)
+				if got := ansi.StringWidth(line); got != w {
+					t.Fatalf("%s width %d row %d: line is %d cells:\n%q", name, w, i, got, line)
+				}
 			}
 		}
 	}
@@ -53,16 +84,27 @@ func TestCloseGrid_AbsentColumnVanishes(t *testing.T) {
 // Columns line up across rows, including a row that is missing a value for a
 // column another row fills.
 func TestCloseGrid_ColumnsAlignAcrossRows(t *testing.T) {
-	rows := sampleRows()
-	g := newCloseGrid(rows, 120)
-	at := make([]int, 0, len(rows))
-	for _, c := range rows {
-		line, _, _ := g.render(c)
-		at = append(at, strings.Index(ansi.Strip(line), "→"))
-	}
-	for i := 1; i < len(at); i++ {
-		if at[i] != at[0] {
-			t.Errorf("arrow column drifts: row 0 at %d, row %d at %d", at[0], i, at[i])
+	for name, rows := range map[string][]closeCells{
+		"sample":   sampleRows(),
+		"wideRune": wideRuneRows(),
+	} {
+		g := newCloseGrid(rows, 120)
+		at := make([]int, 0, len(rows))
+		for _, c := range rows {
+			line, _, _ := g.render(c)
+			stripped := ansi.Strip(line)
+			arrow := strings.Index(stripped, "→")
+			if arrow < 0 {
+				t.Fatalf("%s: no target column in %q", name, stripped)
+			}
+			// Cells, not the byte index: two rows whose titles differ in rune
+			// width can share a byte offset while their columns are askew.
+			at = append(at, lipgloss.Width(stripped[:arrow]))
+		}
+		for i := 1; i < len(at); i++ {
+			if at[i] != at[0] {
+				t.Errorf("%s: arrow column drifts: row 0 at %d, row %d at %d", name, at[0], i, at[i])
+			}
 		}
 	}
 }
@@ -95,14 +137,28 @@ func TestCloseGrid_ShedOrder(t *testing.T) {
 	}
 }
 
-// Age is three cells and is the list's sort key; it must survive every width.
+// The age is the list's sort key, so it survives every width wide enough to
+// hold it — and below that it takes the whole row, rather than buying itself
+// room by overflowing the line.
 func TestCloseGrid_AgeNeverSheds(t *testing.T) {
-	rows := sampleRows()
-	for w := 20; w <= 160; w++ {
-		g := newCloseGrid(rows, w)
-		line, _, _ := g.render(rows[0])
-		if !strings.Contains(ansi.Strip(line), "34m") {
-			t.Fatalf("width %d: age dropped:\n%q", w, ansi.Strip(line))
+	for name, rows := range map[string][]closeCells{
+		"sample":  sampleRows(),
+		"wideAge": wideAgeRows(),
+	} {
+		age := rows[0].age
+		for w := 0; w <= 160; w++ {
+			g := newCloseGrid(rows, w)
+			line, _, _ := g.render(rows[0])
+			stripped := ansi.Strip(line)
+			if w >= lipgloss.Width(age) {
+				if !strings.Contains(stripped, age) {
+					t.Fatalf("%s width %d: age dropped:\n%q", name, w, stripped)
+				}
+				continue
+			}
+			if !strings.HasPrefix(age, stripped) {
+				t.Fatalf("%s width %d: row is %q, want the age %q cut to fit", name, w, stripped, age)
+			}
 		}
 	}
 }
@@ -120,15 +176,21 @@ func TestCloseGrid_TargetClipsFromTheLeft(t *testing.T) {
 // The command's cell range is reported so the caller can recolour it with
 // lipgloss.StyleRanges. Offsets are display cells, not bytes or runes.
 func TestCloseGrid_ReportsCommandRange(t *testing.T) {
-	rows := sampleRows()
-	g := newCloseGrid(rows, 120)
-	line, start, end := g.render(rows[0])
-	if start < 0 || end <= start {
-		t.Fatalf("no command range reported: (%d, %d)", start, end)
-	}
-	stripped := []rune(ansi.Strip(line))
-	if got := strings.TrimSpace(string(stripped[start:end])); got != "claude" {
-		t.Errorf("command range covers %q, want %q", got, "claude")
+	for name, rows := range map[string][]closeCells{
+		"sample":   sampleRows(),
+		"wideRune": wideRuneRows(),
+	} {
+		g := newCloseGrid(rows, 120)
+		line, start, end := g.render(rows[0])
+		if start < 0 || end <= start {
+			t.Fatalf("%s: no command range reported: (%d, %d)", name, start, end)
+		}
+		// Sliced exactly as lipgloss.StyleRanges slices it, by display cells.
+		stripped := ansi.Strip(line)
+		got := ansi.Truncate(ansi.TruncateLeft(stripped, start, ""), end-start, "")
+		if got != "claude" {
+			t.Errorf("%s: command range covers %q, want %q", name, got, "claude")
+		}
 	}
 }
 

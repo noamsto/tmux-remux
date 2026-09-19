@@ -54,6 +54,10 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 		g.target = maxWidth(g.target, r.target)
 		g.age = maxWidth(g.age, r.age)
 	}
+	// The age never sheds, but it cannot be wider than the row either: past
+	// that it would push the line over innerWidth, and the frame pads without
+	// clipping. Clamping here keeps budget+age == innerWidth exact in render.
+	g.age = min(g.age, max(innerWidth, 0))
 
 	g.title = innerWidth - g.fixed() - 1
 	for _, col := range []*int{&g.cwd, &g.badge, &g.cmd} {
@@ -143,7 +147,7 @@ func (g closeGrid) render(c closeCells) (string, int, int) {
 	// cut as a whole: a width too narrow for the columns then eats the title,
 	// not the sort key.
 	age := padLeft(c.age, g.age)
-	budget := max(g.innerWidth-lipgloss.Width(age), 0)
+	budget := max(g.innerWidth-g.age, 0)
 	if cmdEnd > budget {
 		// That fitting cut the command away; a range over those cells would
 		// recolour whatever now sits in them.
