@@ -165,7 +165,7 @@ func (c SaveCmd) Run() error {
 		}
 		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
-		t := tmux.NewClient("tmux", cfg.DecorationOptions...)
+		t := tmux.NewClient("tmux", cfg.CaptureOptions()...)
 		saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 			Host:              hostname(),
 			CaptureScrollback: cfg.CaptureScrollback,
@@ -980,7 +980,11 @@ func signalCtx() (context.Context, func()) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-func loadConfig() config.Config { return config.Default() }
+func loadConfig() config.Config {
+	cfg := config.Default()
+	cfg.DecorationColumns = config.ParseDecorationColumns(tmux.GlobalOptions("tmux")["@remux_columns"])
+	return cfg
+}
 
 // resolveBuildOptions builds the BuildOptions consumed by restore.BuildPlan.
 // Errors are silently swallowed in favor of reasonable defaults: an
