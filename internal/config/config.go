@@ -49,6 +49,11 @@ type Config struct {
 	// codename, tint) that a fan-out orchestrator stamped but that nothing
 	// re-derives after a server restart.
 	DecorationOptions []string
+
+	// DecorationColumns declares which captured options the close list renders
+	// as columns, and how. Empty by default: tmux-remux is a published plugin
+	// and must not ship another tool's option schema. Set via @remux_columns.
+	DecorationColumns []DecorationColumn
 }
 
 // Default returns a Config with XDG-resolved paths and sensible thresholds.
