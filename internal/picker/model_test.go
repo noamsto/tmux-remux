@@ -284,7 +284,7 @@ func TestModel_CloseModeShowsHiddenCountLine(t *testing.T) {
 	}
 	// The title column is padded to the list-wide flex width, so the name no
 	// longer abuts its reopen target.
-	if !strings.Contains(out, "win") || !strings.Contains(out, "→ mono:4") {
+	if !strings.Contains(out, "win") || !strings.Contains(out, "mono:4") {
 		t.Errorf("recoverable row should still render, got:\n%s", out)
 	}
 }

@@ -316,3 +316,34 @@ func TestCloseGrid_WideIdDoesNotStarveTheTitle(t *testing.T) {
 		}
 	}
 }
+
+// The section header is rendered through the same grid as the rows beneath
+// it, so a label sits over its own column by construction rather than by a
+// second width calculation that could disagree. Pinning it here means a change
+// to the grid cannot move the values out from under their labels.
+func TestCloseGrid_LabelRowSharesTheRowsColumns(t *testing.T) {
+	rows := sampleRows()
+	for w := 40; w <= 160; w++ {
+		g := newCloseGrid(rows, w)
+		labels, _, _ := g.render(closeCells{cwd: "path", cmd: "cmd", target: "to", age: "age"})
+		row, _, _ := g.render(rows[0])
+		if ansi.StringWidth(labels) != ansi.StringWidth(row) {
+			t.Fatalf("w=%d: label row is %d cells, row is %d", w, ansi.StringWidth(labels), ansi.StringWidth(row))
+		}
+		// The command column is right-aligned, so its label ends where the
+		// value does; that shared edge is what makes the label read as a
+		// heading rather than as a stray word.
+		if g.cmd >= 6 {
+			// Cells, not byte offsets: the scope glyph is three bytes wide and
+			// one cell, so a byte index is already off by two before the first
+			// column begins.
+			endCell := func(line, s string) int {
+				stripped := ansi.Strip(line)
+				return lipgloss.Width(stripped[:strings.Index(stripped, s)+len(s)])
+			}
+			if l, v := endCell(labels, "cmd"), endCell(row, "claude"); l != v {
+				t.Errorf("w=%d: cmd label ends at cell %d, its value at %d", w, l, v)
+			}
+		}
+	}
+}

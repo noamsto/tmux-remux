@@ -652,6 +652,37 @@ type closeListView struct {
 	// would still be indented past a path column only the section below fills.
 	grids   []closeGrid
 	section map[int64]int
+	// headerSection maps a section header's text to the section it opens, so
+	// the header can label the columns of the rows beneath it.
+	headerSection map[string]int
+}
+
+// columnLabels names the columns in the section header, so the rows below
+// need not repeat a marker on every line. Roles, never option names: what a
+// decoration column holds is config's business, not the picker's.
+//
+// Each entry is tried in order and the first that fits its column wins, so a
+// narrow section says "to" where a wide one says "restore" rather than going
+// unlabelled. A column too narrow for even the last alternative is left bare:
+// a cut label says less than none.
+
+func labelsFor(g closeGrid) closeCells {
+	pick := func(width int, alts ...string) string {
+		for _, s := range alts {
+			if lipgloss.Width(s) <= width {
+				return s
+			}
+		}
+		return ""
+	}
+	return closeCells{
+		id:     pick(g.id, "id"),
+		cwd:    pick(g.cwd, "path", "dir"),
+		badge:  pick(g.badge, "tag"),
+		cmd:    pick(g.cmd, "cmd"),
+		target: pick(g.target, "restore", "to"),
+		age:    pick(g.age, "age"),
+	}
 }
 
 // gridFor returns the grid governing r's section.
@@ -698,15 +729,21 @@ func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[str
 	// one. Rows before the first header (a list with no sections at all) fall
 	// into section 0, which is why there is always at least one grid.
 	v.section = make(map[int64]int, len(rows))
+	v.headerSection = map[string]int{}
 	sections := [][]closeCells{{}}
 	for _, r := range rows {
 		if r.Kind == RowSectionHeader && len(sections[len(sections)-1]) > 0 {
 			sections = append(sections, nil)
 		}
+		i := len(sections) - 1
+		if r.Kind == RowSectionHeader {
+			// Keyed by the header's own text: a header carries no event id, and
+			// its labels have to be measured against the grid it introduces.
+			v.headerSection[r.Section] = i
+		}
 		if !r.Selectable() {
 			continue
 		}
-		i := len(sections) - 1
 		v.section[r.EventID] = i
 		sections[i] = append(sections[i], v.cells(r))
 	}
@@ -875,7 +912,9 @@ func (v closeListView) cells(r CloseRow) closeCells {
 	if title == "" {
 		title = snapshot.StripFormat(r.Placement.WindowName)
 	}
-	target := "→ " + r.Session
+	// No arrow: the section header labels this column "restore", so a marker
+	// on every row would say the same thing once per line.
+	target := r.Session
 	if r.Scope == "session" {
 		title = fmt.Sprintf("%dw", countWindows(cc.SubManifest))
 	} else {
@@ -924,7 +963,7 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 		return rowDim.Render(strings.Repeat("─", innerWidth))
 	}
 	if !r.Selectable() {
-		return previewHeader.Width(innerWidth).Render(ansi.Truncate(r.Section, innerWidth, "…"))
+		return v.renderSectionHeader(r, innerWidth)
 	}
 
 	line, cmdStart, cmdEnd := v.gridFor(r).render(v.cells(r))
@@ -989,4 +1028,41 @@ func closeRowScopeStyle(scope string) lipgloss.Style {
 		return nodeWindow
 	}
 	return nodePane
+}
+
+// renderSectionHeader draws a section's name and, to its right, a label over
+// each column the rows beneath it will fill. The labels are laid out by
+// rendering them through that section's own grid, so they cannot drift from
+// the values below: the header is a row, built the way every other row is.
+//
+// A label wider than its column is dropped rather than cut — "resto" over a
+// narrow target column says less than an unlabelled one, and the arrow the
+// rows used to carry is gone precisely because this says it once instead.
+func (v closeListView) renderSectionHeader(r CloseRow, innerWidth int) string {
+	g := v.grids[v.headerSection[r.Section]]
+	line, _, _ := g.render(labelsFor(g))
+
+	// The name takes the head of the line; the run of spaces between it and
+	// the first label becomes a rule, which is what ties the two together as
+	// one header rather than a name and a detached row of words.
+	name := ansi.Truncate(r.Section, innerWidth, "…")
+	head := lipgloss.Width(name)
+	first := firstLabelCell(line)
+	if first <= head+1 {
+		return previewHeader.Width(innerWidth).Render(name)
+	}
+	rule := rowDim.Render(" " + strings.Repeat("─", first-head-2) + " ")
+	tail := ansi.TruncateLeft(line, first, "")
+	return previewHeader.Render(name) + rule + rowDim.Render(tail)
+}
+
+// firstLabelCell returns the cell offset of the first non-blank cell in a
+// rendered label row, or the row's width when it carries no labels at all.
+func firstLabelCell(line string) int {
+	for i, r := range []rune(line) {
+		if r != ' ' {
+			return lipgloss.Width(string([]rune(line)[:i]))
+		}
+	}
+	return lipgloss.Width(line)
 }
