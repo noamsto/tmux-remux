@@ -387,7 +387,7 @@ Pure layout: no tmux, no store, no frames. This is the task that carries the beh
   1cell  auto  auto        flex          auto   auto     auto    fixed
 ```
 
-`auto` = widest value present across `rows`, and **0 when no row has one** — the column and its separator vanish. Shed order when a row will not fit: title→floor(12), drop cwd, drop badge, drop cmd, clip title below floor, clip target from the left. Age never sheds.
+`auto` = widest value present across `rows`, and **0 when no row has one** — the column and its separator vanish. Shed order when a row will not fit: drop cwd, title→floor(12), drop badge, drop cmd, clip title below floor, clip target from the left. Age never sheds. The cwd column caps at `min(innerWidth/4, 24)` and is fitted with `fitCwd`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1306,3 +1306,24 @@ Then run the `/deslop` skill over the branch before pushing (the pre-push hook e
 **Pre-flight corrections to this plan** (made before execution, after the drafted code was checked against the call sites):
 - `newCloseListView` takes `innerWidth` and stores the resolved grid. An earlier draft stored raw cells and re-resolved inside `renderRow`, which was O(rows²) per frame for no benefit — `view.go:408` already has `innerWidth` in scope.
 - `TestCloseGrid_CommandRangeOnlyWhenCommandRendered` replaced a single-width probe that called `t.Skip` when the command survived. A test that can skip its only assertion asserts nothing; the sweep asserts at every width and fails loudly if the shed case never occurs.
+
+
+---
+
+## Correction during execution (Task 4)
+
+The shed order originally put the title's shrink before the cwd's drop, and
+sized the cwd purely to the widest value present. Both were wrong against
+decisions already documented in the code, found when Task 4 integrated the grid:
+
+- `closeListMin = 71`'s comment states the floor was read off a list whose rows
+  carry every column **including the cwd tail**. Uncapped, one 34-cell path
+  sheds the cwd for every row at exactly that width.
+- `TestCloseListRow_CwdYieldsBeforeTheName` pins that the cwd is given up whole
+  before a single cell is taken from the name.
+
+Resolved with the user in favour of the existing policy: cap the cwd at
+`min(innerWidth/4, 24)`, fit it with `fitCwd` (moved into `rowgrid.go` with its
+two tests, which keep passing unchanged), and shed it before the title shrinks.
+The zero-width-when-absent rule is unchanged — that is the fix this whole change
+exists for.
