@@ -261,3 +261,37 @@ func TestFitCwd_ExactWidthAcrossWideRunes(t *testing.T) {
 		}
 	}
 }
+
+// A double-width rune straddling a truncation cut can leave the cut one cell
+// over budget, so a column fitter must clamp back rather than hand the row a
+// cell it did not ask for or panic on a negative strings.Repeat count. pad and
+// padLeft land on exactly the width asked for; clipLeft never exceeds it, and
+// hits it exactly whenever it had to cut, since the grid squares up what it
+// returns afterwards.
+//
+// TestFitCwd_ExactWidthAcrossWideRunes covers the same ground for the cwd
+// column's own fitter; these three are the ones every other column goes
+// through. TestCloseGrid_EveryLineIsExactlyInnerWidth does not reach them:
+// it measures the finished line, where one column a cell over cancels another
+// a cell under.
+func TestGridPadding_ExactWidthAcrossWideRunes(t *testing.T) {
+	for _, s := range []string{
+		"git/日本語プロジェクト/internal",
+		"emoji/📁folder/sub",
+		"noamsto/tmux-remux/internal/picker",
+		"factify/services/document",
+	} {
+		for width := 8; width <= 24; width++ {
+			if got := pad(s, width); lipgloss.Width(got) != width {
+				t.Errorf("pad(%q, %d) = %q, width %d", s, width, got, lipgloss.Width(got))
+			}
+			if got := padLeft(s, width); lipgloss.Width(got) != width {
+				t.Errorf("padLeft(%q, %d) = %q, width %d", s, width, got, lipgloss.Width(got))
+			}
+			want := min(width, lipgloss.Width(s))
+			if got := clipLeft(s, width); lipgloss.Width(got) != want {
+				t.Errorf("clipLeft(%q, %d) = %q, width %d, want %d", s, width, got, lipgloss.Width(got), want)
+			}
+		}
+	}
+}

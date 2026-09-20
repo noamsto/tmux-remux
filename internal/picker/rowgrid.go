@@ -26,11 +26,6 @@ type closeCells struct {
 // name says nothing, so spending the row's last cells on it is waste.
 const titleFloor = 12
 
-// cwdFloor is the width below which a fitted path fragment stops saying
-// anything a reader can act on — "…ker" is a syllable, not a directory — so
-// the column is given up whole rather than shown at less than this.
-const cwdFloor = 8
-
 // closeGrid holds the column widths resolved once for a whole list, so every
 // row renders against the same columns. A zero width means the column draws
 // nothing at all — value and separator both — whether because no row filled
@@ -75,26 +70,20 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 	// list where no row has a cwd at all stays at zero throughout — that is
 	// what retires the blank gutter, and the cap must not resurrect it.
 	if g.cwd > 0 {
-		if g.cwd = min(g.cwd, innerWidth/4, 24); g.cwd < cwdFloor {
+		if g.cwd = min(g.cwd, innerWidth/4, 24); g.cwd < 8 {
 			g.cwd = 0
 		}
 	}
 
-	// The cwd yields before the title gives up a cell: a window name clipped
-	// from a shared column still identifies its window, where a path already
-	// fitted into one is the value that has least left to lose. It gives
-	// ground down to its own floor first and goes whole only when even that
-	// is not enough — a fitted tail still discriminates at eight cells, so
-	// shedding the column while it could still be shown gives up more than
-	// the narrower column costs. Past that the title absorbs down to its own
-	// floor, and only then do the badge and the command go.
+	// The cwd yields whole before the title gives up a cell: a window name
+	// clipped from a shared column still identifies its window, where a path
+	// already fitted into one has least left to lose. Its width is the cap's
+	// to decide; under pressure it goes, rather than shrinking further and
+	// spending the row on a fragment. Past that the title absorbs down to its
+	// own floor, and only then do the badge and the command go.
 	g.title = innerWidth - g.fixed() - 1
 	if g.title < want && g.cwd > 0 {
-		if give := want - g.title; g.cwd-give >= cwdFloor {
-			g.cwd -= give
-		} else {
-			g.cwd = 0
-		}
+		g.cwd = 0
 		g.title = innerWidth - g.fixed() - 1
 	}
 	for _, col := range []*int{&g.badge, &g.cmd} {
