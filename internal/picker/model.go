@@ -602,6 +602,13 @@ func (m *PickerModel) SetCloseRows(rows []CloseRow) {
 	m.closeRows = rows
 }
 
+// SetDecorationColumns configures which captured window options the close list
+// renders as columns. The picker never names an option itself — the spec comes
+// from config, which parses it from @remux_columns.
+func (m *PickerModel) SetDecorationColumns(cols []config.DecorationColumn) {
+	m.decorationColumns = cols
+}
+
 // SetCursor moves the cursor. Exported for tests; production code moves the
 // cursor through key handling.
 func (m *PickerModel) SetCursor(i int) { m.cursor = i }

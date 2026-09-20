@@ -632,16 +632,18 @@ type closeListView struct {
 	live  map[string]bool
 	now   time.Time
 	tails map[int64]string // EventID → cwd tail; absent when elided
+	// cols is the decoration column spec. The view switches on each column's
+	// role, never on its option name, so which tmux option feeds which column
+	// stays config's business.
+	cols []config.DecorationColumn
 	// grid is resolved once for the list, so every row shares one set of
 	// column widths — that shared resolution is what makes the columns align.
 	grid closeGrid
 }
 
-// newCloseListView precomputes the per-list column facts for rows. The
-// decoration column spec is taken now and read once decoration values are
-// captured, so the signature settles before there is anything to put in it.
-func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time, _ []config.DecorationColumn, innerWidth int) closeListView {
-	v := closeListView{ctxs: ctxs, live: live, now: now, tails: map[int64]string{}}
+// newCloseListView precomputes the per-list column facts for rows.
+func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time, cols []config.DecorationColumn, innerWidth int) closeListView {
+	v := closeListView{ctxs: ctxs, live: live, now: now, tails: map[int64]string{}, cols: cols}
 
 	counts := map[string]map[string]int{}
 	cwds := map[int64]string{}
@@ -802,8 +804,8 @@ func scopeGlyph(scope string) string {
 	return glyphPane
 }
 
-// cells pulls one row's column values. Everything here is remux's own data;
-// decoration columns are added once configured.
+// cells pulls one row's column values: remux's own data, plus whatever the
+// configured decoration columns find on the closed window.
 //
 // Defaults say nothing, so they are left empty: a shell that is fish, a window
 // that held one pane, a session that is still running.
@@ -814,7 +816,35 @@ func (v closeListView) cells(r CloseRow) closeCells {
 		cmd = ""
 	}
 
-	title := snapshot.StripFormat(r.Placement.WindowName)
+	var id, badge, decoratedTitle string
+	if w := closedWindow(cc); w != nil {
+		for _, col := range v.cols {
+			// Stripped before the role switch, not per role: @remux_columns can
+			// point a column at any window option, and a value reaching the
+			// title column through a different sanitization than the window
+			// name does is the inconsistency this closes.
+			val := snapshot.StripFormat(w.Decoration[col.Option])
+			if val == "" {
+				continue
+			}
+			switch col.Role {
+			case config.RoleID:
+				id = ansi.Truncate(val, col.Max, "…")
+			case config.RoleBadge:
+				badge = ansi.Truncate(val, col.Max, "…")
+			case config.RoleText:
+				decoratedTitle = val
+			}
+		}
+	}
+
+	// An event captured before a column was configured has no value for it, so
+	// the title falls back to the window name through the same column rather
+	// than through a second path for old rows.
+	title := decoratedTitle
+	if title == "" {
+		title = snapshot.StripFormat(r.Placement.WindowName)
+	}
 	target := "→ " + r.Session
 	if r.Scope == "session" {
 		title = fmt.Sprintf("%dw", countWindows(cc.SubManifest))
@@ -844,7 +874,9 @@ func (v closeListView) cells(r CloseRow) closeCells {
 	return closeCells{
 		glyph:  scopeGlyph(r.Scope),
 		cwd:    v.tails[r.EventID],
+		id:     id,
 		title:  title,
+		badge:  badge,
 		cmd:    cmd,
 		target: target,
 		age:    age,

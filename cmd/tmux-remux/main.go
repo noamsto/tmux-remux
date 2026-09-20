@@ -633,6 +633,7 @@ func (c PickCmd) Run() error {
 			evs, hidden = partitionRecoverable(evs, ctxs, bridged)
 		}
 		m := picker.NewPickerModel(mode, evs, runningSet, sb)
+		m.SetDecorationColumns(cfg.DecorationColumns)
 		m.SetBridged(bridged)
 		if mode == picker.ModeClose {
 			m.SetCloseContexts(ctxs)

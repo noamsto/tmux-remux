@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/config"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 )
@@ -1362,5 +1363,103 @@ func TestRenderCloseList_ArrowColumnIsStable(t *testing.T) {
 		if at[i] != at[0] {
 			t.Errorf("arrow drifts: row 0 at %d, row %d at %d", at[0], i, at[i])
 		}
+	}
+}
+
+// A configured RoleID column moves the ticket id out of the title and into its
+// own column; a row with no value for it leaves the column blank rather than
+// shifting its neighbours.
+func TestCells_DecorationColumnsPopulateCells(t *testing.T) {
+	cols := []config.DecorationColumn{
+		{Option: "@issue_id", Role: config.RoleID, Max: 10},
+		{Option: "@pr_number", Role: config.RoleBadge, Max: 6},
+		{Option: "@issue_title", Role: config.RoleText},
+	}
+	cc := CloseContext{
+		Placement: ClosePlacement{Scope: "window", WindowIndex: 1},
+		SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{
+			Windows: []snapshot.Window{{
+				Index: 1,
+				Name:  "raw-window-name",
+				Decoration: map[string]string{
+					"@issue_id":    "ENG-8224",
+					"@pr_number":   "#3511",
+					"@issue_title": "effort lever",
+				},
+				Panes: []snapshot.Pane{{Command: "claude"}},
+			}},
+		}}},
+	}
+	v := closeListView{
+		ctxs: map[int64]CloseContext{7: cc},
+		live: map[string]bool{"s": true},
+		now:  time.Now(),
+		cols: cols,
+	}
+	got := v.cells(CloseRow{Kind: RowClose, EventID: 7, Scope: "window", Session: "s",
+		Placement: cc.Placement, Count: 1})
+
+	if got.id != "ENG-8224" {
+		t.Errorf("id = %q, want %q", got.id, "ENG-8224")
+	}
+	if got.badge != "#3511" {
+		t.Errorf("badge = %q, want %q", got.badge, "#3511")
+	}
+	if got.title != "effort lever" {
+		t.Errorf("title = %q, want the @issue_title value", got.title)
+	}
+}
+
+// With no columns configured — or an event captured before they were — the
+// title falls back to the window name through the same column. There is no
+// second rendering path for old events.
+func TestCells_FallsBackToWindowNameWithoutDecoration(t *testing.T) {
+	cc := CloseContext{
+		Placement: ClosePlacement{Scope: "window", WindowIndex: 1, WindowName: "raw-window-name"},
+		SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{
+			Windows: []snapshot.Window{{Index: 1, Panes: []snapshot.Pane{{Command: "claude"}}}},
+		}}},
+	}
+	v := closeListView{
+		ctxs: map[int64]CloseContext{7: cc},
+		live: map[string]bool{"s": true},
+		now:  time.Now(),
+	}
+	got := v.cells(CloseRow{Kind: RowClose, EventID: 7, Scope: "window", Session: "s",
+		Placement: cc.Placement, Count: 1})
+
+	if got.title != "raw-window-name" {
+		t.Errorf("title = %q, want the window name", got.title)
+	}
+	if got.id != "" || got.badge != "" {
+		t.Errorf("id/badge = %q/%q, want empty without decoration", got.id, got.badge)
+	}
+}
+
+// A decoration value reaches the title column through the same strip the
+// window name does — tmux evaluates #[...] on render, so the raw directive
+// would otherwise print as text.
+func TestCells_StripsFormatDirectivesFromDecoration(t *testing.T) {
+	cc := CloseContext{
+		Placement: ClosePlacement{Scope: "window", WindowIndex: 1},
+		SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{
+			Windows: []snapshot.Window{{
+				Index:      1,
+				Decoration: map[string]string{"@issue_title": "#[fg=colour141]effort lever#[default]"},
+				Panes:      []snapshot.Pane{{Command: "claude"}},
+			}},
+		}}},
+	}
+	v := closeListView{
+		ctxs: map[int64]CloseContext{7: cc},
+		live: map[string]bool{"s": true},
+		now:  time.Now(),
+		cols: []config.DecorationColumn{{Option: "@issue_title", Role: config.RoleText}},
+	}
+	got := v.cells(CloseRow{Kind: RowClose, EventID: 7, Scope: "window", Session: "s",
+		Placement: cc.Placement, Count: 1})
+
+	if got.title != "effort lever" {
+		t.Errorf("title = %q, want the value with its format directives stripped", got.title)
 	}
 }

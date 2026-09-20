@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 )
 
@@ -95,6 +96,23 @@ func closedPaneInfo(cc CloseContext) (cmd, cwd string) {
 		}
 	}
 	return "", ""
+}
+
+// closedWindow returns the window a close event took down, or nil when the
+// sub-manifest does not contain it. A window- or pane-scope close is matched by
+// Placement.WindowIndex; a session-scope close has no single window.
+func closedWindow(cc CloseContext) *snapshot.Window {
+	if cc.Placement.Scope == "session" {
+		return nil
+	}
+	for _, s := range cc.SubManifest.Sessions {
+		for i, w := range s.Windows {
+			if w.Index == cc.Placement.WindowIndex {
+				return &s.Windows[i]
+			}
+		}
+	}
+	return nil
 }
 
 // closeGroup accumulates one collapsed row as later duplicates are folded in.
