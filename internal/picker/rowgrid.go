@@ -31,6 +31,12 @@ const titleFloor = 12
 // the column is given up whole rather than shown at less than this.
 const cwdFloor = 8
 
+// cwdCap bounds the cwd column so one deep path cannot price the column out
+// of the list: without it the column is sized to the widest tail present, and
+// a single 34-cell path pushes the title under its floor and sheds the cwd for
+// every row. Paired with the quarter-row budget in newCloseGrid.
+const cwdCap = 24
+
 // closeGrid holds the column widths resolved once for a whole list, so every
 // row renders against the same columns. A zero width means the column draws
 // nothing at all — value and separator both — whether because no row filled
@@ -75,7 +81,7 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 	// list where no row has a cwd at all stays at zero throughout — that is
 	// what retires the blank gutter, and the cap must not resurrect it.
 	if g.cwd > 0 {
-		if g.cwd = min(g.cwd, innerWidth/4, 24); g.cwd < cwdFloor {
+		if g.cwd = min(g.cwd, innerWidth/4, cwdCap); g.cwd < cwdFloor {
 			g.cwd = 0
 		}
 	}
@@ -248,5 +254,12 @@ func clipLeft(s string, width int) string {
 	}
 	// A double-width rune straddling the cut can leave TruncateLeft one cell
 	// over budget; the re-truncate clamps it back, as fitCwd does.
-	return ansi.Truncate(ansi.TruncateLeft(s, w-width+1, "…"), width, "")
+	cut := ansi.Truncate(ansi.TruncateLeft(s, w-width+1, "…"), width, "")
+	if cut == "" {
+		// At width 1 the cut consumes the whole string, and TruncateLeft drops
+		// its own ellipsis along with it. A column asked for a cell should
+		// still say something is there.
+		return ansi.Truncate("…", width, "")
+	}
+	return cut
 }

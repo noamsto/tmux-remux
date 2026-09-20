@@ -222,7 +222,7 @@ func TestCloseGrid_CommandRangeOnlyWhenCommandRendered(t *testing.T) {
 // than a path, so it is nudged forward to the next "/" — but only while that
 // is cheap: giving up a long leading segment whole costs more than the ragged
 // edge does. Either way the column is exactly as wide as it was asked for,
-// which is what keeps the row's other columns where layoutRow put them.
+// which is what keeps the row's other columns on the grid's resolved widths.
 func TestFitCwd_PrefersAPathBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		tail  string
@@ -244,8 +244,8 @@ func TestFitCwd_PrefersAPathBoundary(t *testing.T) {
 
 // A double-width rune straddling the truncation cut can leave the cut one
 // cell over budget; fitCwd must still land on exactly width cells rather than
-// panicking on a negative strings.Repeat count. Covers cwdColumnWidth's whole
-// production range (8-24) against tails with CJK and emoji runes.
+// panicking on a negative strings.Repeat count. Covers the cwd column's whole
+// production range, cwdFloor to cwdCap, against tails with CJK and emoji runes.
 func TestFitCwd_ExactWidthAcrossWideRunes(t *testing.T) {
 	for _, tail := range []string{
 		"git/日本語プロジェクト/internal",
@@ -253,7 +253,7 @@ func TestFitCwd_ExactWidthAcrossWideRunes(t *testing.T) {
 		"noamsto/tmux-remux/internal/picker",
 		"factify/services/document",
 	} {
-		for width := 8; width <= 24; width++ {
+		for width := cwdFloor; width <= cwdCap; width++ {
 			got := fitCwd(tail, width)
 			if w := lipgloss.Width(got); w != width {
 				t.Errorf("fitCwd(%q, %d) = %q, width %d, want %d", tail, width, got, w, width)
@@ -281,7 +281,10 @@ func TestGridPadding_ExactWidthAcrossWideRunes(t *testing.T) {
 		"noamsto/tmux-remux/internal/picker",
 		"factify/services/document",
 	} {
-		for width := 8; width <= 24; width++ {
+		// Not the cwd's range: pad, padLeft and clipLeft square up every
+		// column, so this sweeps from a single cell to wider than any value
+		// here needs.
+		for width := 1; width <= 40; width++ {
 			if got := pad(s, width); lipgloss.Width(got) != width {
 				t.Errorf("pad(%q, %d) = %q, width %d", s, width, got, lipgloss.Width(got))
 			}

@@ -985,13 +985,13 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 // changes what Enter does: the cwd tail that says which of a session's
 // several directories this close was in, the name, the reopen target, and the
 // "(gone)" tag that says the target session has to be recreated rather than
-// reopened. layoutRow sheds columns in order as a row runs out of room, so a
-// floor set a few cells lower silently drops one of them and the row reads as
-// a live session, or as the only close in its directory. Widths narrower than
-// this were rendered and looked at: the longest-named row keeps every column
-// down to 67, loses its cwd at 66, starts clipping its name at 50, loses
-// "(gone)" at 40 and its target at 27. The check is on the longest row in the
-// fixture, since that is the one that sheds first.
+// reopened. The grid sheds columns in a declared order as a row runs out of
+// room, so a floor set a few cells lower silently drops one of them and the
+// row reads as a live session, or as the only close in its directory. Widths
+// narrower than this were measured on this fixture: every column survives to
+// 70, the cwd goes at 69, the name starts clipping at 51, "(gone)" goes at 37
+// and the target at 26. The floor is therefore one cell clear of the cwd
+// cliff — this test is what holds it there.
 func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	m.width, m.height = closeSideBySideMin, 40
