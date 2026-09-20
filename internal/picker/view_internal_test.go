@@ -503,23 +503,30 @@ func rowByEvent(t *testing.T, rows []CloseRow, id int64) CloseRow {
 // and age. The cwd column is as wide as the widest tail in the list — 11 for
 // "wt/feat-104" — so a row that elides it still pads to keep names aligned.
 //
-// Every column is padded to one width the whole list shares, so the name, the
-// command and the target each start at the same cell on every row. The command
-// is right-aligned against the arrow, keeping the "claude → mono:2" pairing.
+// Every column is padded to one width its section shares, so the name, the
+// command and the target each start at the same cell on every row of that
+// section. The command is right-aligned against the arrow, keeping the
+// "claude → mono:2" pairing.
 func TestCloseListRow_Columns(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
 	v := newCloseListView(rows, ctxs, live, now, nil, 76)
 
-	// The list's shared widths at 76: 11 for the cwd ("wt/feat-104"), 26 for
-	// the flex title, 6 for the command ("claude"), 18 for the target
-	// ("→ tp-g6-nix-config"), 6 for the age ("×2 18h").
+	// Widths are resolved per section, so the two sections differ. The current
+	// session's (events 1, 2, 4) at 76: cwd 11 ("wt/feat-104"), title 39,
+	// command 6 ("claude"), target 8 ("→ mono:3"), age 6 ("×2 18h"). The
+	// session close (event 5) sits alone under "other sessions", where no row
+	// has a cwd or a command, so both columns are gone entirely and the title
+	// and target take the cells back: title 51, target 18, age 3.
 	blankCwd := strings.Repeat(" ", 11)
-	title := func(s string) string { return s + strings.Repeat(" ", 29-lipgloss.Width(s)) }
+	title := func(s string) string { return s + strings.Repeat(" ", 39-lipgloss.Width(s)) }
 	cmd := func(s string) string { return strings.Repeat(" ", 6-len(s)) + s }
-	target := func(s string) string { return s + strings.Repeat(" ", 18-lipgloss.Width(s)) }
+	target := func(s string) string { return s + strings.Repeat(" ", 8-lipgloss.Width(s)) }
 	age := func(s string) string { return strings.Repeat(" ", 6-lipgloss.Width(s)) + s }
+	// The other-sessions section's own widths.
+	soloTitle := func(s string) string { return s + strings.Repeat(" ", 51-lipgloss.Width(s)) }
+	soloTarget := func(s string) string { return s + strings.Repeat(" ", 18-lipgloss.Width(s)) }
 	tests := []struct {
 		name string
 		id   int64
@@ -543,7 +550,7 @@ func TestCloseListRow_Columns(t *testing.T) {
 		{
 			name: "session close names its window count and targets the session",
 			id:   5,
-			want: glyphSession + " " + blankCwd + " " + title("3w  (gone)") + " " + cmd("") + " " + target("→ tp-g6-nix-config") + " " + age("45m"),
+			want: glyphSession + " " + soloTitle("3w  (gone)") + " " + soloTarget("→ tp-g6-nix-config") + " 45m",
 		},
 	}
 	for _, tt := range tests {
@@ -1342,20 +1349,30 @@ func TestRenderCloseList_ArrowColumnIsStable(t *testing.T) {
 	now := time.Now()
 	rows, ctxs, live := closeListFixture(now)
 	v := newCloseListView(rows, ctxs, live, now, nil, 100)
-	var at []int
+	// Grouped by section, not flattened: columns resolve per section, so the
+	// arrow may sit at a different cell on the far side of a rule. It may not
+	// move between two rows a reader scans as one block.
+	at := map[int][]int{}
 	for _, r := range rows {
 		if !r.Selectable() {
 			continue
 		}
-		line := v.renderRow(r, 100, false)
-		at = append(at, strings.Index(ansi.Strip(line), "→"))
+		stripped := ansi.Strip(v.renderRow(r, 100, false))
+		arrow := strings.Index(stripped, "→")
+		if arrow < 0 {
+			t.Fatalf("no target column in %q", stripped)
+		}
+		s := v.section[r.EventID]
+		at[s] = append(at[s], lipgloss.Width(stripped[:arrow]))
 	}
 	if len(at) < 2 {
-		t.Fatal("fixture needs at least two selectable rows")
+		t.Fatalf("fixture needs rows in at least two sections, got %d", len(at))
 	}
-	for i := 1; i < len(at); i++ {
-		if at[i] != at[0] {
-			t.Errorf("arrow drifts: row 0 at %d, row %d at %d", at[0], i, at[i])
+	for s, cells := range at {
+		for i := 1; i < len(cells); i++ {
+			if cells[i] != cells[0] {
+				t.Errorf("section %d: arrow drifts: row 0 at %d, row %d at %d", s, cells[0], i, cells[i])
+			}
 		}
 	}
 }

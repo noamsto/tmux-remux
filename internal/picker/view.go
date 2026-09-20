@@ -643,12 +643,23 @@ type closeListView struct {
 	// role, never on its option name, so which tmux option feeds which column
 	// stays config's business.
 	cols []config.DecorationColumn
-	// grid is resolved once for the list, so every row shares one set of
-	// column widths — that shared resolution is what makes the columns align.
-	grid closeGrid
+	// grids holds one resolved grid per section; section maps a row's event to
+	// the one that governs it. Columns resolve per section rather than per
+	// list because a section is a closed block — a header above it, a rule
+	// below — so its columns need not line up with a neighbour's. Sharing one
+	// resolution makes every section pay for the widest value in any of them:
+	// a session whose closes are all in one directory elides its cwd, and
+	// would still be indented past a path column only the section below fills.
+	grids   []closeGrid
+	section map[int64]int
 }
 
-// newCloseListView precomputes the per-list column facts for rows.
+// gridFor returns the grid governing r's section.
+func (v closeListView) gridFor(r CloseRow) closeGrid {
+	return v.grids[v.section[r.EventID]]
+}
+
+// newCloseListView precomputes the per-section column facts for rows.
 func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time, cols []config.DecorationColumn, innerWidth int) closeListView {
 	v := closeListView{ctxs: ctxs, live: live, now: now, tails: map[int64]string{}, cols: cols}
 
@@ -683,13 +694,26 @@ func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[str
 		v.tails[r.EventID] = cwdTail(cwd, base[r.Session])
 	}
 
-	cells := make([]closeCells, 0, len(rows))
+	// A header opens a section; every selectable row after it belongs to that
+	// one. Rows before the first header (a list with no sections at all) fall
+	// into section 0, which is why there is always at least one grid.
+	v.section = make(map[int64]int, len(rows))
+	sections := [][]closeCells{{}}
 	for _, r := range rows {
-		if r.Selectable() {
-			cells = append(cells, v.cells(r))
+		if r.Kind == RowSectionHeader && len(sections[len(sections)-1]) > 0 {
+			sections = append(sections, nil)
 		}
+		if !r.Selectable() {
+			continue
+		}
+		i := len(sections) - 1
+		v.section[r.EventID] = i
+		sections[i] = append(sections[i], v.cells(r))
 	}
-	v.grid = newCloseGrid(cells, innerWidth)
+	v.grids = make([]closeGrid, len(sections))
+	for i, cells := range sections {
+		v.grids[i] = newCloseGrid(cells, innerWidth)
+	}
 	return v
 }
 
@@ -903,7 +927,7 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 		return previewHeader.Width(innerWidth).Render(ansi.Truncate(r.Section, innerWidth, "…"))
 	}
 
-	line, cmdStart, cmdEnd := v.grid.render(v.cells(r))
+	line, cmdStart, cmdEnd := v.gridFor(r).render(v.cells(r))
 
 	// One flat style over plain text, then StyleRanges punches in the command's
 	// own colour: lipgloss v2 resets to the terminal default (not the outer
