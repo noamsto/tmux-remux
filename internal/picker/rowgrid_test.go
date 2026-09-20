@@ -300,10 +300,9 @@ func TestGridPadding_ExactWidthAcrossWideRunes(t *testing.T) {
 }
 
 // Every column but the title and the age has a rung in the shed ladder. The id
-// is the one that had to be added: its width is whatever the column spec asked
-// for, so a wide declared id would otherwise hold its full width while the
-// title was crushed to a single cell — the title is what identifies a row, and
-// no other column may starve it.
+// needs one most: its width is whatever the column spec asked for, so without
+// a rung a wide declared id holds its full width while the title is crushed to
+// a single cell. The title identifies the row; no other column may starve it.
 func TestCloseGrid_WideIdDoesNotStarveTheTitle(t *testing.T) {
 	rows := []closeCells{
 		{glyph: "▣", id: strings.Repeat("X", 40), title: "a-window-name-worth-reading",

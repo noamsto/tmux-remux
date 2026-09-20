@@ -822,10 +822,9 @@ func (v closeListView) cells(r CloseRow) closeCells {
 	var id, badge, decoratedTitle string
 	if w := closedWindow(cc); w != nil {
 		for _, col := range v.cols {
-			// Stripped before the role switch, not per role: @remux_columns can
-			// point a column at any window option, and a value reaching the
-			// title column through a different sanitization than the window
-			// name does is the inconsistency this closes.
+			// Stripped before the role switch, not per role: a column can be
+			// pointed at any window option, so no role may reach the row
+			// through a weaker sanitization than the window name gets.
 			val := snapshot.StripFormat(w.Decoration[col.Option])
 			if val == "" {
 				continue

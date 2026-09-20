@@ -1335,9 +1335,8 @@ func TestRenderRow_DividerIsAFullWidthRule(t *testing.T) {
 }
 
 // TestRenderCloseList_ArrowColumnIsStable: the grid is resolved once per list,
-// so two rows rendered from the same view agree on where the arrow sits. The
-// old layoutRow joined fields with single spaces and let the arrow land
-// wherever the name ended.
+// so every row rendered from the same view agrees on where the arrow sits.
+// Resolving per row instead would let it land wherever that row's name ended.
 func TestRenderCloseList_ArrowColumnIsStable(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -1405,10 +1404,11 @@ func TestCells_DecorationColumnsPopulateCells(t *testing.T) {
 	}
 }
 
-// An event captured before the columns were configured has no decoration, but
-// the columns are configured now — the state every list is in for hours after
-// this ships. The title falls back to the window name through the same column.
-// There is no second rendering path for old events.
+// An event captured before the columns were configured carries no decoration,
+// while the columns are configured — a list mixes such rows with decorated
+// ones for as long as the older events stay in the store. The title falls back
+// to the window name through the same column; there is no second rendering
+// path for an undecorated row.
 func TestCells_FallsBackToWindowNameWithoutDecoration(t *testing.T) {
 	cc := CloseContext{
 		Placement: ClosePlacement{Scope: "window", WindowIndex: 1, WindowName: "raw-window-name"},
