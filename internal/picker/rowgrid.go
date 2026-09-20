@@ -167,13 +167,17 @@ func (g closeGrid) render(c closeCells) (string, int, int) {
 	}
 
 	col(pad(c.glyph, 1))
-	if g.cwd > 0 {
-		col(fitCwd(c.cwd, g.cwd))
-	}
 	if g.id > 0 {
 		col(pad(c.id, g.id))
 	}
 	col(pad(clipName(c.title, g.title), g.title))
+	// The path follows the name it qualifies: a name answers "which window",
+	// a path only disambiguates two closes that share one. Leading with it put
+	// the row's weakest identifier first, and on a section where every close
+	// shares a directory it led with nothing at all.
+	if g.cwd > 0 {
+		col(fitCwd(c.cwd, g.cwd))
+	}
 	if g.badge > 0 {
 		col(pad(c.badge, g.badge))
 	}

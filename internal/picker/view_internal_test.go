@@ -535,17 +535,17 @@ func TestCloseListRow_Columns(t *testing.T) {
 		{
 			name: "pane close in the session's modal cwd",
 			id:   1,
-			want: glyphPane + " " + blankCwd + " " + title("main") + " " + cmd("claude") + " " + target("→ mono:2") + " " + age("4m"),
+			want: glyphPane + " " + title("main") + " " + blankCwd + " " + cmd("claude") + " " + target("→ mono:2") + " " + age("4m"),
 		},
 		{
 			name: "collapsed two-pane window close",
 			id:   2,
-			want: glyphWindow + " " + blankCwd + " " + title("docs  2p") + " " + cmd("") + " " + target("→ mono:3") + " " + age("×2 18h"),
+			want: glyphWindow + " " + title("docs  2p") + " " + blankCwd + " " + cmd("") + " " + target("→ mono:3") + " " + age("×2 18h"),
 		},
 		{
 			name: "worktree close shows the discriminating tail",
 			id:   4,
-			want: glyphPane + " wt/feat-104 " + title("code") + " " + cmd("claude") + " " + target("→ mono:4") + " " + age("2d"),
+			want: glyphPane + " " + title("code") + " wt/feat-104 " + cmd("claude") + " " + target("→ mono:4") + " " + age("2d"),
 		},
 		{
 			name: "session close names its window count and targets the session",
@@ -618,17 +618,20 @@ func TestCloseListRow_TieHasNoModalCwd(t *testing.T) {
 	}
 	rows := BuildCloseList(evs, ctxs, "duo")
 	v := newCloseListView(rows, ctxs, map[string]bool{"duo": true}, now, nil, 76)
-	// The title column is padded to the list-wide width, so the name does not
-	// abut its command or the target; the cwd tail and the name are still the
-	// row's opening columns.
-	want := map[int64]string{
-		1: glyphPane + " tmux-remux  main",
-		2: glyphPane + " wt/feat-104 feat",
+	// The name opens the row and the path follows it. Checked by position
+	// rather than as one prefix: the title column is padded, so the two are
+	// not adjacent.
+	want := map[int64]struct{ name, tail string }{
+		1: {"main", "tmux-remux"},
+		2: {"feat", "wt/feat-104"},
 	}
-	for id, prefix := range want {
+	for id, w := range want {
 		got := ansi.Strip(v.renderRow(rowByEvent(t, rows, id), 76, false))
-		if !strings.HasPrefix(got, prefix) {
-			t.Errorf("row %d = %q, want prefix %q", id, got, prefix)
+		if !strings.HasPrefix(got, glyphPane+" "+w.name) {
+			t.Errorf("row %d = %q, want it to open with the name %q", id, got, w.name)
+		}
+		if at := strings.Index(got, w.tail); at < 0 || at < strings.Index(got, w.name) {
+			t.Errorf("row %d = %q, want the path tail %q after the name", id, got, w.tail)
 		}
 		if reopen := fmt.Sprintf("claude → duo:%d", id); !strings.Contains(got, reopen) {
 			t.Errorf("row %d = %q, want it to contain %q", id, got, reopen)
@@ -680,30 +683,44 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 	rows := BuildCloseList(evs, ctxs, "solo")
 	r := rowByEvent(t, rows, 1)
 
+	// The name opens every row now, so a prefix no longer tells the rungs
+	// apart. Each rung names what the row must still contain at that width,
+	// and what it must have given up.
 	tests := []struct {
 		width int
-		want  string
+		has   []string
+		lacks []string
 	}{
 		// 20-cell tail, quarter-row budget 30 capped at 24: the tail fits whole.
-		{120, glyphPane + " wt/topic-branch-long release-notes-editor"},
+		{120, []string{"release-notes-editor", "wt/topic-branch-long", "claude", "→ solo:1"}, nil},
 		// Quarter-row budget 19: one cell short, so the head goes, not the tail.
-		{76, glyphPane + " …/topic-branch-long release-notes-editor"},
+		{76, []string{"release-notes-editor", "…/topic-branch-long", "claude"}, nil},
 		// Down to its floor, which is still enough of a path to act on, and
 		// still not at the name's expense.
-		{50, glyphPane + " …ch-long release-notes-editor claude → solo:1"},
+		{50, []string{"release-notes-editor", "…ch-long", "claude", "→ solo:1"}, nil},
 		// Below that the column no longer fits beside the name, and yields
 		// whole rather than shrinking into a syllable.
-		{44, glyphPane + " release-notes-editor"},
-		{40, glyphPane + " release-notes-edit… claude → solo:1"},
+		{44, []string{"release-notes-editor"}, []string{"ch-long"}},
+		{40, []string{"release-notes-edit…", "claude", "→ solo:1"}, []string{"ch-long"}},
 		// The command column goes before the name is cut past its floor.
-		{28, glyphPane + " release-notes… → solo:1"},
+		{28, []string{"release-notes…", "→ solo:1"}, []string{"claude", "ch-long"}},
 	}
 	for _, tt := range tests {
 		t.Run(strconv.Itoa(tt.width), func(t *testing.T) {
 			v := newCloseListView(rows, ctxs, map[string]bool{"solo": true}, now, nil, tt.width)
 			got := strings.TrimRight(ansi.Strip(v.renderRow(r, tt.width, false)), " ")
-			if !strings.HasPrefix(got, tt.want) {
-				t.Errorf("w=%d:\n got %q\nwant prefix %q", tt.width, got, tt.want)
+			if !strings.HasPrefix(got, glyphPane+" release-notes") {
+				t.Errorf("w=%d: %q does not open with the name", tt.width, got)
+			}
+			for _, s := range tt.has {
+				if !strings.Contains(got, s) {
+					t.Errorf("w=%d: %q is missing %q", tt.width, got, s)
+				}
+			}
+			for _, s := range tt.lacks {
+				if strings.Contains(got, s) {
+					t.Errorf("w=%d: %q should have given up %q", tt.width, got, s)
+				}
 			}
 		})
 	}
@@ -733,14 +750,15 @@ func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 	}
 
 	// A quarter of 32 is exactly the floor, and the whole 8-cell tail fits.
-	// The title column is padded to the list-wide width, so the target does not
-	// abut the name.
-	if got := at(32); !strings.HasPrefix(got, glyphPane+" wt/topic a") || !strings.Contains(got, "→ s:1") {
+	// Checked by containment: the name opens the row and the path follows it,
+	// so the presence of the tail is what tells the two cases apart, not the
+	// prefix — which is "a" either way.
+	if got := at(32); !strings.Contains(got, "wt/topic") || !strings.Contains(got, "→ s:1") {
 		t.Errorf("at 32 the column should hold the tail, got %q", got)
 	}
 	// A quarter of 30 is under it. The row has room to spare, so this is the
 	// floor talking, not the layout running out of width.
-	if got := at(30); !strings.HasPrefix(got, glyphPane+" a") || !strings.Contains(got, "→ s:1") {
+	if got := at(30); strings.Contains(got, "wt/topic") || !strings.Contains(got, "→ s:1") {
 		t.Errorf("at 30 the column should be dropped, got %q", got)
 	}
 }
