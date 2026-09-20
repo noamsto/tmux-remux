@@ -17,6 +17,10 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@v17
+        with:
+          name: lazytmux
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix develop --command go test -tags=integration -race ./...
 
   lint:
@@ -38,4 +42,8 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@v17
+        with:
+          name: lazytmux
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix build .
