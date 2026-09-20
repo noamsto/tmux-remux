@@ -514,7 +514,8 @@ func TestCloseListRow_Columns(t *testing.T) {
 	v := newCloseListView(rows, ctxs, live, now, nil, 76)
 
 	// Widths are resolved per section, so the two sections differ. The current
-	// session's (events 1, 2, 4) at 76: cwd 11 ("wt/feat-104"), title 41,
+	// session's (events 1, 2, 4) at 76: cwd 11 ("wt/feat-104") now sitting
+	// just before the age, title 41,
 	// command 6 ("claude"), target 6 ("mono:3"), age 6 ("×2 18h"). The
 	// session close (event 5) sits alone under "other sessions", where no row
 	// has a cwd or a command, so both columns are gone entirely and the title
@@ -535,17 +536,17 @@ func TestCloseListRow_Columns(t *testing.T) {
 		{
 			name: "pane close in the session's modal cwd",
 			id:   1,
-			want: glyphPane + " " + title("main") + " " + blankCwd + " " + cmd("claude") + " " + target("mono:2") + " " + age("4m"),
+			want: glyphPane + " " + title("main") + " " + cmd("claude") + " " + target("mono:2") + " " + blankCwd + " " + age("4m"),
 		},
 		{
 			name: "collapsed two-pane window close",
 			id:   2,
-			want: glyphWindow + " " + title("docs  2p") + " " + blankCwd + " " + cmd("") + " " + target("mono:3") + " " + age("×2 18h"),
+			want: glyphWindow + " " + title("docs  2p") + " " + cmd("") + " " + target("mono:3") + " " + blankCwd + " " + age("×2 18h"),
 		},
 		{
 			name: "worktree close shows the discriminating tail",
 			id:   4,
-			want: glyphPane + " " + title("code") + " wt/feat-104 " + cmd("claude") + " " + target("mono:4") + " " + age("2d"),
+			want: glyphPane + " " + title("code") + " " + cmd("claude") + " " + target("mono:4") + " wt/feat-104 " + age("2d"),
 		},
 		{
 			name: "session close names its window count and targets the session",
@@ -1377,14 +1378,16 @@ func TestScopeGlyphs_AreOneCellWide(t *testing.T) {
 	}
 }
 
-// A row divider paints a dim rule across the whole pane, so the boundary
-// between two sections is visible without reading the header under it.
-func TestRenderRow_DividerIsAFullWidthRule(t *testing.T) {
+// The section header draws its own rule out to the column labels, so the
+// boundary between two sections is visible without a separate divider row —
+// which is why there no longer is one.
+func TestRenderRow_SectionHeaderCarriesItsOwnRule(t *testing.T) {
 	applyTheme(NewTheme())
-	v := newCloseListView(nil, nil, nil, time.Now(), nil, 40)
-	got := stripANSI(v.renderRow(CloseRow{Kind: RowDivider}, 40, false))
-	if want := strings.Repeat("─", 40); got != want {
-		t.Errorf("divider = %q, want %q", got, want)
+	rows, ctxs, live := closeListFixture(time.Now())
+	v := newCloseListView(rows, ctxs, live, time.Now(), nil, 76)
+	got := stripANSI(v.renderRow(rows[0], 76, false))
+	if !strings.Contains(got, "──") {
+		t.Errorf("header = %q, want a rule joining its name to the labels", got)
 	}
 }
 

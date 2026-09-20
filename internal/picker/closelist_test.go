@@ -333,33 +333,38 @@ func TestBuildCloseList_UnattributedCloseFallsBackToUnknownSession(t *testing.T)
 	}
 }
 
-// The two sections are cut by one dim rule, and only when both exist — a
-// divider above a lone section would separate it from nothing.
-func TestBuildCloseList_DividerOnlyBetweenTwoSections(t *testing.T) {
+// Each section is introduced by exactly one header and nothing else: the
+// header draws its own boundary rule, so the list spends no structural row on
+// a separator. A header only appears when it has closes under it.
+func TestBuildCloseList_EachSectionIsOneHeaderAndItsRows(t *testing.T) {
 	both := map[int64]picker.CloseContext{
 		1: windowCtx("mono", 1, "main", "claude", "/home/mono"),
 		2: windowCtx("lazytmux", 1, "shell", "fish", "/home/lazytmux"),
 	}
 	rows := picker.BuildCloseList([]store.Event{{ID: 1, Ts: 100}, {ID: 2, Ts: 200}}, both, "mono")
 
-	divs := 0
+	headers := 0
 	for i, r := range rows {
-		if r.Kind != picker.RowDivider {
+		if r.Kind != picker.RowSectionHeader {
 			continue
 		}
-		divs++
-		if i == 0 || i == len(rows)-1 || rows[i+1].Kind != picker.RowSectionHeader {
-			t.Errorf("divider at %d is not between a section's rows and the next header", i)
+		headers++
+		if i == len(rows)-1 || !rows[i+1].Selectable() {
+			t.Errorf("header at %d is not followed by a close row", i)
 		}
 	}
-	if divs != 1 {
-		t.Fatalf("dividers = %d, want exactly 1 between two sections", divs)
+	if headers != 2 {
+		t.Fatalf("headers = %d, want one per section", headers)
 	}
 
 	other := map[int64]picker.CloseContext{1: windowCtx("lazytmux", 1, "shell", "fish", "/home/lazytmux")}
+	lone := 0
 	for _, r := range picker.BuildCloseList([]store.Event{{ID: 1, Ts: 100}}, other, "mono") {
-		if r.Kind == picker.RowDivider {
-			t.Error("divider above a lone section")
+		if r.Kind == picker.RowSectionHeader {
+			lone++
 		}
+	}
+	if lone != 1 {
+		t.Errorf("lone section has %d headers, want 1", lone)
 	}
 }

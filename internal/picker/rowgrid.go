@@ -171,20 +171,13 @@ func (g closeGrid) render(c closeCells) (string, int, int) {
 		col(pad(c.id, g.id))
 	}
 	col(pad(clipName(c.title, g.title), g.title))
-	// The path follows the name it qualifies: a name answers "which window",
-	// a path only disambiguates two closes that share one. Leading with it put
-	// the row's weakest identifier first, and on a section where every close
-	// shares a directory it led with nothing at all.
-	if g.cwd > 0 {
-		col(fitCwd(c.cwd, g.cwd))
-	}
 	if g.badge > 0 {
 		col(pad(c.badge, g.badge))
 	}
 	if g.cmd > 0 {
 		if c.cmd != "" {
-			// Right-aligned so the command sits against the arrow, keeping the
-			// "claude → mono:2" pairing the old flowing layout produced.
+			// Right-aligned so the command sits against the restore target,
+			// keeping the "claude · mono:2" pairing as one phrase.
 			cmdStart = lipgloss.Width(b.String()) + g.cmd - lipgloss.Width(c.cmd)
 			cmdEnd = cmdStart + lipgloss.Width(c.cmd)
 		}
@@ -192,6 +185,12 @@ func (g closeGrid) render(c closeCells) (string, int, int) {
 	}
 	if g.target > 0 {
 		col(pad(clipLeft(c.target, g.target), g.target))
+	}
+	// The path sits last before the age: it is the row's weakest identifier,
+	// wanted only when two closes share a name, so it reads as an aside to the
+	// right of what the row is and where it goes rather than interrupting them.
+	if g.cwd > 0 {
+		col(fitCwd(c.cwd, g.cwd))
 	}
 
 	// The age closes the row against the right edge and never sheds, so the

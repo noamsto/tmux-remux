@@ -666,8 +666,26 @@ type closeListView struct {
 // unlabelled. A column too narrow for even the last alternative is left bare:
 // a cut label says less than none.
 
+// Column-header glyphs. If any of these draws as tofu, swap the constant for
+// your Nerd Font's variant — the header tolerates any single-cell glyph, and
+// falls back to the bare word when one does not fit.
+const (
+	headGlyphID      = "" // nerd: nf-cod-tag
+	headGlyphPath    = "" // nerd: nf-cod-folder
+	headGlyphBadge   = "" // nerd: nf-cod-milestone
+	headGlyphCmd     = "" // nerd: nf-cod-terminal
+	headGlyphRestore = "" // nerd: nf-cod-debug-restart
+	headGlyphAge     = "" // nerd: nf-cod-history
+)
+
+// labelsFor names each of a section's columns for its header. Every column is
+// tried as glyph-and-word first, then the word alone, then the glyph alone, so
+// a narrow column still says something; one too narrow for even a glyph is
+// left bare, since a cut label says less than none.
 func labelsFor(g closeGrid) closeCells {
-	pick := func(width int, alts ...string) string {
+	pick := func(width int, glyph, word string, short ...string) string {
+		alts := append([]string{glyph + " " + word, word}, short...)
+		alts = append(alts, glyph)
 		for _, s := range alts {
 			if lipgloss.Width(s) <= width {
 				return s
@@ -676,12 +694,12 @@ func labelsFor(g closeGrid) closeCells {
 		return ""
 	}
 	return closeCells{
-		id:     pick(g.id, "id"),
-		cwd:    pick(g.cwd, "path", "dir"),
-		badge:  pick(g.badge, "tag"),
-		cmd:    pick(g.cmd, "cmd"),
-		target: pick(g.target, "restore", "to"),
-		age:    pick(g.age, "age"),
+		id:     pick(g.id, headGlyphID, "id"),
+		cwd:    pick(g.cwd, headGlyphPath, "path", "dir"),
+		badge:  pick(g.badge, headGlyphBadge, "tag"),
+		cmd:    pick(g.cmd, headGlyphCmd, "cmd"),
+		target: pick(g.target, headGlyphRestore, "restore", "to"),
+		age:    pick(g.age, headGlyphAge, "age"),
 	}
 }
 
@@ -958,9 +976,6 @@ func (v closeListView) cells(r CloseRow) closeCells {
 func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string {
 	if innerWidth < 1 {
 		innerWidth = 1
-	}
-	if r.Kind == RowDivider {
-		return rowDim.Render(strings.Repeat("─", innerWidth))
 	}
 	if !r.Selectable() {
 		return v.renderSectionHeader(r, innerWidth)
