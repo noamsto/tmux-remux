@@ -774,3 +774,66 @@ func TestCaptureResolvesWithinItsOwnServer(t *testing.T) {
 		t.Errorf("resolved session = %q, want alpha (lane b's snapshot has no sessions)", man.Resolved.Item.SessionName)
 	}
 }
+
+// tmux closes a window from the inside out: the last pane's process exits and
+// pane-exited fires, then the window unlinks. The cascade check only looks
+// backwards, so it never sees the outer event coming — the pane row is already
+// stored. The window close has to retract it, or one close the reader made
+// once shows up as two rows restoring the same thing.
+func TestCaptureWindowCloseRetractsItsLastPane(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	pane, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", SessionID: "$1", WindowID: "@4", PaneID: "%9", Host: "h",
+	})
+	if err != nil || pane == 0 {
+		t.Fatalf("pane close not stored: id=%d err=%v", pane, err)
+	}
+	if _, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", SessionID: "$1", WindowID: "@4", Host: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if len(all) != 1 || all[0].Kind != "window-unlinked" {
+		kinds := make([]string, len(all))
+		for i, e := range all {
+			kinds[i] = e.Kind
+		}
+		t.Errorf("events = %v, want only the window close to survive", kinds)
+	}
+}
+
+// A pane closed on its own — no window event follows — is the real close and
+// must survive. Retraction keys on the window id, so a pane of a *different*
+// window is not swept up by an unrelated window closing beside it.
+func TestCaptureKeepsPaneOfADifferentWindow(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", SessionID: "$1", WindowID: "@7", PaneID: "%9", Host: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", SessionID: "$1", WindowID: "@4", Host: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	if len(all) != 2 {
+		t.Errorf("events = %d, want both: the pane belongs to another window", len(all))
+	}
+}
