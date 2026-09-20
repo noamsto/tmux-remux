@@ -345,7 +345,7 @@ func renderList(m PickerModel, width, height int) string {
 		style := rowDefault
 		switch {
 		case i == m.cursor:
-			style = rowActive
+			style = rowFocus(rowDefault)
 		case dim:
 			style = rowDim
 		}
@@ -521,7 +521,7 @@ func renderTree(m PickerModel, width, height int) string {
 	idx := 0
 	var rows []string
 	for _, sess := range tree.Children {
-		appendNodeRows(&rows, sess, 0, &idx, highlightIdx, toggleHint)
+		appendNodeRows(&rows, sess, 0, &idx, highlightIdx, toggleHint, innerWidth)
 	}
 
 	// Header (1) + border (2) consume 3 rows inside the frame's height.
@@ -542,8 +542,9 @@ func renderTree(m PickerModel, width, height int) string {
 // appendNodeRows appends one rendered string per visible node of the subtree
 // rooted at n. idx tracks the position in the flat visible-node list and is
 // incremented for each row appended. highlightIdx is the row to mark active
-// (−1 = none). Caller windows the returned slice for scrolling.
-func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightIdx int, toggleHint string) {
+// (−1 = none), padded to innerWidth so its background spans the pane. Caller
+// windows the returned slice for scrolling.
+func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightIdx int, toggleHint string, innerWidth int) {
 	indent := strings.Repeat("  ", depth)
 	bullet := "•"
 	if len(n.Children) > 0 {
@@ -561,28 +562,31 @@ func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightI
 			note = fmt.Sprintf("%d panes hidden — %s", hidden, toggleHint)
 		}
 	}
+	var style lipgloss.Style
+	switch n.Kind {
+	case NodeSession:
+		style = nodeSession
+	case NodeWindow:
+		style = nodeWindow
+	default:
+		style = nodePane
+	}
+
 	active := *idx == highlightIdx
 	var rendered string
 	if active {
-		// Active row gets a single flat style: lipgloss v2 strips ESC bytes
-		// from pre-styled input, so nesting role-color inside rowActive's
-		// mauve background can collapse to mauve-on-mauve = invisible. Render
-		// once, plain.
+		// Active row gets a single flat style over plain text: lipgloss v2
+		// strips ESC bytes from pre-styled input, so nesting the skip-reason
+		// style inside it would drop the background and leave a hole. The
+		// skip faint/italic is dropped with it, which is what we want anyway
+		// — the cursor row must not also read as faint.
 		line := fmt.Sprintf("%s%s %s", indent, bullet, n.Label)
 		if n.Skipped && n.SkipReason != "" {
 			line = line + "  " + note
 		}
-		rendered = rowActive.Render(line)
+		line = ansi.Truncate(line, innerWidth, "…")
+		rendered = rowFocus(style).Width(innerWidth).Render(line)
 	} else {
-		var style lipgloss.Style
-		switch n.Kind {
-		case NodeSession:
-			style = nodeSession
-		case NodeWindow:
-			style = nodeWindow
-		default:
-			style = nodePane
-		}
 		if n.Skipped {
 			// Keep the role color so the tree shape stays legible when
 			// skip-running marks everything skipped; just dim it.
@@ -598,7 +602,7 @@ func appendNodeRows(rows *[]string, n *TreeNode, depth int, idx *int, highlightI
 	*idx++
 	if n.Expanded {
 		for _, c := range n.Children {
-			appendNodeRows(rows, c, depth+1, idx, highlightIdx, toggleHint)
+			appendNodeRows(rows, c, depth+1, idx, highlightIdx, toggleHint, innerWidth)
 		}
 	}
 }
@@ -904,19 +908,20 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 	// One flat style over plain text, then StyleRanges punches in the command's
 	// own colour: lipgloss v2 resets to the terminal default (not the outer
 	// style) at the end of a span rendered separately and spliced in by hand,
-	// so a nested Render() leaves a hole in rowActive's background once the
-	// span ends. StyleRanges avoids that — applied to the already-rendered
+	// so a nested Render() leaves a hole in the focused row's background once
+	// the span ends. StyleRanges avoids that — applied to the already-rendered
 	// line, it restores the surrounding style after the range it recolours.
-	var styled string
+	rowStyle, cmdStyle := closeRowScopeStyle(r.Scope), closeRowCmd
 	if active {
-		styled = rowActive.Width(innerWidth).Render(line)
-	} else {
-		styled = closeRowScopeStyle(r.Scope).Width(innerWidth).Render(line)
+		// The command span carries the focus background too, or it punches a
+		// base-coloured gap through the middle of the cursor row.
+		rowStyle, cmdStyle = rowFocus(rowStyle), cmdStyle.Background(rowFocusBg)
 	}
+	styled := rowStyle.Width(innerWidth).Render(line)
 	if cmdStart < 0 {
 		return styled
 	}
-	return lipgloss.StyleRanges(styled, lipgloss.NewRange(cmdStart, cmdEnd, closeRowCmd))
+	return lipgloss.StyleRanges(styled, lipgloss.NewRange(cmdStart, cmdEnd, cmdStyle))
 }
 
 // clipName cuts a window name to width cells. A name carrying a nerd-font

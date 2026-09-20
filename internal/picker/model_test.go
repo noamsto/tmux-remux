@@ -216,10 +216,16 @@ func TestModel_ViewHighlightsTreeCursor(t *testing.T) {
 	upd, _ = pm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	pm = upd.(picker.PickerModel)
 	out := pm.View().Content
-	// Active row style sets a mauve background (#cba6f7 = 203;166;247 in 24-bit SGR).
-	// When focus is on the tree pane, the first visible node must be highlighted.
-	if !strings.Contains(out, "203;166;247") {
-		t.Errorf("expected mauve-background highlight in tree pane, got:\n%s", out)
+	// Surface-0 (#313244) as a background: the 48;2 prefix is load-bearing,
+	// since the bare triplet also appears in any row that merely uses the
+	// colour as text.
+	if !strings.Contains(out, "48;2;49;50;68") {
+		t.Errorf("expected focus-background highlight in tree pane, got:\n%s", out)
+	}
+	// The focused node is a session, so it keeps mauve (#cba6f7) as its
+	// foreground: the cursor changes weight, never hue.
+	if !strings.Contains(out, "38;2;203;166;247") {
+		t.Errorf("expected focused session row to keep its mauve role colour, got:\n%s", out)
 	}
 }
 

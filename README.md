@@ -2,7 +2,7 @@
 
 Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](https://github.com/tmux-plugins/tmux-resurrect) and [`tmux-continuum`](https://github.com/tmux-plugins/tmux-continuum), backed by SQLite and content-addressed scrollback files.
 
-> **Status:** v0.4.0. Pre-release. Personal tool — used and shaped by my workflow. Bug reports welcome; feature requests will be answered with "PR welcome."
+> **Status:** pre-release. Personal tool — used and shaped by my workflow. Bug reports welcome; feature requests will be answered with "PR welcome." Tagged releases are on the [releases page](https://github.com/noamsto/tmux-remux/releases).
 
 ![Kill the pane an agent is working in, undo it, and the agent resumes](demo/undo.gif)
 
@@ -266,9 +266,10 @@ Full design at [`docs/specs/2026-04-26-tmux-state-design.md`](docs/specs/2026-04
 
 ## Status and roadmap
 
-**v0.1.0 — current.** Save, restore (manual + auto), undo, Bubble Tea picker, list/prune/gc, systemd timer.
+`main` is the development line. Tagged releases, and what each one contains, are
+on the [releases page](https://github.com/noamsto/tmux-remux/releases).
 
-**v0.2.0 — planned.**
+**Planned:**
 - Per-unit restore (restore *just* this pane / window / session from a snapshot)
 - nvim cooperation (companion Lua module that writes `mksession` files on `VimLeave`)
 - Cross-host cwd remap rules
@@ -279,6 +280,14 @@ Full design at [`docs/specs/2026-04-26-tmux-state-design.md`](docs/specs/2026-04
 ## Contributing
 
 This is a personal tool I publish in case it's useful. Bug reports with reproduction steps are welcome. Feature requests are unlikely to be implemented unless I hit them in my own workflow — fork freely.
+
+### Releasing
+
+Tags, the changelog and the GitHub release are cut by
+[release-please](https://github.com/googleapis/release-please) from conventional
+commits on `main`; goreleaser then attaches the archives. To build the archives
+locally: `goreleaser release --snapshot --clean` (goreleaser ships in
+`nix develop`).
 
 ## Acknowledgements
 

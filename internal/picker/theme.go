@@ -9,7 +9,10 @@ import (
 )
 
 // Theme resolves Catppuccin role colors from tmux options, with hardcoded
-// Latte (light) and Mocha (dark) fallbacks when an option is unset.
+// Latte (light) and Mocha (dark) fallbacks when an option is unset. The
+// fallbacks mirror nix-config `home/theme/palette.nix`: its Latte accents are
+// darkened to clear 4.5:1 on the Latte base, which several upstream Catppuccin
+// ones do not, so take them from there rather than from upstream.
 type Theme struct {
 	flavour  string // "dark" | "light"
 	tmuxOpts map[string]string
@@ -38,6 +41,9 @@ func (t Theme) color(tmuxOpt, darkFallback, lightFallback string) color.Color {
 // Base returns the Catppuccin base (background) color for the current theme.
 func (t Theme) Base() color.Color { return t.color("@thm_bg", "#1e1e2e", "#eff1f5") }
 
+// Surface0 returns the Catppuccin surface-0, the cursor row's background.
+func (t Theme) Surface0() color.Color { return t.color("@thm_surface_0", "#313244", "#ccd0da") }
+
 // Surface1 returns the Catppuccin surface-1 (subtle border / dim background).
 func (t Theme) Surface1() color.Color { return t.color("@thm_surface_1", "#45475a", "#bcc0cc") }
 
@@ -57,16 +63,17 @@ func (t Theme) Mauve() color.Color { return t.color("@thm_mauve", "#cba6f7", "#8
 func (t Theme) Blue() color.Color { return t.color("@thm_blue", "#89b4fa", "#1e66f5") }
 
 // Green returns the Catppuccin green accent used for "on" toggle states.
-func (t Theme) Green() color.Color { return t.color("@thm_green", "#a6e3a2", "#40a02b") }
+func (t Theme) Green() color.Color { return t.color("@thm_green", "#a6e3a1", "#358023") }
 
-// Yellow returns the Catppuccin yellow accent. Reserved for future use.
-func (t Theme) Yellow() color.Color { return t.color("@thm_yellow", "#f9e2af", "#df8e1d") }
+// Yellow returns the Catppuccin yellow accent used for the close list's
+// command column and its second pane-block rail.
+func (t Theme) Yellow() color.Color { return t.color("@thm_yellow", "#f9e2af", "#996b00") }
 
 // Red returns the Catppuccin red accent used for warnings and invalid state.
 func (t Theme) Red() color.Color { return t.color("@thm_red", "#f38ba8", "#d20f39") }
 
 // Lavender returns the Catppuccin lavender accent used for footer key labels.
-func (t Theme) Lavender() color.Color { return t.color("@thm_lavender", "#b4befe", "#7287fd") }
+func (t Theme) Lavender() color.Color { return t.color("@thm_lavender", "#b4befe", "#5a6ad4") }
 
 // ASCIIGlyphs reports whether the scope glyphs should fall back to geometric
 // shapes, for a terminal whose font has no Nerd Font icons. Any value but
