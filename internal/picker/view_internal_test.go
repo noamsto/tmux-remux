@@ -658,10 +658,10 @@ func TestCloseListRow_SubMinuteAgeIsStatic(t *testing.T) {
 // whole, then the command column goes, and the name is clipped only after
 // that — never below the cells that still identify a window.
 //
-// #142 moved one rung. The command, which the old layout shed with the rest
-// of the extras, is now the column that goes when the title reaches its
-// floor. The cwd's own rungs are unchanged: the cap it is fitted into is the
-// same quarter-row budget the old cwdColumnWidth used.
+// #142 moved two rungs. The cwd now gives ground to its own eight-cell floor
+// before it is dropped, so it survives four cells further down than it used
+// to; and the command, which the old layout shed with the rest of the extras,
+// is now the column that goes when the title reaches its floor.
 func TestCloseListRow_WidthLadder(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -686,9 +686,12 @@ func TestCloseListRow_WidthLadder(t *testing.T) {
 		{120, glyphPane + " wt/topic-branch-long release-notes-editor"},
 		// Quarter-row budget 19: one cell short, so the head goes, not the tail.
 		{76, glyphPane + " …/topic-branch-long release-notes-editor"},
-		// The column no longer fits beside the name, and yields whole rather
-		// than shrinking into a syllable.
-		{50, glyphPane + " release-notes-editor"},
+		// Down to its floor, which is still enough of a path to act on, and
+		// still not at the name's expense.
+		{50, glyphPane + " …ch-long release-notes-editor claude → solo:1"},
+		// Below that the column no longer fits beside the name, and yields
+		// whole rather than shrinking into a syllable.
+		{44, glyphPane + " release-notes-editor"},
 		{40, glyphPane + " release-notes-edit… claude → solo:1"},
 		// The command column goes before the name is cut past its floor.
 		{28, glyphPane + " release-notes… → solo:1"},
@@ -996,14 +999,9 @@ func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.
 	lines := innerLines(t, renderCloseList(m, listW, 38))
 	// #142 pads every column to a width the list shares, so the row no longer
 	// reads as one run of text; each column is checked where it now sits.
-	//
-	// The cwd tail is no longer among them. The grid gives that column up
-	// whole before the title loses a cell, and at this width a list with a
-	// 26-cell title cannot hold both — the column is capped at 16 here, and
-	// keeping it would cut "(gone)" off the longest rows instead. The preview
-	// shows a close's directory in full either way.
 	for _, want := range []string{
 		"claude → mono:2",
+		"/document",
 		"test-runner-long-5  (gone)",
 		"→ nix-config:11",
 	} {
