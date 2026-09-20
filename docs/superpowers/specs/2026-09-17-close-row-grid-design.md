@@ -153,6 +153,11 @@ switches on `ColumnRole` and never on an option name.
   and **0 when no row has one**, which removes the column and its separator
   entirely. This is the general form of the cwd fix: the gutter disappears by
   the same rule that sizes every other column, rather than by a special case.
+  The cwd column additionally caps at `min(innerWidth/4, 24)` and is fitted
+  with `fitCwd`, which snaps a cut to a path boundary. Without the cap a single
+  34-cell outlier path costs *every* row its cwd at `closeListMin` — and that
+  floor was calibrated, per its own comment, on a list whose rows carry every
+  column including the cwd tail.
 - **flex** — the title absorbs all remaining space and is the first to shrink.
   Its value is the declared `RoleText` column's option when that column is
   configured and the row has a value for it; otherwise the window name. So a
@@ -166,12 +171,18 @@ switches on `ColumnRole` and never on an option name.
 
 Declared as data, replacing the implicit ladder:
 
-1. title shrinks to its floor (12 cells)
-2. cwd drops
+1. cwd drops
+2. title shrinks to its floor (12 cells)
 3. badge drops
 4. cmd drops
 5. title clips below its floor
 6. target clips from the left (`…nix-config:2`)
+
+The cwd yields *whole* before the title loses a cell. That is the existing
+policy pinned by `TestCloseListRow_CwdYieldsBeforeTheName`, and an earlier
+draft of this spec inverted it. The title is the row's primary identifier; the
+cwd column only appears at all when a row's cwd is surprising, so it is the
+cheaper thing to give up.
 
 Age never drops: it is three cells and it is the list's sort key. This ordering
 fixes the inversion noted above — the title is squeezed before the command is
