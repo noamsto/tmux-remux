@@ -1410,9 +1410,10 @@ func TestCells_DecorationColumnsPopulateCells(t *testing.T) {
 	}
 }
 
-// With no columns configured — or an event captured before they were — the
-// title falls back to the window name through the same column. There is no
-// second rendering path for old events.
+// An event captured before the columns were configured has no decoration, but
+// the columns are configured now — the state every list is in for hours after
+// this ships. The title falls back to the window name through the same column.
+// There is no second rendering path for old events.
 func TestCells_FallsBackToWindowNameWithoutDecoration(t *testing.T) {
 	cc := CloseContext{
 		Placement: ClosePlacement{Scope: "window", WindowIndex: 1, WindowName: "raw-window-name"},
@@ -1424,6 +1425,11 @@ func TestCells_FallsBackToWindowNameWithoutDecoration(t *testing.T) {
 		ctxs: map[int64]CloseContext{7: cc},
 		live: map[string]bool{"s": true},
 		now:  time.Now(),
+		cols: []config.DecorationColumn{
+			{Option: "@issue_id", Role: config.RoleID, Max: 10},
+			{Option: "@pr_number", Role: config.RoleBadge, Max: 6},
+			{Option: "@issue_title", Role: config.RoleText},
+		},
 	}
 	got := v.cells(CloseRow{Kind: RowClose, EventID: 7, Scope: "window", Session: "s",
 		Placement: cc.Placement, Count: 1})

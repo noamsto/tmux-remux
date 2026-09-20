@@ -35,3 +35,23 @@ func TestClosedWindow_NilWhenAbsent(t *testing.T) {
 		t.Errorf("closedWindow(zero) = %v, want nil", w)
 	}
 }
+
+// A session close has no single window, and its sub-manifest carries every
+// window the session held. WindowIndex is 0 on such a placement, so matching
+// by index would hand back window 0 and wear its ticket id on the session row.
+func TestClosedWindow_NilForSessionScope(t *testing.T) {
+	cc := CloseContext{
+		Placement: ClosePlacement{Scope: "session", Session: "s"},
+		SubManifest: snapshot.Manifest{Sessions: []snapshot.Session{{
+			Name: "s",
+			Windows: []snapshot.Window{{
+				Index:      0,
+				Name:       "w0",
+				Decoration: map[string]string{"@issue_id": "ENG-8224"},
+			}},
+		}}},
+	}
+	if w := closedWindow(cc); w != nil {
+		t.Errorf("closedWindow(session scope) = %+v, want nil", w)
+	}
+}
