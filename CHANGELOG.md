@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/noamsto/tmux-remux/compare/v0.5.0...v0.6.0) (2026-09-20)
+
+
+### Features
+
+* **picker:** column grid for the close list row layout ([#151](https://github.com/noamsto/tmux-remux/issues/151)) ([229b681](https://github.com/noamsto/tmux-remux/commit/229b6817b5713e27d3f9c1eb28b3febd30d68412))
+
 ## [0.5.0](https://github.com/noamsto/tmux-remux/compare/v0.4.0...v0.5.0) (2026-09-18)
 
 
