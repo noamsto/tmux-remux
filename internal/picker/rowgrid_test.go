@@ -217,35 +217,46 @@ func TestCloseGrid_CommandRangeOnlyWhenCommandRendered(t *testing.T) {
 	}
 }
 
-// A double-width rune straddling a truncation cut can leave the cut one cell
-// over budget, so a column fitter must clamp back rather than hand the row a
-// cell it did not ask for or panic on a negative strings.Repeat count. pad and
-// padLeft land on exactly the width asked for; clipLeft never exceeds it, and
-// hits it exactly whenever it had to cut, since the grid squares up what it
-// returns afterwards.
-//
-// Descends from the deleted TestFitCwd_ExactWidthAcrossWideRunes, whose
-// function #142 retired: the invariant moved into these three helpers.
-// TestCloseGrid_EveryLineIsExactlyInnerWidth does not cover it, since it
-// measures the whole line and one column a cell over cancels another a cell
-// under.
-func TestGridPadding_ExactWidthAcrossWideRunes(t *testing.T) {
-	for _, s := range []string{
+// The cwd column is cut from the left, since the end of a path is what
+// discriminates. A cut that lands mid-segment reads as a mangled word rather
+// than a path, so it is nudged forward to the next "/" — but only while that
+// is cheap: giving up a long leading segment whole costs more than the ragged
+// edge does. Either way the column is exactly as wide as it was asked for,
+// which is what keeps the row's other columns where layoutRow put them.
+func TestFitCwd_PrefersAPathBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		tail  string
+		width int
+		want  string
+	}{
+		{"noamsto/tmux-remux", 22, "noamsto/tmux-remux    "},
+		{"noamsto/tmux-remux", 14, "…/tmux-remux  "},
+		{"noamsto/tmux-remux/internal/picker", 18, "…/internal/picker "},
+		// Snapping here would drop "services" as well — eight of eighteen
+		// cells — so the ragged cut is the lesser loss.
+		{"factify/services/document", 18, "…services/document"},
+	} {
+		if got := fitCwd(tc.tail, tc.width); got != tc.want {
+			t.Errorf("fitCwd(%q, %d) = %q, want %q", tc.tail, tc.width, got, tc.want)
+		}
+	}
+}
+
+// A double-width rune straddling the truncation cut can leave the cut one
+// cell over budget; fitCwd must still land on exactly width cells rather than
+// panicking on a negative strings.Repeat count. Covers cwdColumnWidth's whole
+// production range (8-24) against tails with CJK and emoji runes.
+func TestFitCwd_ExactWidthAcrossWideRunes(t *testing.T) {
+	for _, tail := range []string{
 		"git/日本語プロジェクト/internal",
 		"emoji/📁folder/sub",
 		"noamsto/tmux-remux/internal/picker",
 		"factify/services/document",
 	} {
 		for width := 8; width <= 24; width++ {
-			if got := pad(s, width); lipgloss.Width(got) != width {
-				t.Errorf("pad(%q, %d) = %q, width %d", s, width, got, lipgloss.Width(got))
-			}
-			if got := padLeft(s, width); lipgloss.Width(got) != width {
-				t.Errorf("padLeft(%q, %d) = %q, width %d", s, width, got, lipgloss.Width(got))
-			}
-			want := min(width, lipgloss.Width(s))
-			if got := clipLeft(s, width); lipgloss.Width(got) != want {
-				t.Errorf("clipLeft(%q, %d) = %q, width %d, want %d", s, width, got, lipgloss.Width(got), want)
+			got := fitCwd(tail, width)
+			if w := lipgloss.Width(got); w != width {
+				t.Errorf("fitCwd(%q, %d) = %q, width %d, want %d", tail, width, got, w, width)
 			}
 		}
 	}

@@ -279,16 +279,11 @@ func closeListWidth(width int) int {
 }
 
 // closeListMin is the close list's floor, read off rendered output for a list
-// whose rows carry every column. Below it the grid starts shedding them and a
-// row reads as a live session rather than one whose target has to be
-// recreated: on the list
-// TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit measures,
-// the "(gone)" tag holds down to 38 and the reopen target below that.
-//
-// #142 put the cwd tail out of this floor's reach. The grid shows a tail
-// whole or sheds it, and that list's deepest path needs 80 cells to survive,
-// where the old layout squeezed it into a quarter of the row at any width. A
-// close's directory is now the preview's to show, not the floor's to promise.
+// whose rows carry every column — including the cwd tail, which only appears
+// when a session's closes are not all in one directory. It is where layoutRow
+// stops shedding, with four cells in hand: at 66 the cwd goes first, from 50
+// the name is clipped, at 40 the "(gone)" tag that says the session must be
+// recreated goes, and at 27 the reopen target.
 const closeListMin = 71
 
 // closePreviewMax is the widest the close preview grows before its surplus is
