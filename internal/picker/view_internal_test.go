@@ -503,11 +503,9 @@ func rowByEvent(t *testing.T, rows []CloseRow, id int64) CloseRow {
 // and age. The cwd column is as wide as the widest tail in the list — 11 for
 // "wt/feat-104" — so a row that elides it still pads to keep names aligned.
 //
-// #142 changed the arrangement: every column is now padded to one width shared
-// by the whole list rather than joined with single spaces, so the name, the
+// Every column is padded to one width the whole list shares, so the name, the
 // command and the target each start at the same cell on every row. The command
-// is right-aligned against the arrow, which is what keeps the "claude → mono:2"
-// pairing the old flowing layout produced.
+// is right-aligned against the arrow, keeping the "claude → mono:2" pairing.
 func TestCloseListRow_Columns(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -613,8 +611,9 @@ func TestCloseListRow_TieHasNoModalCwd(t *testing.T) {
 	}
 	rows := BuildCloseList(evs, ctxs, "duo")
 	v := newCloseListView(rows, ctxs, map[string]bool{"duo": true}, now, nil, 76)
-	// #142 pads the title column, so the name no longer abuts its command and
-	// target; the cwd tail and the name are still the row's opening columns.
+	// The title column is padded to the list-wide width, so the name does not
+	// abut its command or the target; the cwd tail and the name are still the
+	// row's opening columns.
 	want := map[int64]string{
 		1: glyphPane + " tmux-remux  main",
 		2: glyphPane + " wt/feat-104 feat",
@@ -658,11 +657,6 @@ func TestCloseListRow_SubMinuteAgeIsStatic(t *testing.T) {
 // truncated from the left (the tail is what discriminates), then dropped
 // whole, then the command column goes, and the name is clipped only after
 // that — never below the cells that still identify a window.
-//
-// #142 moved two rungs. The cwd now gives ground to its own eight-cell floor
-// before it is dropped, so it survives four cells further down than it used
-// to; and the command, which the old layout shed with the rest of the extras,
-// is now the column that goes when the title reaches its floor.
 func TestCloseListRow_WidthLadder(t *testing.T) {
 	applyTheme(NewTheme())
 	now := time.Now()
@@ -732,7 +726,8 @@ func TestCloseListRow_CwdColumnNeedsRoomToMeanAnything(t *testing.T) {
 	}
 
 	// A quarter of 32 is exactly the floor, and the whole 8-cell tail fits.
-	// #142 pads the title column, so the target no longer abuts the name.
+	// The title column is padded to the list-wide width, so the target does not
+	// abut the name.
 	if got := at(32); !strings.HasPrefix(got, glyphPane+" wt/topic a") || !strings.Contains(got, "→ s:1") {
 		t.Errorf("at 32 the column should hold the tail, got %q", got)
 	}
@@ -818,7 +813,8 @@ func TestCloseListRow_ElidesDefaults(t *testing.T) {
 			t.Errorf("default %q should be elided, got %q", unwanted, defaults)
 		}
 	}
-	// #142 pads the title column, so the target no longer abuts the name.
+	// The title column is padded to the list-wide width, so the target does not
+	// abut the name.
 	if want := glyphWindow + " shell"; !strings.HasPrefix(defaults, want) {
 		t.Errorf("row = %q, want prefix %q", defaults, want)
 	}
@@ -997,7 +993,7 @@ func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.
 	m.width, m.height = closeSideBySideMin, 40
 	listW, _, _ := m.paneWidthsThree()
 	lines := innerLines(t, renderCloseList(m, listW, 38))
-	// #142 pads every column to a width the list shares, so the row no longer
+	// Every column is padded to a width the list shares, so the row no longer
 	// reads as one run of text; each column is checked where it now sits.
 	for _, want := range []string{
 		"claude → mono:2",
