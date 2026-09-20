@@ -280,15 +280,18 @@ func closeListWidth(width int) int {
 
 // closeListMin is the close list's floor, read off rendered output for a list
 // whose rows carry every column — including the cwd tail, which only appears
-// when a session's closes are not all in one directory. Measured on the
-// closeListModel(t, 12) fixture, the grid keeps every column down to 70 and
-// loses the cwd at 69; from 51 the name is clipped, at 37 the "(gone)" tag
-// that says the session must be recreated goes, and at 26 the reopen target.
+// when a session's closes are not all in one directory. The cwd is the column
+// that goes first, so it sets the floor: rendering closeListModel(t, 12)
+// through renderCloseList at descending list widths, it survives down to 70
+// and is gone at 69. One width of margin, which is the whole reason this is a
+// named constant rather than a number at the call site.
 //
-// That leaves this floor one cell above the cwd cliff. Re-measure before
-// changing it or any column's width — nothing but
+// Re-measure that way before changing this or any column's width — the other
+// columns' thresholds are not quoted here because a clipped-but-present value
+// reads as absent to a substring check, so the numbers drift depending on what
+// you grep for. Nothing but
 // TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit would catch
-// the cwd dropping out here.
+// the cwd dropping out from under this floor.
 const closeListMin = 71
 
 // closePreviewMax is the widest the close preview grows before its surplus is

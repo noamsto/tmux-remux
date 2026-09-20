@@ -298,3 +298,22 @@ func TestGridPadding_ExactWidthAcrossWideRunes(t *testing.T) {
 		}
 	}
 }
+
+// Every column but the title and the age has a rung in the shed ladder. The id
+// is the one that had to be added: its width is whatever the column spec asked
+// for, so a wide declared id would otherwise hold its full width while the
+// title was crushed to a single cell — the title is what identifies a row, and
+// no other column may starve it.
+func TestCloseGrid_WideIdDoesNotStarveTheTitle(t *testing.T) {
+	rows := []closeCells{
+		{glyph: "▣", id: strings.Repeat("X", 40), title: "a-window-name-worth-reading",
+			cmd: "claude", target: "→ mono:2", age: "4m"},
+	}
+	for w := 30; w <= 70; w++ {
+		g := newCloseGrid(rows, w)
+		if g.id > 0 && g.title < titleFloor {
+			t.Errorf("width %d: id holds %d cells while the title is down to %d, under its floor of %d",
+				w, g.id, g.title, titleFloor)
+		}
+	}
+}

@@ -93,7 +93,7 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 	// is not enough — a fitted tail still discriminates at eight cells, so
 	// shedding the column while it could still be shown gives up more than
 	// the narrower column costs. Past that the title absorbs down to its own
-	// floor, and only then do the badge and the command go.
+	// floor, and only then do the badge, the command and the id go.
 	g.title = innerWidth - g.fixed() - 1
 	if g.title < want && g.cwd > 0 {
 		if give := want - g.title; g.cwd-give >= cwdFloor {
@@ -103,7 +103,12 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 		}
 		g.title = innerWidth - g.fixed() - 1
 	}
-	for _, col := range []*int{&g.badge, &g.cmd} {
+	// The id sheds last of the three: a ticket id names the work outright,
+	// where the badge and the command only qualify it. It has to be in this
+	// ladder at all, though — its width is whatever the column spec asked for,
+	// so without a rung here a column declared 40 wide would sit at 40
+	// cells while the title was crushed to one.
+	for _, col := range []*int{&g.badge, &g.cmd, &g.id} {
 		if g.title >= titleFloor {
 			break
 		}

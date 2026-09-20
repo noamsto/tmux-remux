@@ -171,18 +171,26 @@ switches on `ColumnRole` and never on an option name.
 
 Declared as data, replacing the implicit ladder:
 
-1. cwd drops
+1. cwd shrinks toward its own eight-cell floor, then drops whole
 2. title shrinks to its floor (12 cells)
 3. badge drops
 4. cmd drops
 5. title clips below its floor
 6. target clips from the left (`…nix-config:2`)
 
-The cwd yields *whole* before the title loses a cell. That is the existing
-policy pinned by `TestCloseListRow_CwdYieldsBeforeTheName`, and an earlier
-draft of this spec inverted it. The title is the row's primary identifier; the
-cwd column only appears at all when a row's cwd is surprising, so it is the
-cheaper thing to give up.
+The cwd yields before the title loses a cell — the title is the row's primary
+identifier, and the cwd column only appears at all when a row's cwd is
+surprising, so it is the cheaper thing to give up. An earlier draft of this
+spec inverted that, and `TestCloseListRow_CwdYieldsBeforeTheName` pins it.
+
+It gives ground *gradually* rather than whole, which that draft also got wrong.
+Pure yield-whole cannot coexist with keeping every column at `closeListMin`:
+the grid pads the title to a width the list shares, where the old flowing
+layout let each row take only what it needed, so at that floor a row cannot
+afford both a full-width cwd and a full title. Forcing it drops the column
+outright there — the regression the cap exists to prevent. A fitted tail still
+discriminates at eight cells, so shrinking to that floor gives up less than
+shedding the column while it could still be shown.
 
 Age never drops: it is three cells and it is the list's sort key. This ordering
 fixes the inversion noted above — the title is squeezed before the command is

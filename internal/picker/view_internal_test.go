@@ -988,11 +988,10 @@ func TestPaneWidths_CloseListSplit(t *testing.T) {
 // "(gone)" tag that says the target session has to be recreated rather than
 // reopened. The grid sheds columns in a declared order as a row runs out of
 // room, so a floor set a few cells lower silently drops one of them and the
-// row reads as a live session, or as the only close in its directory. Widths
-// narrower than this were measured on this fixture: every column survives to
-// 70, the cwd goes at 69, the name starts clipping at 51, "(gone)" goes at 37
-// and the target at 26. The floor is therefore one cell clear of the cwd
-// cliff — this test is what holds it there.
+// row reads as a live session, or as the only close in its directory. The cwd
+// goes first and so sets the floor: on this fixture it survives down to a list
+// width of 70 and is gone at 69, one width below closeListMin. This test is
+// what holds it there.
 func TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit(t *testing.T) {
 	m := closeListModel(t, 12)
 	m.width, m.height = closeSideBySideMin, 40
