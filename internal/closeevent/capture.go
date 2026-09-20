@@ -39,6 +39,10 @@ type Args struct {
 // Capture inserts a close event into the store unless a fresh outer-scope
 // event for the same session exists (cascade dedup). Returns the inserted
 // event id, or 0 if deduped.
+//
+// The dedup runs both ways, because tmux's cascade runs inner-first: an outer
+// event already stored suppresses this one, and this one retracts the inner
+// rows it subsumes. See retractSuperseded.
 func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 	// after-kill-pane is a command hook, so it carries no hook_pane: a pane
 	// killed with prefix+x used to leave no trace at all. Recover its id by
@@ -127,8 +131,56 @@ func Capture(ctx context.Context, db *store.Store, a Args) (int64, error) {
 		return 0, err
 	}
 
+	if err := retractSuperseded(ctx, db, a, cutoff); err != nil {
+		return 0, err
+	}
+
 	linkResolvedScrollback(ctx, db, id, man.Resolved)
 	return id, nil
+}
+
+// retractSuperseded deletes the inner-scope events this one subsumes. The
+// cascade checks above only look backwards, which never fires for the order
+// tmux actually produces: a window's last pane exits *before* the window
+// unlinks, and every pane and window goes before the session closes. The inner
+// row is therefore already stored by the time the outer event arrives, and
+// restoring the outer one recreates what the inner one held — so the list grew
+// two rows for a close the reader only made once.
+//
+// Scrollback rows reference events ON DELETE CASCADE and parent_event_id is ON
+// DELETE SET NULL, so a delete here leaves nothing dangling.
+func retractSuperseded(ctx context.Context, db *store.Store, a Args, cutoff int64) error {
+	var inner []string
+	switch a.Kind {
+	case "window-unlinked":
+		inner = []string{"pane-died"}
+	case "session-closed":
+		inner = []string{"pane-died", "window-unlinked"}
+	default:
+		return nil
+	}
+
+	evs, err := db.ListEvents(ctx, store.ListOpts{Kinds: inner, Limit: 50})
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for _, ev := range evs {
+		if ev.Ts < cutoff {
+			continue
+		}
+		match := eventReferencesWindow(ev.ManifestJSON, a.SessionID, a.WindowID)
+		if a.Kind == "session-closed" {
+			match = eventReferencesSession(ev.ManifestJSON, a.SessionID)
+		}
+		if match {
+			ids = append(ids, ev.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return db.DeleteEvents(ctx, ids)
 }
 
 // resolveAtCapture embeds the closed entity in the event at capture time so a

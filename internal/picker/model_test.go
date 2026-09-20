@@ -271,7 +271,7 @@ func closeModel(t *testing.T, hidden int) picker.PickerModel {
 	m := picker.NewPickerModel(picker.ModeClose, events, running, nil)
 	m.SetCloseContexts(ctxs)
 	m.SetCloseRows(picker.BuildCloseList(events, ctxs, "mono"))
-	m.SetHiddenCount(hidden)
+	m.SetHiddenCount(hidden, 0)
 	m.Bootstrap()
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	return upd.(picker.PickerModel)
@@ -282,7 +282,9 @@ func TestModel_CloseModeShowsHiddenCountLine(t *testing.T) {
 	if !strings.Contains(out, "14 unrecoverable closes hidden") {
 		t.Errorf("expected hidden-count line, got:\n%s", out)
 	}
-	if !strings.Contains(out, "win → mono:4") {
+	// The title column is padded to the list-wide flex width, so the name no
+	// longer abuts its reopen target.
+	if !strings.Contains(out, "win") || !strings.Contains(out, "mono:4") {
 		t.Errorf("recoverable row should still render, got:\n%s", out)
 	}
 }
@@ -307,7 +309,7 @@ func TestModel_CloseModeNoHiddenLineWhenZero(t *testing.T) {
 func TestModel_CloseModeAllHiddenEmptyState(t *testing.T) {
 	m := picker.NewPickerModel(picker.ModeClose, nil, nil, nil)
 	m.SetCloseRows(picker.BuildCloseList(nil, nil, ""))
-	m.SetHiddenCount(5)
+	m.SetHiddenCount(5, 0)
 	m.Bootstrap()
 	upd, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	out := upd.(picker.PickerModel).View().Content
@@ -413,7 +415,7 @@ func TestModel_CloseModeWithNoRowsNeverPagesTheEventSlice(t *testing.T) {
 	evs := []store.Event{{ID: 7, Ts: 300, Kind: "pane-died"}, {ID: 8, Ts: 200, Kind: "pane-died"}}
 	m := picker.NewPickerModel(picker.ModeClose, evs, nil, nil)
 	m.SetCloseRows(picker.BuildCloseList(evs, nil, "mono")) // no contexts: nothing recoverable
-	m.SetHiddenCount(len(evs))
+	m.SetHiddenCount(len(evs), 0)
 	m.Bootstrap()
 
 	for _, code := range []rune{tea.KeyDown, tea.KeyDown, tea.KeyUp} {

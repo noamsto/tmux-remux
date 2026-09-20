@@ -166,7 +166,7 @@ func (c SaveCmd) Run() error {
 		}
 		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
-		t := tmux.NewClient("tmux", cfg.DecorationOptions...)
+		t := tmux.NewClient("tmux", cfg.CaptureOptions()...)
 		saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 			Host:              hostname(),
 			CaptureScrollback: cfg.CaptureScrollback,
@@ -628,16 +628,17 @@ func (c PickCmd) Run() error {
 
 		sb := scrollback.New(cfg.ScrollbackDir)
 		var ctxs map[int64]picker.CloseContext
-		hidden := 0
+		hidden, ignored := 0, 0
 		if mode == picker.ModeClose {
 			ctxs = buildCloseContexts(ctx, db, evs)
-			evs, hidden = partitionRecoverable(evs, ctxs, bridged)
+			evs, hidden, ignored = partitionRecoverable(evs, ctxs, bridged, cfg.IgnoreWindows)
 		}
 		m := picker.NewPickerModel(mode, evs, runningSet, sb)
+		m.SetDecorationColumns(cfg.DecorationColumns)
 		m.SetBridged(bridged)
 		if mode == picker.ModeClose {
 			m.SetCloseContexts(ctxs)
-			m.SetHiddenCount(hidden)
+			m.SetHiddenCount(hidden, ignored)
 			m.SetCloseRows(picker.BuildCloseList(evs, ctxs, currentSession(ctx, t, c.Session)))
 		}
 		m.Bootstrap()
@@ -711,7 +712,7 @@ func undoFailures(eventID int64, failed []restore.FailedAction, logf func(string
 // same way. Capture drops these at the source, but a store keeps every one
 // recorded before that drop worked, and restoring one injects a window into a
 // rendering of a remote.
-func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext, bridged map[string]bool) (kept []store.Event, hidden int) {
+func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext, bridged map[string]bool, ignore []string) (kept []store.Event, hidden, ignored int) {
 	kept = make([]store.Event, 0, len(evs))
 	for _, ev := range evs {
 		cc := ctxs[ev.ID]
@@ -719,9 +720,16 @@ func partitionRecoverable(evs []store.Event, ctxs map[int64]picker.CloseContext,
 			hidden++
 			continue
 		}
+		// Counted apart from the unrecoverable: one is a close we failed to
+		// resolve, the other one the reader never made. Saying "unrecoverable"
+		// for both would report a failure where there was none.
+		if config.IgnoredWindow(ignore, snapshot.StripFormat(cc.Placement.WindowName)) {
+			ignored++
+			continue
+		}
 		kept = append(kept, ev)
 	}
-	return kept, hidden
+	return kept, hidden, ignored
 }
 
 // bridgedSessions names the sessions carrying @bridge_host — lazytmux bridge
@@ -981,7 +989,13 @@ func signalCtx() (context.Context, func()) {
 	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
-func loadConfig() config.Config { return config.Default() }
+func loadConfig() config.Config {
+	cfg := config.Default()
+	opts := tmux.GlobalOptions("tmux")
+	cfg.DecorationColumns = config.ParseDecorationColumns(opts["@remux_columns"])
+	cfg.IgnoreWindows = config.ParseIgnoreWindows(opts["@remux_ignore_windows"])
+	return cfg
+}
 
 // resolveBuildOptions builds the BuildOptions consumed by restore.BuildPlan.
 // Errors are silently swallowed in favor of reasonable defaults: an

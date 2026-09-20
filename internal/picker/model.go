@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/noamsto/tmux-remux/internal/config"
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -76,10 +77,17 @@ type PickerModel struct {
 	// When the mode is ModeClose, m.cursor indexes closeRows rather than
 	// m.events. Empty when nothing recoverable was closed.
 	closeRows []CloseRow
+	// decorationColumns declares the close list's extra columns, sourced from
+	// captured tmux window options. Nil when @remux_columns is unset, which is
+	// the default: remux ships no schema of its own.
+	decorationColumns []config.DecorationColumn
 	// hiddenCount is the number of unrecoverable close events the caller
 	// filtered out before constructing the model. Rendered as a footer line so
 	// the user knows the list is pruned. Close mode only.
 	hiddenCount int
+	// ignoredCount is the number filtered by @remux_ignore_windows. Kept apart
+	// from hiddenCount so the footer can say which is which.
+	ignoredCount int
 	// demoKeys echoes the last key pressed into the footer, for screen
 	// recordings where the viewer can't see the keyboard. Off unless
 	// REMUX_DEMO_KEYS is set; never on in normal use.
@@ -585,16 +593,25 @@ func (m *PickerModel) SetBridged(bridged map[string]bool) {
 	m.filter.Bridged = bridged
 }
 
-// SetHiddenCount records how many unrecoverable close events the caller
-// filtered out. Rendered as a footer line in the list pane. Close mode only.
-func (m *PickerModel) SetHiddenCount(n int) {
-	m.hiddenCount = n
+// SetHiddenCount records how many close events the caller filtered out:
+// unrecoverable ones, and ones whose window matched @remux_ignore_windows.
+// Rendered as a footer line in the list pane. Close mode only.
+func (m *PickerModel) SetHiddenCount(unrecoverable, ignored int) {
+	m.hiddenCount = unrecoverable
+	m.ignoredCount = ignored
 }
 
 // SetCloseRows attaches the flat, newest-first close list. Call between
 // NewPickerModel and Bootstrap. Close mode only.
 func (m *PickerModel) SetCloseRows(rows []CloseRow) {
 	m.closeRows = rows
+}
+
+// SetDecorationColumns configures which captured window options the close list
+// renders as columns. The picker never names an option itself — the spec comes
+// from config, which parses it from @remux_columns.
+func (m *PickerModel) SetDecorationColumns(cols []config.DecorationColumn) {
+	m.decorationColumns = cols
 }
 
 // SetCursor moves the cursor. Exported for tests; production code moves the

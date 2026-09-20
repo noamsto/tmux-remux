@@ -49,6 +49,16 @@ type Config struct {
 	// codename, tint) that a fan-out orchestrator stamped but that nothing
 	// re-derives after a server restart.
 	DecorationOptions []string
+
+	// DecorationColumns declares which captured options the close list renders
+	// as columns, and how. Empty by default: tmux-remux is a published plugin
+	// and must not ship another tool's option schema. Set via @remux_columns.
+	DecorationColumns []DecorationColumn
+
+	// IgnoreWindows are window-name patterns whose closes the picker hides.
+	// Empty by default: which windows are noise is a property of the user's
+	// plugins, not of tmux-remux. Set via @remux_ignore_windows.
+	IgnoreWindows []string
 }
 
 // Default returns a Config with XDG-resolved paths and sensible thresholds.

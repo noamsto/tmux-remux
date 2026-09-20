@@ -78,7 +78,10 @@ func applyTheme(t Theme) {
 	footerSep = lipgloss.NewStyle().Foreground(t.Overlay())
 	keyCast = lipgloss.NewStyle().Foreground(t.Base()).Background(t.Mauve()).Bold(true)
 
-	previewHeader = lipgloss.NewStyle().Foreground(t.Blue()).Bold(true)
+	// Mauve, not blue: a section header names a session, and window-scope
+	// close rows are blue. A window named after its repo then read as the
+	// section above it, which is the same name in the same colour.
+	previewHeader = lipgloss.NewStyle().Foreground(t.Mauve()).Bold(true)
 	// Shares the preview's second-rail accent so a command reads the same
 	// wherever it appears. Must stay distinct from nodeWindow: the two sit
 	// adjacent in a row, over glyph-dense window names with no other boundary.

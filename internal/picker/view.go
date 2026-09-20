@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/noamsto/tmux-remux/internal/config"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 )
 
@@ -279,10 +280,18 @@ func closeListWidth(width int) int {
 
 // closeListMin is the close list's floor, read off rendered output for a list
 // whose rows carry every column — including the cwd tail, which only appears
-// when a session's closes are not all in one directory. It is where layoutRow
-// stops shedding, with four cells in hand: at 66 the cwd goes first, from 50
-// the name is clipped, at 40 the "(gone)" tag that says the session must be
-// recreated goes, and at 27 the reopen target.
+// when a session's closes are not all in one directory. The cwd is the column
+// that goes first, so it sets the floor: rendering closeListModel(t, 12)
+// through renderCloseList at descending list widths, it survives down to 70
+// and is gone at 69. One width of margin, which is the whole reason this is a
+// named constant rather than a number at the call site.
+//
+// Re-measure that way before changing this or any column's width — the other
+// columns' thresholds are not quoted here because a clipped-but-present value
+// reads as absent to a substring check, so the numbers drift depending on what
+// you grep for. Nothing but
+// TestRenderCloseList_KeepsEveryDecidingColumnAtTheNarrowestSplit would catch
+// the cwd dropping out from under this floor.
 const closeListMin = 71
 
 // closePreviewMax is the widest the close preview grows before its surplus is
@@ -300,7 +309,7 @@ func (m PickerModel) listWindow(height int) (start, end, eventRows int, showFoot
 	if rows < 1 {
 		rows = 1
 	}
-	showFooter = m.hiddenCount > 0 && rows > 1
+	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	eventRows = rows
 	if showFooter {
 		eventRows--
@@ -353,7 +362,7 @@ func renderList(m PickerModel, width, height int) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount, m.ignoredCount)), innerWidth, "…")
 		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
 	}
 	return frame.Render(b.String())
@@ -368,7 +377,7 @@ func (m PickerModel) closeListWindow(height int) (start, end, pin, rowBudget int
 	if rows < 1 {
 		rows = 1
 	}
-	showFooter = m.hiddenCount > 0 && rows > 1
+	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	rowBudget = rows
 	if showFooter {
 		rowBudget--
@@ -397,15 +406,15 @@ func renderCloseList(m PickerModel, width, height int) string {
 	}
 	if len(m.closeRows) == 0 {
 		msg := "No close events yet."
-		if m.hiddenCount > 0 {
-			msg = fmt.Sprintf("No recoverable closes (%d hidden).", m.hiddenCount)
+		if n := m.hiddenCount + m.ignoredCount; n > 0 {
+			msg = fmt.Sprintf("No recoverable closes (%d hidden).", n)
 		}
 		return frame.Render(rowDim.Render(msg))
 	}
 
 	start, end, pin, rowBudget, showFooter := m.closeListWindow(height)
 
-	v := newCloseListView(m.closeRows, m.closeContexts, m.runningSet, time.Now())
+	v := newCloseListView(m.closeRows, m.closeContexts, m.runningSet, time.Now(), m.decorationColumns, innerWidth)
 	var b strings.Builder
 	if pin >= 0 {
 		b.WriteString(v.renderRow(m.closeRows[pin], innerWidth, false))
@@ -423,7 +432,7 @@ func renderCloseList(m PickerModel, width, height int) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount, m.ignoredCount)), innerWidth, "…")
 		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
 	}
 	return frame.Render(b.String())
@@ -444,12 +453,19 @@ func sectionHeaderIdx(rows []CloseRow, i int) int {
 }
 
 // hiddenPhrase renders the pluralized "N unrecoverable close(s)" fragment.
-func hiddenPhrase(n int) string {
+func hiddenPhrase(unrecoverable, ignored int) string {
 	noun := "closes"
-	if n == 1 {
+	if unrecoverable+ignored == 1 {
 		noun = "close"
 	}
-	return fmt.Sprintf("%d unrecoverable %s", n, noun)
+	switch {
+	case ignored == 0:
+		return fmt.Sprintf("%d unrecoverable %s", unrecoverable, noun)
+	case unrecoverable == 0:
+		return fmt.Sprintf("%d ignored %s", ignored, noun)
+	default:
+		return fmt.Sprintf("%d unrecoverable, %d ignored %s", unrecoverable, ignored, noun)
+	}
 }
 
 // scrollWindow returns [start,end) such that `cursor` falls inside and the
@@ -630,14 +646,78 @@ type closeListView struct {
 	live  map[string]bool
 	now   time.Time
 	tails map[int64]string // EventID → cwd tail; absent when elided
-	// widest is the widest tail in the list, so rows that elide theirs still
-	// pad to keep the columns right of it aligned. 0 drops the column.
-	widest int
+	// cols is the decoration column spec. The view switches on each column's
+	// role, never on its option name, so which tmux option feeds which column
+	// stays config's business.
+	cols []config.DecorationColumn
+	// grids holds one resolved grid per section; section maps a row's event to
+	// the one that governs it. Columns resolve per section rather than per
+	// list because a section is a closed block — a header above it, a rule
+	// below — so its columns need not line up with a neighbour's. Sharing one
+	// resolution makes every section pay for the widest value in any of them:
+	// a session whose closes are all in one directory elides its cwd, and
+	// would still be indented past a path column only the section below fills.
+	grids   []closeGrid
+	section map[int64]int
+	// headerSection maps a section header's text to the section it opens, so
+	// the header can label the columns of the rows beneath it.
+	headerSection map[string]int
 }
 
-// newCloseListView precomputes the per-list column facts for rows.
-func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time) closeListView {
-	v := closeListView{ctxs: ctxs, live: live, now: now, tails: map[int64]string{}}
+// columnLabels names the columns in the section header, so the rows below
+// need not repeat a marker on every line. Roles, never option names: what a
+// decoration column holds is config's business, not the picker's.
+//
+// Each entry is tried in order and the first that fits its column wins, so a
+// narrow section says "to" where a wide one says "restore" rather than going
+// unlabelled. A column too narrow for even the last alternative is left bare:
+// a cut label says less than none.
+
+// Column-header glyphs. If any of these draws as tofu, swap the constant for
+// your Nerd Font's variant — the header tolerates any single-cell glyph, and
+// falls back to the bare word when one does not fit.
+const (
+	headGlyphID      = "" // nerd: nf-cod-tag
+	headGlyphPath    = "" // nerd: nf-cod-folder
+	headGlyphBadge   = "" // nerd: nf-cod-milestone
+	headGlyphCmd     = "" // nerd: nf-cod-terminal
+	headGlyphRestore = "" // nerd: nf-cod-debug-restart
+	headGlyphAge     = "" // nerd: nf-cod-history
+)
+
+// labelsFor names each of a section's columns for its header. Every column is
+// tried as glyph-and-word first, then the word alone, then the glyph alone, so
+// a narrow column still says something; one too narrow for even a glyph is
+// left bare, since a cut label says less than none.
+func labelsFor(g closeGrid) closeCells {
+	pick := func(width int, glyph, word string, short ...string) string {
+		alts := append([]string{glyph + " " + word, word}, short...)
+		alts = append(alts, glyph)
+		for _, s := range alts {
+			if lipgloss.Width(s) <= width {
+				return s
+			}
+		}
+		return ""
+	}
+	return closeCells{
+		id:     pick(g.id, headGlyphID, "id"),
+		cwd:    pick(g.cwd, headGlyphPath, "path", "dir"),
+		badge:  pick(g.badge, headGlyphBadge, "tag"),
+		cmd:    pick(g.cmd, headGlyphCmd, "cmd"),
+		target: pick(g.target, headGlyphRestore, "restore", "to"),
+		age:    pick(g.age, headGlyphAge, "age"),
+	}
+}
+
+// gridFor returns the grid governing r's section.
+func (v closeListView) gridFor(r CloseRow) closeGrid {
+	return v.grids[v.section[r.EventID]]
+}
+
+// newCloseListView precomputes the per-section column facts for rows.
+func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[string]bool, now time.Time, cols []config.DecorationColumn, innerWidth int) closeListView {
+	v := closeListView{ctxs: ctxs, live: live, now: now, tails: map[int64]string{}, cols: cols}
 
 	counts := map[string]map[string]int{}
 	cwds := map[int64]string{}
@@ -667,11 +747,34 @@ func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[str
 		if !ok || cwd == modal[r.Session] {
 			continue
 		}
-		tail := cwdTail(cwd, base[r.Session])
-		v.tails[r.EventID] = tail
-		if w := lipgloss.Width(tail); w > v.widest {
-			v.widest = w
+		v.tails[r.EventID] = cwdTail(cwd, base[r.Session])
+	}
+
+	// A header opens a section; every selectable row after it belongs to that
+	// one. Rows before the first header (a list with no sections at all) fall
+	// into section 0, which is why there is always at least one grid.
+	v.section = make(map[int64]int, len(rows))
+	v.headerSection = map[string]int{}
+	sections := [][]closeCells{{}}
+	for _, r := range rows {
+		if r.Kind == RowSectionHeader && len(sections[len(sections)-1]) > 0 {
+			sections = append(sections, nil)
 		}
+		i := len(sections) - 1
+		if r.Kind == RowSectionHeader {
+			// Keyed by the header's own text: a header carries no event id, and
+			// its labels have to be measured against the grid it introduces.
+			v.headerSection[r.Section] = i
+		}
+		if !r.Selectable() {
+			continue
+		}
+		v.section[r.EventID] = i
+		sections[i] = append(sections[i], v.cells(r))
+	}
+	v.grids = make([]closeGrid, len(sections))
+	for i, cells := range sections {
+		v.grids[i] = newCloseGrid(cells, innerWidth)
 	}
 	return v
 }
@@ -794,6 +897,86 @@ func scopeGlyph(scope string) string {
 	return glyphPane
 }
 
+// cells pulls one row's column values: remux's own data, plus whatever the
+// configured decoration columns find on the closed window.
+//
+// Defaults say nothing, so they are left empty: a shell that is fish, a window
+// that held one pane, a session that is still running.
+func (v closeListView) cells(r CloseRow) closeCells {
+	cc := v.ctxs[r.EventID]
+	cmd, _ := closedPaneInfo(cc)
+	if cmd == "fish" {
+		cmd = ""
+	}
+
+	var id, badge, decoratedTitle string
+	if w := closedWindow(cc); w != nil {
+		for _, col := range v.cols {
+			// Stripped before the role switch, not per role: a column can be
+			// pointed at any window option, so no role may reach the row
+			// through a weaker sanitization than the window name gets.
+			val := snapshot.StripFormat(w.Decoration[col.Option])
+			if val == "" {
+				continue
+			}
+			switch col.Role {
+			case config.RoleID:
+				id = ansi.Truncate(val, col.Max, "…")
+			case config.RoleBadge:
+				badge = ansi.Truncate(val, col.Max, "…")
+			case config.RoleText:
+				decoratedTitle = val
+			}
+		}
+	}
+
+	// An event captured before a column was configured has no value for it, so
+	// the title falls back to the window name through the same column rather
+	// than through a second path for old rows.
+	title := decoratedTitle
+	if title == "" {
+		title = snapshot.StripFormat(r.Placement.WindowName)
+	}
+	// No arrow: the section header labels this column "restore", so a marker
+	// on every row would say the same thing once per line.
+	target := r.Session
+	if r.Scope == "session" {
+		title = fmt.Sprintf("%dw", countWindows(cc.SubManifest))
+	} else {
+		target += ":" + strconv.Itoa(r.Placement.WindowIndex)
+	}
+
+	// (gone) and the pane count ride along with the title rather than taking
+	// columns of their own: both are rare, so a column for either would be
+	// blank on nearly every row.
+	var extra []string
+	if !v.live[r.Session] {
+		extra = append(extra, "(gone)")
+	}
+	if r.Placement.PaneCount > 1 {
+		extra = append(extra, fmt.Sprintf("%dp", r.Placement.PaneCount))
+	}
+	if len(extra) > 0 {
+		title += "  " + strings.Join(extra, " ")
+	}
+
+	age := columnAge(v.now.Sub(time.UnixMilli(r.Ts)))
+	if r.Count > 1 {
+		age = fmt.Sprintf("×%d %s", r.Count, age)
+	}
+
+	return closeCells{
+		glyph:  scopeGlyph(r.Scope),
+		cwd:    v.tails[r.EventID],
+		id:     id,
+		title:  title,
+		badge:  badge,
+		cmd:    cmd,
+		target: target,
+		age:    age,
+	}
+}
+
 // renderRow renders one flat close row as a single line of exactly innerWidth
 // cells. Section headers render their text alone; a divider renders as a dim
 // rule across the pane.
@@ -801,47 +984,11 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
-	if r.Kind == RowDivider {
-		return rowDim.Render(strings.Repeat("─", innerWidth))
-	}
 	if !r.Selectable() {
-		return previewHeader.Width(innerWidth).Render(ansi.Truncate(r.Section, innerWidth, "…"))
+		return v.renderSectionHeader(r, innerWidth)
 	}
 
-	cc := v.ctxs[r.EventID]
-	cmd, _ := closedPaneInfo(cc)
-	name := snapshot.StripFormat(r.Placement.WindowName)
-	target := "→ " + r.Session
-	if r.Scope == "session" {
-		name = fmt.Sprintf("%dw", countWindows(cc.SubManifest))
-	} else {
-		target += ":" + strconv.Itoa(r.Placement.WindowIndex)
-	}
-
-	// Defaults say nothing, so they are not printed: a shell that is fish, a
-	// window that held one pane, a session that is still running. hasCmd is
-	// tracked separately from extra[0] == cmd because "(gone)" or a pane count
-	// can also land first when cmd itself is elided.
-	var extra []string
-	hasCmd := cmd != "" && cmd != "fish"
-	if hasCmd {
-		extra = append(extra, cmd)
-	}
-	if !v.live[r.Session] {
-		extra = append(extra, "(gone)")
-	}
-	if r.Placement.PaneCount > 1 {
-		extra = append(extra, fmt.Sprintf("%dp", r.Placement.PaneCount))
-	}
-
-	var right []string
-	if r.Count > 1 {
-		right = append(right, fmt.Sprintf("×%d", r.Count))
-	}
-	right = append(right, columnAge(v.now.Sub(time.UnixMilli(r.Ts))))
-	tail := strings.Join(right, " ")
-
-	line, cmdStart, cmdEnd := v.layoutRow(r, name, extra, hasCmd, target, tail, innerWidth)
+	line, cmdStart, cmdEnd := v.gridFor(r).render(v.cells(r))
 
 	// One flat style over plain text, then StyleRanges punches in the command's
 	// own colour: lipgloss v2 resets to the terminal default (not the outer
@@ -862,78 +1009,6 @@ func (v closeListView) renderRow(r CloseRow, innerWidth int, active bool) string
 	return lipgloss.StyleRanges(styled, lipgloss.NewRange(cmdStart, cmdEnd, cmdStyle))
 }
 
-// layoutRow fits the columns into innerWidth by giving them up in order of
-// how little they say. The cwd column goes first — it is the one that most
-// often has nothing to say — then the name is clipped to a readable floor,
-// then the extra column, and only then is the name cut to the bone. The name
-// is defended this far because nerd-font glyph runs measure narrower than
-// they paint, so a name cut mid-run loses the words that identify it.
-//
-// hasCmd reports whether extra[0] is the closed pane's command, so callers
-// can recolour it; layoutRow returns its [start,end) cell range in the
-// finished line, or (-1,-1) when there is no command or it didn't survive the
-// column-shedding above. Positions are cell offsets — lipgloss.StyleRanges
-// indexes by display width, not by rune or byte count, and glyph-dense
-// window names make those three disagree.
-func (v closeListView) layoutRow(r CloseRow, name string, extra []string, hasCmd bool, target, tail string, innerWidth int) (line string, cmdStart, cmdEnd int) {
-	avail := innerWidth - lipgloss.Width(tail) - 1
-	if avail < 1 {
-		avail = 1
-	}
-
-	cmdStart, cmdEnd = -1, -1
-	build := func(name string, cwdWidth int, extra []string) string {
-		cols := []string{scopeGlyph(r.Scope)}
-		if cwdWidth > 0 {
-			cols = append(cols, fitCwd(v.tails[r.EventID], cwdWidth))
-		}
-		cols = append(cols, name)
-		prefix := strings.Join(cols, " ")
-		cmdStart, cmdEnd = -1, -1
-		if hasCmd && len(extra) > 0 {
-			cmdStart = lipgloss.Width(prefix) + 1
-			cmdEnd = cmdStart + lipgloss.Width(extra[0])
-		}
-		cols = append(cols, extra...)
-		return strings.Join(append(cols, target), " ")
-	}
-	clip := func(line string, floor int) string {
-		budget := lipgloss.Width(name) - (lipgloss.Width(line) - avail)
-		if budget < floor {
-			budget = floor
-		}
-		return clipName(name, budget)
-	}
-
-	left := build(name, v.cwdColumnWidth(innerWidth), extra)
-	if lipgloss.Width(left) > avail {
-		left = build(name, 0, extra)
-	}
-	if lipgloss.Width(left) > avail {
-		name = clip(left, 8)
-		left = build(name, 0, extra)
-	}
-	if lipgloss.Width(left) > avail && len(extra) > 0 {
-		left = build(name, 0, nil)
-		extra = nil
-	}
-	if lipgloss.Width(left) > avail {
-		left = build(clip(left, 4), 0, extra)
-	}
-
-	line = left
-	if gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(tail); gap > 0 {
-		line += strings.Repeat(" ", gap)
-	} else {
-		line += " "
-	}
-	line = ansi.Truncate(line+tail, innerWidth, "…")
-	if cmdEnd > lipgloss.Width(line) {
-		cmdStart, cmdEnd = -1, -1
-	}
-	return line, cmdStart, cmdEnd
-}
-
 // clipName cuts a window name to width cells. A name carrying a nerd-font
 // glyph run — the ticket id, agent and PR glyphs a window name accretes — is
 // cut from the left, because the run sits at the end and is what identifies
@@ -949,7 +1024,7 @@ func clipName(name string, width int) string {
 		return ansi.Truncate(name, width, "…")
 	}
 	// A double-width rune straddling the cut can leave TruncateLeft one cell
-	// over budget; the re-truncate clamps it back, as fitCwd does.
+	// over budget; the re-truncate clamps it back, as clipLeft does.
 	return ansi.Truncate(ansi.TruncateLeft(name, w-width+1, "…"), width, "")
 }
 
@@ -965,51 +1040,6 @@ func hasGlyphRun(name string) bool {
 	return false
 }
 
-// cwdColumnWidth budgets the cwd column: as wide as the widest tail in the
-// list, but never more than a quarter of the row, and dropped entirely when
-// that quarter is too narrow to hold a meaningful path fragment.
-func (v closeListView) cwdColumnWidth(innerWidth int) int {
-	if v.widest == 0 {
-		return 0
-	}
-	budget := innerWidth / 4
-	if budget > 24 {
-		budget = 24
-	}
-	if budget < 8 {
-		return 0
-	}
-	if v.widest < budget {
-		return v.widest
-	}
-	return budget
-}
-
-// fitCwd pads or left-truncates a tail to exactly width cells. Truncation is
-// from the left, since the tail is what discriminates. A cut that lands
-// mid-segment ("…sto/tmux-remux") reads as a mangled word rather than a path,
-// so the cut is nudged forward to the next "/" when that costs only a few
-// more cells — past that the segment is long enough that losing it whole
-// gives up more than the ragged edge does.
-func fitCwd(tail string, width int) string {
-	w := lipgloss.Width(tail)
-	if w <= width {
-		return tail + strings.Repeat(" ", width-w)
-	}
-	cut := ansi.TruncateLeft(tail, w-width+1, "…")
-	if i := strings.IndexByte(cut, '/'); i > 0 && lipgloss.Width(cut[:i]) <= 6 {
-		cut = "…" + cut[i:]
-	}
-	// A double-width rune straddling the TruncateLeft cut can leave it one
-	// cell over width; clamp before padding so the Repeat count never goes
-	// negative.
-	cut = ansi.Truncate(cut, width, "")
-	if pad := width - lipgloss.Width(cut); pad > 0 {
-		cut += strings.Repeat(" ", pad)
-	}
-	return cut
-}
-
 // closeRowScopeStyle colours a close row by what it would restore, matching
 // the palette the preview tree uses for the same three levels.
 func closeRowScopeStyle(scope string) lipgloss.Style {
@@ -1020,4 +1050,41 @@ func closeRowScopeStyle(scope string) lipgloss.Style {
 		return nodeWindow
 	}
 	return nodePane
+}
+
+// renderSectionHeader draws a section's name and, to its right, a label over
+// each column the rows beneath it will fill. The labels are laid out by
+// rendering them through that section's own grid, so they cannot drift from
+// the values below: the header is a row, built the way every other row is.
+//
+// A label wider than its column is dropped rather than cut — "resto" over a
+// narrow target column says less than an unlabelled one, and the arrow the
+// rows used to carry is gone precisely because this says it once instead.
+func (v closeListView) renderSectionHeader(r CloseRow, innerWidth int) string {
+	g := v.grids[v.headerSection[r.Section]]
+	line, _, _ := g.render(labelsFor(g))
+
+	// The name takes the head of the line; the run of spaces between it and
+	// the first label becomes a rule, which is what ties the two together as
+	// one header rather than a name and a detached row of words.
+	name := ansi.Truncate(r.Section, innerWidth, "…")
+	head := lipgloss.Width(name)
+	first := firstLabelCell(line)
+	if first <= head+1 {
+		return previewHeader.Width(innerWidth).Render(name)
+	}
+	rule := rowDim.Render(" " + strings.Repeat("─", first-head-2) + " ")
+	tail := ansi.TruncateLeft(line, first, "")
+	return previewHeader.Render(name) + rule + rowDim.Render(tail)
+}
+
+// firstLabelCell returns the cell offset of the first non-blank cell in a
+// rendered label row, or the row's width when it carries no labels at all.
+func firstLabelCell(line string) int {
+	for i, r := range []rune(line) {
+		if r != ' ' {
+			return lipgloss.Width(string([]rune(line)[:i]))
+		}
+	}
+	return lipgloss.Width(line)
 }

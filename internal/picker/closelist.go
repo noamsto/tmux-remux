@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/noamsto/tmux-remux/internal/closeevent"
+	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
 )
 
@@ -22,13 +23,12 @@ type ClosePlacement struct {
 // CloseRowKind identifies what a CloseRow represents in the flat list.
 type CloseRowKind int
 
-// Close-row kinds. RowSectionHeader introduces a section, RowDivider is the
-// rule between two sections, and RowClose is one close event (or a collapsed
-// run of duplicates).
+// Close-row kinds. RowSectionHeader introduces a section — and draws the rule
+// that separates it from the one above — and RowClose is one close event (or a
+// collapsed run of duplicates).
 const (
 	RowSectionHeader CloseRowKind = iota
 	RowClose
-	RowDivider
 )
 
 // CloseRow is one row of the flat close list.
@@ -97,6 +97,23 @@ func closedPaneInfo(cc CloseContext) (cmd, cwd string) {
 	return "", ""
 }
 
+// closedWindow returns the window a close event took down, or nil when the
+// sub-manifest does not contain it. A window- or pane-scope close is matched by
+// Placement.WindowIndex; a session-scope close has no single window.
+func closedWindow(cc CloseContext) *snapshot.Window {
+	if cc.Placement.Scope == "session" {
+		return nil
+	}
+	for _, s := range cc.SubManifest.Sessions {
+		for i, w := range s.Windows {
+			if w.Index == cc.Placement.WindowIndex {
+				return &s.Windows[i]
+			}
+		}
+	}
+	return nil
+}
+
 // closeGroup accumulates one collapsed row as later duplicates are folded in.
 type closeGroup struct {
 	row   CloseRow
@@ -157,12 +174,10 @@ func BuildCloseList(evs []store.Event, ctxs map[int64]CloseContext, current stri
 		out = append(out, finishCloseGroups(thisGroups)...)
 	}
 	if len(otherGroups) > 0 {
-		// The two sections are cut by one dim rule, so a reader scanning down
-		// the list sees where the current session's closes end instead of
-		// walking into another session's rows under a heading easy to miss.
-		if len(thisGroups) > 0 {
-			out = append(out, CloseRow{Kind: RowDivider})
-		}
+		// No rule of its own between the sections: the header carries one,
+		// running from its name out to the column labels, so a separate
+		// full-width rule above it drew the same boundary twice and spent a
+		// row of a list that is usually taller than the pane it sits in.
 		out = append(out, CloseRow{Kind: RowSectionHeader, Section: sectionOther()})
 		out = append(out, finishCloseGroups(otherGroups)...)
 	}

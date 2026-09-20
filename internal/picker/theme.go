@@ -2,11 +2,10 @@ package picker
 
 import (
 	"image/color"
-	"os/exec"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/noamsto/themestate"
+	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 // Theme resolves Catppuccin role colors from tmux options, with hardcoded
@@ -25,7 +24,7 @@ type Theme struct {
 func NewTheme() Theme {
 	return Theme{
 		flavour:  themestate.Detect(),
-		tmuxOpts: readTmuxOpts(),
+		tmuxOpts: tmux.GlobalOptions("tmux"),
 	}
 }
 
@@ -83,22 +82,4 @@ func (t Theme) Lavender() color.Color { return t.color("@thm_lavender", "#b4befe
 func (t Theme) ASCIIGlyphs() bool {
 	v := t.tmuxOpts["@remux_ascii_glyphs"]
 	return v != "" && v != "off"
-}
-
-func readTmuxOpts() map[string]string {
-	out, err := exec.Command("tmux", "show", "-g").Output()
-	if err != nil {
-		return nil
-	}
-	m := make(map[string]string)
-	for _, line := range strings.Split(string(out), "\n") {
-		i := strings.IndexByte(line, ' ')
-		if i <= 0 {
-			continue
-		}
-		v := strings.TrimRight(line[i+1:], " \t\r")
-		v = strings.Trim(v, "\"")
-		m[line[:i]] = v
-	}
-	return m
 }
