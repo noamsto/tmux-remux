@@ -2,7 +2,7 @@
 
 **Issue:** noamsto/tmux-remux#142
 **Date:** 2026-09-17
-**Status:** Design approved, pending implementation plan
+**Status:** Implemented — see docs/superpowers/plans/2026-09-17-close-row-grid.md
 
 ## Problem
 
