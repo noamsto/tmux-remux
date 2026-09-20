@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path"
 	"strconv"
 	"strings"
 )
@@ -79,4 +80,45 @@ func (c Config) CaptureOptions() []string {
 		}
 	}
 	return out
+}
+
+// ParseIgnoreWindows reads the `@remux_ignore_windows` spec: comma-separated
+// window-name patterns whose closes the picker hides. Patterns are matched with
+// path.Match, so "[fingers]" is literal and "scratch-*" is a prefix — a popup a
+// plugin opens and closes is a close the reader never made and can never want
+// back. Empty entries are skipped so a trailing comma is harmless.
+func ParseIgnoreWindows(spec string) []string {
+	var out []string
+	for _, p := range strings.Split(spec, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// IgnoredWindow reports whether a window name matches any ignore pattern.
+//
+// An entry is a glob only when it contains "*" or "?"; otherwise it is matched
+// literally, brackets and all. That is not a shortcut — the name this exists
+// to filter is glob-special. "[fingers]" is a character class matching one of
+// f,i,n,g,e,r,s, so treating every entry as a glob both fails to match the
+// window actually called "[fingers]" and silently hides a window called "f".
+// Window names carry brackets far more often than they want a character class.
+//
+// A malformed glob matches nothing rather than erroring — it costs its own
+// entry, not the rest of the list.
+func IgnoredWindow(patterns []string, name string) bool {
+	for _, p := range patterns {
+		if !strings.ContainsAny(p, "*?") {
+			if p == name {
+				return true
+			}
+			continue
+		}
+		if ok, err := path.Match(p, name); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }

@@ -27,7 +27,7 @@ func TestPartitionRecoverable(t *testing.T) {
 		3: {Label: "window-unlinked"},
 	}
 
-	kept, hidden := partitionRecoverable(evs, ctxs, nil)
+	kept, hidden, _ := partitionRecoverable(evs, ctxs, nil, nil)
 	if len(kept) != 1 || kept[0].ID != 1 {
 		t.Fatalf("kept = %+v, want only event 1", kept)
 	}
@@ -54,7 +54,7 @@ func TestPartitionRecoverableHidesLiveBridgeMirrors(t *testing.T) {
 		},
 	}
 
-	kept, hidden := partitionRecoverable(evs, ctxs, map[string]bool{"halo-houston": true})
+	kept, hidden, _ := partitionRecoverable(evs, ctxs, map[string]bool{"halo-houston": true}, nil)
 	if len(kept) != 1 || kept[0].ID != 1 {
 		t.Fatalf("kept = %+v, want only event 1 (the close outside the mirror)", kept)
 	}
@@ -239,5 +239,46 @@ func TestBuildCloseContextsAdoptsScrollbackFromAnEarlierSnapshot(t *testing.T) {
 	}
 	if cc.SubManifest.ScrollbackSkipped {
 		t.Error("SubManifest.ScrollbackSkipped = true, want false: the close now carries the pane's own capture")
+	}
+}
+
+// A window a plugin opens and closes on its own — tmux-fingers' "[fingers]"
+// popup — is a close the reader never made. It is counted apart from the
+// unrecoverable ones, because one is a close we failed to resolve and the
+// other one that was never interesting.
+func TestPartitionRecoverableSeparatesIgnoredWindows(t *testing.T) {
+	live := snapshot.Manifest{Sessions: []snapshot.Session{{Name: "mono"}}}
+	evs := []store.Event{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}}
+	ctxs := map[int64]picker.CloseContext{
+		1: {SubManifest: live, Placement: picker.ClosePlacement{WindowName: "editor"}},
+		2: {SubManifest: live, Placement: picker.ClosePlacement{WindowName: "[fingers]"}},
+		3: {SubManifest: live, Placement: picker.ClosePlacement{WindowName: "scratch-7"}},
+		4: {Label: "unrecoverable"}, // empty sub-manifest
+	}
+
+	kept, hidden, ignored := partitionRecoverable(evs, ctxs, nil, []string{"[fingers]", "scratch-*"})
+	if len(kept) != 1 || kept[0].ID != 1 {
+		t.Fatalf("kept = %+v, want only the editor close", kept)
+	}
+	if hidden != 1 {
+		t.Errorf("hidden = %d, want 1 unrecoverable", hidden)
+	}
+	if ignored != 2 {
+		t.Errorf("ignored = %d, want 2", ignored)
+	}
+}
+
+// With no patterns configured nothing is ignored — the shipped default must
+// not quietly hide anyone's windows.
+func TestPartitionRecoverableIgnoresNothingByDefault(t *testing.T) {
+	live := snapshot.Manifest{Sessions: []snapshot.Session{{Name: "mono"}}}
+	evs := []store.Event{{ID: 1}, {ID: 2}}
+	ctxs := map[int64]picker.CloseContext{
+		1: {SubManifest: live, Placement: picker.ClosePlacement{WindowName: "editor"}},
+		2: {SubManifest: live, Placement: picker.ClosePlacement{WindowName: "[fingers]"}},
+	}
+	kept, _, ignored := partitionRecoverable(evs, ctxs, nil, nil)
+	if len(kept) != 2 || ignored != 0 {
+		t.Errorf("kept %d, ignored %d — want both kept with no patterns set", len(kept), ignored)
 	}
 }

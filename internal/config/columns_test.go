@@ -80,3 +80,52 @@ func TestDefaultHasNoDecorationColumns(t *testing.T) {
 		t.Errorf("Default().DecorationColumns = %#v, want nil — remux must not ship another tool's schema", got)
 	}
 }
+
+func TestParseIgnoreWindows(t *testing.T) {
+	for _, tc := range []struct {
+		spec string
+		want []string
+	}{
+		{"", nil},
+		{"[fingers]", []string{"[fingers]"}},
+		{" [fingers] , scratch-* ", []string{"[fingers]", "scratch-*"}},
+		{"[fingers],,", []string{"[fingers]"}}, // a trailing comma is harmless
+	} {
+		if got := ParseIgnoreWindows(tc.spec); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("ParseIgnoreWindows(%q) = %#v, want %#v", tc.spec, got, tc.want)
+		}
+	}
+}
+
+func TestIgnoredWindow(t *testing.T) {
+	pats := []string{"[fingers]", "scratch-*"}
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		// Matched literally — as a glob "[fingers]" is a character class, so
+		// path.Match alone would never match the window of that name.
+		{"[fingers]", true},
+		{"f", false}, // and it must not match the class's members either
+		{"scratch-1", true},
+		{"scratch", false}, // the * needs something to match
+		{"my-[fingers]", false},
+		{"editor", false},
+	} {
+		if got := IgnoredWindow(pats, tc.name); got != tc.want {
+			t.Errorf("IgnoredWindow(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// A malformed glob costs its own entry, not the list. It needs a wildcard
+	// to be treated as a glob at all — without one it is just a literal that
+	// happens to contain a bracket.
+	if IgnoredWindow([]string{"[unclosed*"}, "anything") {
+		t.Error("a malformed glob should match nothing")
+	}
+	if !IgnoredWindow([]string{"[unclosed*", "editor"}, "editor") {
+		t.Error("a malformed glob should not disable the entries after it")
+	}
+	if IgnoredWindow(nil, "editor") {
+		t.Error("no patterns should ignore nothing")
+	}
+}

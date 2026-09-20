@@ -85,6 +85,9 @@ type PickerModel struct {
 	// filtered out before constructing the model. Rendered as a footer line so
 	// the user knows the list is pruned. Close mode only.
 	hiddenCount int
+	// ignoredCount is the number filtered by @remux_ignore_windows. Kept apart
+	// from hiddenCount so the footer can say which is which.
+	ignoredCount int
 	// demoKeys echoes the last key pressed into the footer, for screen
 	// recordings where the viewer can't see the keyboard. Off unless
 	// REMUX_DEMO_KEYS is set; never on in normal use.
@@ -590,10 +593,12 @@ func (m *PickerModel) SetBridged(bridged map[string]bool) {
 	m.filter.Bridged = bridged
 }
 
-// SetHiddenCount records how many unrecoverable close events the caller
-// filtered out. Rendered as a footer line in the list pane. Close mode only.
-func (m *PickerModel) SetHiddenCount(n int) {
-	m.hiddenCount = n
+// SetHiddenCount records how many close events the caller filtered out:
+// unrecoverable ones, and ones whose window matched @remux_ignore_windows.
+// Rendered as a footer line in the list pane. Close mode only.
+func (m *PickerModel) SetHiddenCount(unrecoverable, ignored int) {
+	m.hiddenCount = unrecoverable
+	m.ignoredCount = ignored
 }
 
 // SetCloseRows attaches the flat, newest-first close list. Call between

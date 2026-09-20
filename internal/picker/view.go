@@ -309,7 +309,7 @@ func (m PickerModel) listWindow(height int) (start, end, eventRows int, showFoot
 	if rows < 1 {
 		rows = 1
 	}
-	showFooter = m.hiddenCount > 0 && rows > 1
+	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	eventRows = rows
 	if showFooter {
 		eventRows--
@@ -362,7 +362,7 @@ func renderList(m PickerModel, width, height int) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount, m.ignoredCount)), innerWidth, "…")
 		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
 	}
 	return frame.Render(b.String())
@@ -377,7 +377,7 @@ func (m PickerModel) closeListWindow(height int) (start, end, pin, rowBudget int
 	if rows < 1 {
 		rows = 1
 	}
-	showFooter = m.hiddenCount > 0 && rows > 1
+	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	rowBudget = rows
 	if showFooter {
 		rowBudget--
@@ -406,8 +406,8 @@ func renderCloseList(m PickerModel, width, height int) string {
 	}
 	if len(m.closeRows) == 0 {
 		msg := "No close events yet."
-		if m.hiddenCount > 0 {
-			msg = fmt.Sprintf("No recoverable closes (%d hidden).", m.hiddenCount)
+		if n := m.hiddenCount + m.ignoredCount; n > 0 {
+			msg = fmt.Sprintf("No recoverable closes (%d hidden).", n)
 		}
 		return frame.Render(rowDim.Render(msg))
 	}
@@ -432,7 +432,7 @@ func renderCloseList(m PickerModel, width, height int) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount)), innerWidth, "…")
+		text := ansi.Truncate(fmt.Sprintf("— %s hidden —", hiddenPhrase(m.hiddenCount, m.ignoredCount)), innerWidth, "…")
 		b.WriteString(rowDim.Width(innerWidth).Align(lipgloss.Center).Render(text))
 	}
 	return frame.Render(b.String())
@@ -453,12 +453,19 @@ func sectionHeaderIdx(rows []CloseRow, i int) int {
 }
 
 // hiddenPhrase renders the pluralized "N unrecoverable close(s)" fragment.
-func hiddenPhrase(n int) string {
+func hiddenPhrase(unrecoverable, ignored int) string {
 	noun := "closes"
-	if n == 1 {
+	if unrecoverable+ignored == 1 {
 		noun = "close"
 	}
-	return fmt.Sprintf("%d unrecoverable %s", n, noun)
+	switch {
+	case ignored == 0:
+		return fmt.Sprintf("%d unrecoverable %s", unrecoverable, noun)
+	case unrecoverable == 0:
+		return fmt.Sprintf("%d ignored %s", ignored, noun)
+	default:
+		return fmt.Sprintf("%d unrecoverable, %d ignored %s", unrecoverable, ignored, noun)
+	}
 }
 
 // scrollWindow returns [start,end) such that `cursor` falls inside and the

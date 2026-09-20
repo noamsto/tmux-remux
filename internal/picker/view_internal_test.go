@@ -1077,7 +1077,7 @@ func TestView_CloseListFrameGeometry(t *testing.T) {
 		for _, h := range []int{10, 24, 30, 40} {
 			m := closeListModel(t, 40)
 			m.width, m.height = w, h
-			m.SetHiddenCount(3)
+			m.SetHiddenCount(3, 0)
 
 			out := m.View().Content
 			if got := lipgloss.Height(out); got != h {
@@ -1181,7 +1181,7 @@ func countPrefixed(lines []string, prefix string) int {
 // The hidden-count line survives the move to the flat list.
 func TestRenderCloseList_KeepsTheHiddenCountFooter(t *testing.T) {
 	m := closeListModel(t, 40)
-	m.SetHiddenCount(3)
+	m.SetHiddenCount(3, 0)
 	lines := innerLines(t, renderCloseList(m, 60, 18))
 	if got := lines[len(lines)-1]; got != "— 3 unrecoverable closes hidden —" {
 		t.Errorf("last row = %q, want the hidden-count footer", got)
@@ -1321,7 +1321,7 @@ func TestRenderCloseList_NeverOverflowsFrame(t *testing.T) {
 		long.closeRows[i].Placement.WindowName = "a-really-long-window-name-that-will-not-fit-in-any-narrow-pane 🧠"
 	}
 	for _, m := range []PickerModel{closeListModel(t, 40), long} {
-		m.SetHiddenCount(14)
+		m.SetHiddenCount(14, 0)
 		for _, size := range []struct{ w, h int }{{28, 5}, {32, 8}, {50, 6}, {64, 12}, {80, 30}} {
 			m.width, m.height = size.w, size.h
 			for _, cursor := range []int{1, 25} {
