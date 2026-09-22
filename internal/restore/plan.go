@@ -266,11 +266,7 @@ func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarg
 	}
 	plan := make([]Action, 0, 2+len(lost.Decoration))
 	plan = append(plan, SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)})
-	// split-window (no -d) leaves the new pane active, so liveTarget without
-	// an explicit pane suffix addresses it here. Same residual gap as
-	// BuildPlan: if the SplitPane above fails, Apply has no failedWindows-style
-	// tracking for it, so this SetOption would land on whichever pane was
-	// previously active (accepted, out of scope).
+	// Active-pane targeting and the failed-split gap: see BuildPlan.
 	plan = append(plan, setOptionActions(liveTarget, true, lost.Decoration)...)
 	plan = append(plan, SetLayout{Window: liveTarget, Layout: layout})
 	return plan
