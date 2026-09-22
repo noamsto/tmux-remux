@@ -136,18 +136,111 @@ func TestServerStartTimeParsesSecondsToMillis(t *testing.T) {
 	}
 }
 
-func TestWindowFormatWithDecoration(t *testing.T) {
+func TestWindowFormatHasNoDecorationFields(t *testing.T) {
 	c := tmux.NewClient("tmux", "@crew_name", "@crew_color")
-	got := c.WindowFormat()
-	if !strings.HasSuffix(got, tmux.FieldSep+"#{@crew_name}"+tmux.FieldSep+"#{@crew_color}") {
-		t.Errorf("format missing decoration fields: %q", got)
+	if strings.Contains(c.WindowFormat(), "#{@") {
+		t.Errorf("decoration is captured via show-options now, format must not embed it: %q", c.WindowFormat())
 	}
 }
 
-func TestWindowFormatNoDecoration(t *testing.T) {
-	c := tmux.NewClient("tmux")
-	if strings.Contains(c.WindowFormat(), "#{@") {
-		t.Errorf("unexpected decoration field in %q", c.WindowFormat())
+// TestCaptureDecorationRoundTripsRawValues asserts the byte-exact acceptance
+// criteria against a single multi-line `show-options` response: a value
+// containing spaces, #[...] style sequences, or commas round-trips verbatim
+// once quoting is stripped, and only allow-listed names survive the filter.
+func TestCaptureDecorationRoundTripsRawValues(t *testing.T) {
+	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n%%s\n%%s\n' %s %s %s`,
+		shellQuote(`@crew_name atlas`),
+		shellQuote(`pane-border-format "`+" #[bold]#{@crew_name}#[nobold] "+`"`),
+		shellQuote(`pane-border-style "bg=#{@thm_bg},fg=colour99,bold"`),
+	))
+	c := tmux.NewClient(fake)
+	got, err := c.CaptureDecoration(context.Background(), "@4", []string{"@crew_name", "pane-border-format", "pane-border-style"}, false)
+	if err != nil {
+		t.Fatalf("CaptureDecoration: %v", err)
+	}
+	want := map[string]string{
+		"@crew_name":         "atlas",
+		"pane-border-format": " #[bold]#{@crew_name}#[nobold] ",
+		"pane-border-style":  "bg=#{@thm_bg},fg=colour99,bold",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CaptureDecoration = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("CaptureDecoration[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// shellQuote wraps s in single quotes for embedding in a fake tmux script's
+// printf argument, escaping any single quotes in s itself.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func TestCaptureDecorationUnsetReturnsNil(t *testing.T) {
+	fake := writeFakeTmux(t, `true`) // empty stdout, exit 0 (as tmux does when nothing is locally set)
+	c := tmux.NewClient(fake)
+	got, err := c.CaptureDecoration(context.Background(), "@4", []string{"@crew_name"}, false)
+	if err != nil {
+		t.Fatalf("CaptureDecoration: %v", err)
+	}
+	if got != nil {
+		t.Errorf("CaptureDecoration = %v, want nil", got)
+	}
+}
+
+func TestCaptureDecorationNonServerFailureIsNotFatal(t *testing.T) {
+	// A closed-mid-save window/pane fails the tmux invocation without a "no
+	// server" stderr message; this must not propagate as an error.
+	fake := writeFakeTmux(t, `>&2 echo "can't find window"; exit 1`)
+	c := tmux.NewClient(fake)
+	got, err := c.CaptureDecoration(context.Background(), "@4", []string{"@crew_name"}, false)
+	if err != nil {
+		t.Fatalf("CaptureDecoration: unexpected error %v", err)
+	}
+	if got != nil {
+		t.Errorf("CaptureDecoration = %v, want nil", got)
+	}
+}
+
+func TestCaptureDecorationNoServerPropagates(t *testing.T) {
+	fake := writeFakeTmux(t, `>&2 echo "no server running on /tmp/tmux-1000/default"; exit 1`)
+	c := tmux.NewClient(fake)
+	_, err := c.CaptureDecoration(context.Background(), "@4", []string{"@crew_name"}, false)
+	if !errors.Is(err, tmux.ErrNoServer) {
+		t.Errorf("CaptureDecoration err = %v, want ErrNoServer", err)
+	}
+}
+
+func TestCaptureDecorationEmptyNamesShortCircuits(t *testing.T) {
+	// No tmux invocation should happen at all: a binary that always fails
+	// proves CaptureDecoration never runs it.
+	fake := writeFakeTmux(t, `exit 1`)
+	c := tmux.NewClient(fake)
+	got, err := c.CaptureDecoration(context.Background(), "@4", nil, false)
+	if err != nil {
+		t.Fatalf("CaptureDecoration: %v", err)
+	}
+	if got != nil {
+		t.Errorf("CaptureDecoration = %v, want nil", got)
+	}
+}
+
+// TestCaptureDecorationFiltersUnlistedNames ensures options set locally but
+// not in the allow-list (e.g. an unrelated @remux_* option) are dropped by
+// the Go-side filter rather than leaking into Decoration.
+func TestCaptureDecorationFiltersUnlistedNames(t *testing.T) {
+	fake := writeFakeTmux(t, `printf '@crew_name atlas\n@unrelated_option value\n'`)
+	c := tmux.NewClient(fake)
+	got, err := c.CaptureDecoration(context.Background(), "@4", []string{"@crew_name"}, false)
+	if err != nil {
+		t.Fatalf("CaptureDecoration: %v", err)
+	}
+	want := map[string]string{"@crew_name": "atlas"}
+	if len(got) != len(want) || got["@crew_name"] != want["@crew_name"] {
+		t.Errorf("CaptureDecoration = %v, want %v", got, want)
 	}
 }
 

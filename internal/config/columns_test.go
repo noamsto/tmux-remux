@@ -69,7 +69,12 @@ func TestCaptureOptionsIsUnion(t *testing.T) {
 		{Option: "@crew_name", Role: RoleText}, // already a default; must not duplicate
 	}
 	got := c.CaptureOptions()
-	want := []string{"@crew_name", "@crew_color", "@issue_id"}
+	want := []string{
+		"@crew_name", "@crew_color",
+		"pane-border-style", "pane-active-border-style",
+		"pane-border-format", "pane-border-status",
+		"@issue_id",
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("CaptureOptions() = %v, want %v", got, want)
 	}

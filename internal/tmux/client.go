@@ -26,19 +26,27 @@ var ErrNoServer = errors.New("tmux: no server running")
 // Client invokes a tmux-compatible binary. Defaults to the "tmux" command
 // when binary is empty.
 type Client struct {
-	binary         string
-	decorationOpts []string
+	binary             string
+	decorationOpts     []string
+	paneDecorationOpts []string
 }
 
 // NewClient returns a Client that invokes binary; if empty, "tmux" is used.
-// Each decorationOpts entry is wrapped as a #{opt} field appended to the
-// list-windows format and captured into WindowRow.Decoration (names are
-// typically @-prefixed user options, e.g. "@crew_color").
+// decorationOpts is the allow-list of window options captured into
+// WindowRow.Decoration via CaptureDecoration (names are typically
+// @-prefixed user options, e.g. "@crew_color", but may be any tmux option).
 func NewClient(binary string, decorationOpts ...string) *Client {
 	if binary == "" {
 		binary = "tmux"
 	}
 	return &Client{binary: binary, decorationOpts: decorationOpts}
+}
+
+// SetPaneDecorationOptions sets the allow-list of pane options captured into
+// PaneRow.Decoration via CaptureDecoration. Chainable.
+func (c *Client) SetPaneDecorationOptions(names []string) *Client {
+	c.paneDecorationOpts = names
+	return c
 }
 
 // Run executes the binary with the given args and returns stdout. Non-zero
@@ -114,14 +122,10 @@ const (
 	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}"
 )
 
-// WindowFormat returns the list-windows -F format, with one #{@opt} field per
-// decoration option appended in order.
+// WindowFormat returns the list-windows -F format. Decoration is captured
+// separately via CaptureDecoration, not embedded in this format.
 func (c *Client) WindowFormat() string {
-	f := baseWindowFormat
-	for _, o := range c.decorationOpts {
-		f += FieldSep + "#{" + o + "}"
-	}
-	return f
+	return baseWindowFormat
 }
 
 // ListSessions runs `tmux list-sessions -F …` and parses the result.
@@ -137,7 +141,8 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRow, error) {
 	return ParseSessions(out)
 }
 
-// ListWindows runs `tmux list-windows -a -F …` and parses the result.
+// ListWindows runs `tmux list-windows -a -F …` and parses the result, then
+// captures each window's decoration via CaptureDecoration keyed by window id.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 	out, err := c.Run(ctx, []string{"list-windows", "-a", "-F", c.WindowFormat()})
@@ -147,10 +152,25 @@ func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseWindows(out, c.decorationOpts)
+	rows, err := ParseWindows(out)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		dec, err := c.CaptureDecoration(ctx, rows[i].ID, c.decorationOpts, false)
+		if errors.Is(err, ErrNoServer) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows[i].Decoration = dec
+	}
+	return rows, nil
 }
 
-// ListPanes runs `tmux list-panes -a -F …` and parses the result.
+// ListPanes runs `tmux list-panes -a -F …` and parses the result, then
+// captures each pane's decoration via CaptureDecoration keyed by pane id.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListPanes(ctx context.Context) ([]PaneRow, error) {
 	out, err := c.Run(ctx, []string{"list-panes", "-a", "-F", paneFormat})
@@ -160,7 +180,65 @@ func (c *Client) ListPanes(ctx context.Context) ([]PaneRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParsePanes(out)
+	rows, err := ParsePanes(out)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		dec, err := c.CaptureDecoration(ctx, rows[i].ID, c.paneDecorationOpts, true)
+		if errors.Is(err, ErrNoServer) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		rows[i].Decoration = dec
+	}
+	return rows, nil
+}
+
+// CaptureDecoration captures the locally-set values of names on target (a
+// window or pane id) with a single `tmux show-options [-w|-p] -t target`
+// call (no option name, no -v), listing every option explicitly set at that
+// scope as "name value" lines — show-options -w/-p (no -g) never returns an
+// inherited global/theme default. The output is parsed with
+// ParseOptionLines and filtered down to names, returning a map keyed by
+// option name (nil when none matched, matching WindowRow.Decoration/
+// PaneRow.Decoration's nil-when-none-set convention).
+//
+// Empty names short-circuits to zero tmux invocations. A Run error that is
+// ErrNoServer is propagated (the server is genuinely gone); any other Run
+// error (e.g. the window/pane closed mid-capture) is treated as "nothing
+// captured", err=nil — a closed target must never fail the whole
+// ListWindows/ListPanes call.
+func (c *Client) CaptureDecoration(ctx context.Context, target string, names []string, pane bool) (map[string]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	scope := "-w"
+	if pane {
+		scope = "-p"
+	}
+	out, err := c.Run(ctx, []string{"show-options", scope, "-t", target})
+	if errors.Is(err, ErrNoServer) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, nil
+	}
+	all := ParseOptionLines(out)
+	var dec map[string]string
+	for _, name := range names {
+		v, ok := all[name]
+		if !ok {
+			continue
+		}
+		if dec == nil {
+			dec = map[string]string{}
+		}
+		dec[name] = v
+	}
+	return dec, nil
 }
 
 // CapturePane returns the scrollback contents of a pane as raw bytes.

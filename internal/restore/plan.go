@@ -129,6 +129,24 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 	return BuildStartupCommand(so)
 }
 
+// setOptionActions returns a SetOption action per decoration key, sorted for
+// deterministic plan output.
+func setOptionActions(target string, pane bool, decoration map[string]string) []Action {
+	if len(decoration) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(decoration))
+	for k := range decoration {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	actions := make([]Action, 0, len(names))
+	for _, k := range names {
+		actions = append(actions, SetOption{Target: target, Pane: pane, Name: k, Value: decoration[k]})
+	}
+	return actions
+}
+
 // BuildPlan builds an ordered slice of Actions to restore the manifest,
 // honoring the filter and the allow-list of commands. The returned PlanStats
 // reports what was kept vs filtered, per reason.
@@ -181,30 +199,32 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				NewSession:      !sessionStarted,
 			})
 			sessionStarted = true
-			if len(win.Decoration) > 0 {
-				names := make([]string, 0, len(win.Decoration))
-				for k := range win.Decoration {
-					names = append(names, k)
-				}
-				sort.Strings(names)
-				target := fmt.Sprintf("%s:%d", sess.Name, win.Index)
-				for _, k := range names {
-					plan = append(plan, SetOption{Target: target, Name: k, Value: win.Decoration[k]})
-				}
-			}
+			windowTarget := fmt.Sprintf("%s:%d", sess.Name, win.Index)
+			plan = append(plan, setOptionActions(windowTarget, false, win.Decoration)...)
+			// new-window/new-session leaves the first pane active, so
+			// set-option -p with no explicit pane index lands on it here.
+			plan = append(plan, setOptionActions(windowTarget, true, firstPane.Decoration)...)
 			for _, p := range keptPanes[1:] {
 				plan = append(plan, SplitPane{
-					Target:         fmt.Sprintf("%s:%d", sess.Name, win.Index),
+					Target:         windowTarget,
 					Cwd:            p.Cwd,
 					StartupCommand: startupFor(p),
 				})
+				// split-window (no -d) leaves the new pane active; emitting its
+				// decoration here, before the next split changes what's active,
+				// is what makes each SetOption land on the right pane. Known
+				// gap: if this SplitPane fails, Apply doesn't track it the way
+				// it tracks a failed CreateWindow, so these SetOptions would
+				// land on whichever pane was previously active instead of being
+				// skipped (accepted, out of scope).
+				plan = append(plan, setOptionActions(windowTarget, true, p.Decoration)...)
 			}
 			layout := win.Layout
 			if normalized, err := tmux.NormalizeLayout(layout); err == nil {
 				layout = normalized
 			}
 			plan = append(plan, SetLayout{
-				Window: fmt.Sprintf("%s:%d", sess.Name, win.Index),
+				Window: windowTarget,
 				Layout: layout,
 			})
 		}
@@ -244,8 +264,14 @@ func BuildPaneRestore(lost snapshot.Pane, win snapshot.Window, session, liveTarg
 	if normalized, err := tmux.NormalizeLayout(layout); err == nil {
 		layout = normalized
 	}
-	return []Action{
-		SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)},
-		SetLayout{Window: liveTarget, Layout: layout},
-	}
+	plan := make([]Action, 0, 2+len(lost.Decoration))
+	plan = append(plan, SplitPane{Target: liveTarget, Cwd: lost.Cwd, StartupCommand: paneStartup(lost, opts)})
+	// split-window (no -d) leaves the new pane active, so liveTarget without
+	// an explicit pane suffix addresses it here. Same residual gap as
+	// BuildPlan: if the SplitPane above fails, Apply has no failedWindows-style
+	// tracking for it, so this SetOption would land on whichever pane was
+	// previously active (accepted, out of scope).
+	plan = append(plan, setOptionActions(liveTarget, true, lost.Decoration)...)
+	plan = append(plan, SetLayout{Window: liveTarget, Layout: layout})
+	return plan
 }

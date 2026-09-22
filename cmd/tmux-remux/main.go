@@ -166,7 +166,7 @@ func (c SaveCmd) Run() error {
 		}
 		defer func() { _ = log.Close() }()
 		sb := scrollback.New(cfg.ScrollbackDir)
-		t := tmux.NewClient("tmux", cfg.CaptureOptions()...)
+		t := tmux.NewClient("tmux", cfg.CaptureOptions()...).SetPaneDecorationOptions(cfg.PaneDecorationOptions)
 		saver := snapshot.NewSaver(db, sb, t, snapshot.SaverOptions{
 			Host:              hostname(),
 			CaptureScrollback: cfg.CaptureScrollback,
@@ -994,7 +994,25 @@ func loadConfig() config.Config {
 	opts := tmux.GlobalOptions("tmux")
 	cfg.DecorationColumns = config.ParseDecorationColumns(opts["@remux_columns"])
 	cfg.IgnoreWindows = config.ParseIgnoreWindows(opts["@remux_ignore_windows"])
+	if v := opts["@remux_decoration_options"]; v != "" {
+		cfg.DecorationOptions = splitCommaList(v)
+	}
+	if v := opts["@remux_pane_decoration_options"]; v != "" {
+		cfg.PaneDecorationOptions = splitCommaList(v)
+	}
 	return cfg
+}
+
+// splitCommaList parses a comma-separated option-name list, trimming
+// whitespace and dropping empty entries.
+func splitCommaList(spec string) []string {
+	var out []string
+	for _, s := range strings.Split(spec, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveBuildOptions builds the BuildOptions consumed by restore.BuildPlan.

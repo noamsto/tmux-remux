@@ -54,18 +54,17 @@ type WindowRow struct {
 	Layout          string
 	ID              string            // tmux window id, e.g. "@4"
 	AutomaticRename bool              // #{E:automatic-rename} == "1"
-	Decoration      map[string]string // allow-listed @-options; nil when none set
+	Decoration      map[string]string // allow-listed options captured via show-options -qv; nil when none set
 }
 
-// ParseWindows parses tmux list-windows -F output. decorationOpts names the
-// trailing #{@opt} fields appended to the format (in order); each non-empty
-// trailing field is stored in WindowRow.Decoration keyed by its option name.
-func ParseWindows(s string, decorationOpts []string) ([]WindowRow, error) {
+// ParseWindows parses tmux list-windows -F output (baseWindowFormat only;
+// decoration is captured separately via CaptureDecoration and set on
+// WindowRow.Decoration by ListWindows).
+func ParseWindows(s string) ([]WindowRow, error) {
 	if s == "" {
 		return nil, nil
 	}
-	const fixed = 6
-	want := fixed + len(decorationOpts)
+	const want = 6
 	var out []WindowRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
@@ -79,14 +78,6 @@ func ParseWindows(s string, decorationOpts []string) ([]WindowRow, error) {
 		row := WindowRow{
 			Session: fields[0], Index: idx, Name: fields[2], Layout: fields[3], ID: fields[4],
 			AutomaticRename: fields[5] == "1",
-		}
-		for j, name := range decorationOpts {
-			if v := fields[fixed+j]; v != "" {
-				if row.Decoration == nil {
-					row.Decoration = map[string]string{}
-				}
-				row.Decoration[name] = v
-			}
 		}
 		out = append(out, row)
 	}
@@ -105,6 +96,7 @@ type PaneRow struct {
 	ID          string // tmux pane id, e.g. "%3"
 	Relaunch    string // @remux_relaunch pane option; verbatim relaunch command, empty when unset
 	Floating    bool
+	Decoration  map[string]string // allow-listed options captured via show-options -qv; nil when none set
 }
 
 // ParsePanes parses tmux list-panes -F output.

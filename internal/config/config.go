@@ -50,6 +50,11 @@ type Config struct {
 	// re-derives after a server restart.
 	DecorationOptions []string
 
+	// PaneDecorationOptions is the allow-list of tmux pane options
+	// snapshotted and re-applied verbatim on restore, mirroring
+	// DecorationOptions but at pane scope.
+	PaneDecorationOptions []string
+
 	// DecorationColumns declares which captured options the close list renders
 	// as columns, and how. Empty by default: tmux-remux is a published plugin
 	// and must not ship another tool's option schema. Set via @remux_columns.
@@ -101,7 +106,16 @@ func Default() Config {
 			"ssh", "mosh",
 		},
 
-		DecorationOptions: []string{"@crew_name", "@crew_color"},
+		DecorationOptions: []string{
+			"@crew_name", "@crew_color",
+			"pane-border-style", "pane-active-border-style",
+			"pane-border-format", "pane-border-status",
+		},
+		PaneDecorationOptions: []string{
+			"@crew_role", "@crew_role_color", "@crew_state",
+			"pane-border-style", "pane-active-border-style",
+			"pane-border-format",
+		},
 	}
 }
 
