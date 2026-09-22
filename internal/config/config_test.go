@@ -99,8 +99,24 @@ func TestRestoreModeIsTyped(t *testing.T) {
 
 func TestDefaultDecorationOptions(t *testing.T) {
 	got := config.Default().DecorationOptions
-	want := []string{"@crew_name", "@crew_color"}
+	want := []string{
+		"@crew_name", "@crew_color",
+		"pane-border-style", "pane-active-border-style",
+		"pane-border-format", "pane-border-status",
+	}
 	if !slices.Equal(got, want) {
 		t.Errorf("DecorationOptions = %v, want %v", got, want)
+	}
+}
+
+func TestDefaultPaneDecorationOptions(t *testing.T) {
+	got := config.Default().PaneDecorationOptions
+	want := []string{
+		"@crew_role", "@crew_role_color", "@crew_state",
+		"pane-border-style", "pane-active-border-style",
+		"pane-border-format",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("PaneDecorationOptions = %v, want %v", got, want)
 	}
 }

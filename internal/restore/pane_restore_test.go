@@ -80,6 +80,44 @@ func TestBuildPaneRestoreSplitsIntoResolvedTarget(t *testing.T) {
 	}
 }
 
+func TestBuildPaneRestoreSplitsIntoLiveWindowIncludesPaneDecoration(t *testing.T) {
+	win := paneRestoreWindow()
+	lost := win.Panes[1]
+	lost.Decoration = map[string]string{"@crew_role": "navigator"}
+
+	plan := restore.BuildPaneRestore(lost, win, "s1", "@7", defaultOpts)
+	want := []restore.Action{
+		restore.SplitPane{Target: "@7", Cwd: "/b", StartupCommand: ""},
+		restore.SetOption{Target: "@7", Pane: true, Name: "@crew_role", Value: "navigator"},
+		restore.SetLayout{Window: "@7", Layout: "LAY"},
+	}
+	if diff := cmp.Diff(want, plan); diff != "" {
+		t.Errorf("plan mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// liveTarget == "" delegates to BuildPlan on a single-window manifest, which
+// should pick up both window- and pane-level decoration replay for free.
+func TestBuildPaneRestoreRecreatesGoneWindowIncludesPaneDecoration(t *testing.T) {
+	win := paneRestoreWindow()
+	win.Panes[1].Decoration = map[string]string{"@crew_role": "navigator"}
+	lost := win.Panes[1]
+
+	plan := restore.BuildPaneRestore(lost, win, "s1", "", defaultOpts)
+
+	want := restore.SetOption{Target: "s1:2", Pane: true, Name: "@crew_role", Value: "navigator"}
+	found := false
+	for _, a := range plan {
+		if so, ok := a.(restore.SetOption); ok && so == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("plan = %+v, want it to contain the lost pane's decoration SetOption %+v", plan, want)
+	}
+}
+
 func TestBuildPaneRestoreRecreatesWindowWhenNoLiveTarget(t *testing.T) {
 	win := snapshot.Window{Index: 3, Name: "docs", Layout: "L", ID: "@9",
 		Panes: []snapshot.Pane{{Index: 1, Cwd: "/a"}, {Index: 2, Cwd: "/b"}}}

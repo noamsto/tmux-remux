@@ -64,6 +64,16 @@ func TestFingerprintIgnoresDecoration(t *testing.T) {
 	if base.Fingerprint() != withDecor.Fingerprint() {
 		t.Error("Fingerprint changed when only Decoration differs")
 	}
+
+	baseWithPane := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{
+		Index: 1, Panes: []snapshot.Pane{{Index: 1}},
+	}}}}}
+	withPaneDecor := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{Name: "s", Windows: []snapshot.Window{{
+		Index: 1, Panes: []snapshot.Pane{{Index: 1, Decoration: map[string]string{"@crew_role": "driver"}}},
+	}}}}}
+	if baseWithPane.Fingerprint() != withPaneDecor.Fingerprint() {
+		t.Error("Fingerprint changed when only Pane.Decoration differs")
+	}
 }
 
 func TestStructureFingerprintChangesOnRelaunch(t *testing.T) {

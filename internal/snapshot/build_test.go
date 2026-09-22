@@ -109,15 +109,21 @@ func TestBuildCarriesDecoration(t *testing.T) {
 		windows: []tmux.WindowRow{
 			{Session: "s1", Index: 1, Decoration: map[string]string{"@crew_color": "colour141"}},
 		},
+		panes: []tmux.PaneRow{
+			{Session: "s1", WindowIndex: 1, PaneIndex: 1, Decoration: map[string]string{"@crew_role": "driver"}},
+		},
 	}
 	m, err := snapshot.Build(context.Background(), fc, "h", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"@crew_color": "colour141"}
-	got := m.Sessions[0].Windows[0].Decoration
-	if !maps.Equal(got, want) {
-		t.Errorf("Decoration = %v, want %v", got, want)
+	wantWindow := map[string]string{"@crew_color": "colour141"}
+	if got := m.Sessions[0].Windows[0].Decoration; !maps.Equal(got, wantWindow) {
+		t.Errorf("Window.Decoration = %v, want %v", got, wantWindow)
+	}
+	wantPane := map[string]string{"@crew_role": "driver"}
+	if got := m.Sessions[0].Windows[0].Panes[0].Decoration; !maps.Equal(got, wantPane) {
+		t.Errorf("Pane.Decoration = %v, want %v", got, wantPane)
 	}
 }
 

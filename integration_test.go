@@ -53,7 +53,9 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
-	return tmux.ParseWindows(out, nil)
+	// Decoration-free: this stub exists to test filter/session-scoping
+	// behavior, not decoration, and nothing here asserts decoration.
+	return tmux.ParseWindows(out)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
 	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}"})
@@ -260,6 +262,164 @@ func TestDecorationRestoreRoundtrip(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out); got != "colour141" {
 		t.Errorf("restored @crew_color = %q, want %q", got, "colour141")
+	}
+}
+
+// TestBorderDecorationRestoreRoundtrip captures window- and pane-scoped
+// border/style options (set locally, not globally) from a real tmux server
+// into a manifest, replays the resulting restore plan against a fresh
+// server, and confirms: (a) the locally-set values round-trip byte-exact,
+// including spaces, #[...] escapes, and commas; (b) a second window with no
+// locally-set border options gets nothing pinned on it by restore — it keeps
+// inheriting the global/theme default.
+func TestBorderDecorationRestoreRoundtrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	const spaceValue = " #[bold]#{@crew_name}#[nobold] "
+	const commaValue = "bg=#{@thm_bg},fg=colour99,bold"
+
+	src := testutil.StartServer(t)
+	if _, err := src.Tmux("rename-session", "-t", "init", "deco"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-window-option", "-t", "deco:0", "pane-border-style", commaValue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-window-option", "-t", "deco:0", "pane-active-border-style", spaceValue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-window-option", "-t", "deco:0", "pane-border-format", spaceValue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-option", "-p", "-t", "deco:0.0", "@crew_role", "scout"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-option", "-p", "-t", "deco:0.0", "pane-border-style", spaceValue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Tmux("set-option", "-p", "-t", "deco:0.0", "pane-active-border-style", commaValue); err != nil {
+		t.Fatal(err)
+	}
+	// Second window: no locally-set border/decoration options at all.
+	if _, err := src.Tmux("new-window", "-t", "deco", "-n", "plain"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TMUX", src.Socket+",0,0")
+	windowOpts := []string{
+		"@crew_name", "@crew_color",
+		"pane-border-style", "pane-active-border-style",
+		"pane-border-format", "pane-border-status",
+	}
+	paneOpts := []string{
+		"@crew_role", "@crew_role_color", "@crew_state",
+		"pane-border-style", "pane-active-border-style",
+		"pane-border-format",
+	}
+	srcClient := tmux.NewClient("tmux", windowOpts...).SetPaneDecorationOptions(paneOpts)
+
+	ctx := context.Background()
+	m, err := snapshot.Build(ctx, srcClient, "test", time.Now().UnixMilli())
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+
+	var sess *snapshot.Session
+	for i := range m.Sessions {
+		if m.Sessions[i].Name == "deco" {
+			sess = &m.Sessions[i]
+			break
+		}
+	}
+	if sess == nil {
+		t.Fatal("deco session missing from manifest")
+	}
+	var win0, win1 *snapshot.Window
+	for i := range sess.Windows {
+		switch sess.Windows[i].Index {
+		case 0:
+			win0 = &sess.Windows[i]
+		case 1:
+			win1 = &sess.Windows[i]
+		}
+	}
+	if win0 == nil || win1 == nil {
+		t.Fatalf("deco session missing windows: win0=%v win1=%v", win0, win1)
+	}
+
+	wantWin0 := map[string]string{
+		"pane-border-style":        commaValue,
+		"pane-active-border-style": spaceValue,
+		"pane-border-format":       spaceValue,
+	}
+	if !reflect.DeepEqual(win0.Decoration, wantWin0) {
+		t.Errorf("captured window 0 Decoration = %#v, want %#v", win0.Decoration, wantWin0)
+	}
+	if win1.Decoration != nil {
+		t.Errorf("captured window 1 Decoration = %#v, want nil", win1.Decoration)
+	}
+	if len(win0.Panes) == 0 {
+		t.Fatal("window 0 has no panes in manifest")
+	}
+	wantPane0 := map[string]string{
+		"@crew_role":               "scout",
+		"pane-border-style":        spaceValue,
+		"pane-active-border-style": commaValue,
+	}
+	if !reflect.DeepEqual(win0.Panes[0].Decoration, wantPane0) {
+		t.Errorf("captured pane 0 Decoration = %#v, want %#v", win0.Panes[0].Decoration, wantPane0)
+	}
+	if len(win1.Panes) == 0 {
+		t.Fatal("window 1 has no panes in manifest")
+	}
+	if win1.Panes[0].Decoration != nil {
+		t.Errorf("captured window 1 pane Decoration = %#v, want nil", win1.Panes[0].Decoration)
+	}
+
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{})
+
+	dst := testutil.StartServer(t)
+	t.Setenv("TMUX", dst.Socket+",0,0")
+	dstClient := tmux.NewClient("tmux")
+	if _, err := restore.Apply(ctx, dstClient, plan); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	showLocal := func(t *testing.T, pane bool, target, name string) string {
+		t.Helper()
+		scope := "-w"
+		if pane {
+			scope = "-p"
+		}
+		out, err := dst.Tmux("show-options", "-qv", scope, "-t", target, name)
+		if err != nil {
+			t.Fatalf("show-options %s %s %s: %v", scope, target, name, err)
+		}
+		return strings.TrimSuffix(out, "\n")
+	}
+
+	for name, want := range wantWin0 {
+		if got := showLocal(t, false, "deco:0", name); got != want {
+			t.Errorf("restored window 0 %s = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range wantPane0 {
+		if got := showLocal(t, true, "deco:0.0", name); got != want {
+			t.Errorf("restored pane 0 %s = %q, want %q", name, got, want)
+		}
+	}
+
+	for name := range wantWin0 {
+		if got := showLocal(t, false, "deco:1", name); got != "" {
+			t.Errorf("restored window 1 %s = %q, want empty (not locally set)", name, got)
+		}
+	}
+	for name := range wantPane0 {
+		if got := showLocal(t, true, "deco:1.0", name); got != "" {
+			t.Errorf("restored window 1 pane 0 %s = %q, want empty (not locally set)", name, got)
+		}
 	}
 }
 

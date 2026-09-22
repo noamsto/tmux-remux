@@ -257,6 +257,30 @@ func TestBuildPlanEmitsSortedSetOptions(t *testing.T) {
 	}
 }
 
+func TestBuildPlanEmitsPaneDecorationInterleavedWithSplits(t *testing.T) {
+	m := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
+		Name: "s", Windows: []snapshot.Window{{
+			Index: 1, Layout: "L",
+			Panes: []snapshot.Pane{
+				{Index: 0, Cwd: "/a", Command: "bash", Decoration: map[string]string{"@crew_role": "driver"}},
+				{Index: 1, Cwd: "/b", Command: "bash", Decoration: map[string]string{"@crew_role": "navigator"}},
+			},
+		}},
+	}}}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{DefaultShell: "/bin/sh"})
+
+	want := []restore.Action{
+		restore.CreateWindow{Session: "s", Index: 1, Cwd: "/a", StartupCommand: "", NewSession: true},
+		restore.SetOption{Target: "s:1", Pane: true, Name: "@crew_role", Value: "driver"},
+		restore.SplitPane{Target: "s:1", Cwd: "/b", StartupCommand: ""},
+		restore.SetOption{Target: "s:1", Pane: true, Name: "@crew_role", Value: "navigator"},
+		restore.SetLayout{Window: "s:1", Layout: "L"},
+	}
+	if diff := cmp.Diff(want, plan); diff != "" {
+		t.Errorf("plan mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestBuildPlanNoDecorationNoSetOption(t *testing.T) {
 	m := snapshot.Manifest{V: 1, Sessions: []snapshot.Session{{
 		Name: "s", Windows: []snapshot.Window{{

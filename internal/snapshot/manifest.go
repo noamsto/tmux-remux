@@ -69,15 +69,16 @@ type Window struct {
 
 // Pane captures one tmux pane's state, including optional scrollback hash.
 type Pane struct {
-	Index         int      `json:"index"`
-	Cwd           string   `json:"cwd"`
-	Command       string   `json:"command"`
-	CommandArgs   []string `json:"command_args,omitempty"`
-	LastUsed      int64    `json:"last_used"`
-	ChildCount    int      `json:"child_count"`
-	ScrollbackSHA string   `json:"scrollback_sha,omitempty"`
-	ID            string   `json:"id,omitempty"`       // tmux pane id ("%7"); stable within a server lifetime
-	Relaunch      string   `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list
+	Index         int               `json:"index"`
+	Cwd           string            `json:"cwd"`
+	Command       string            `json:"command"`
+	CommandArgs   []string          `json:"command_args,omitempty"`
+	LastUsed      int64             `json:"last_used"`
+	ChildCount    int               `json:"child_count"`
+	ScrollbackSHA string            `json:"scrollback_sha,omitempty"`
+	ID            string            `json:"id,omitempty"`       // tmux pane id ("%7"); stable within a server lifetime
+	Relaunch      string            `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list
+	Decoration    map[string]string `json:"decoration,omitempty"`
 }
 
 // Fingerprint returns a sha256 hex of the manifest with timestamps zeroed,
@@ -97,6 +98,7 @@ func (m Manifest) Fingerprint() string {
 			for k, p := range w.Panes {
 				p2 := p
 				p2.LastUsed = 0
+				p2.Decoration = nil
 				w2.Panes[k] = p2
 			}
 			s2.Windows[j] = w2
