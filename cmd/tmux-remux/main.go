@@ -31,7 +31,7 @@ import (
 
 // Version is the released version. release-please bumps the annotated value on
 // each release; goreleaser and the nix build stamp the tag over it.
-var Version = "0.6.0" // x-release-please-version
+var Version = "0.7.0" // x-release-please-version
 
 var hostname = sync.OnceValue(func() string {
 	h, _ := os.Hostname()
