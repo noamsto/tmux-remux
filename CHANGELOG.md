@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/noamsto/tmux-remux/compare/v0.6.0...v0.7.0) (2026-09-22)
+
+
+### Features
+
+* **restore:** capture and replay window and pane decoration options ([#155](https://github.com/noamsto/tmux-remux/issues/155)) ([7ac59b6](https://github.com/noamsto/tmux-remux/commit/7ac59b6c72c6ba268c8dd0cfb2207614b8f525d6))
+
 ## [0.6.0](https://github.com/noamsto/tmux-remux/compare/v0.5.0...v0.6.0) (2026-09-20)
 
 
