@@ -11,6 +11,10 @@ var defaultIdleShells = map[string]bool{
 	"bash": true, "fish": true, "zsh": true, "sh": true,
 }
 
+// IsShell reports whether name is one of the default interactive shells the
+// smart filter treats as idle when childless.
+func IsShell(name string) bool { return defaultIdleShells[name] }
+
 // Filter holds the configurable thresholds and feature flags for the
 // smart-restore filter.
 type Filter struct {

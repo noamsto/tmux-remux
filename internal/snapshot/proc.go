@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package snapshot
 
 import (
@@ -7,6 +9,10 @@ import (
 	"strconv"
 	"strings"
 )
+
+// childCounter returns the per-pid counter a Build uses. /proc answers each pid
+// directly, so there is nothing to share across panes.
+func childCounter() func(int) (int, error) { return ChildCount }
 
 // ChildCount returns the number of direct children of pid, by reading
 // /proc/<pid>/task/*/children. Returns 0 (no error) if pid is gone.

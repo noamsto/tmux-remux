@@ -77,7 +77,7 @@ type Pane struct {
 	ChildCount    int               `json:"child_count"`
 	ScrollbackSHA string            `json:"scrollback_sha,omitempty"`
 	ID            string            `json:"id,omitempty"`       // tmux pane id ("%7"); stable within a server lifetime
-	Relaunch      string            `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list
+	Relaunch      string            `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list, unless the pane was an idle plain shell at capture
 	Decoration    map[string]string `json:"decoration,omitempty"`
 }
 

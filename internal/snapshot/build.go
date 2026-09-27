@@ -16,8 +16,8 @@ type Lister interface {
 }
 
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
-// is populated best-effort from /proc; errors are ignored (missing PID just
-// leaves it zero).
+// is populated best-effort from the process table; errors are ignored
+// (missing PID just leaves it zero).
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
 	var sessions []tmux.SessionRow
 	var windows []tmux.WindowRow
@@ -57,6 +57,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		pansByWin[p.Session][p.WindowIndex] = append(pansByWin[p.Session][p.WindowIndex], p)
 	}
 
+	countChildren := childCounter()
 	for _, s := range sessions {
 		if s.BridgeHost != "" {
 			m.Bridged = append(m.Bridged, s.Name)
@@ -73,7 +74,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 				if p.Floating {
 					continue
 				}
-				cc, _ := ChildCount(p.PID)
+				cc, _ := countChildren(p.PID)
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
 					LastUsed:   p.LastUsed,

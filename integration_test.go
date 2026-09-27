@@ -195,6 +195,107 @@ func panesInWindow(t *testing.T, st scopedTmux, windowIndex int) int {
 	return n
 }
 
+// findWindow returns the window at index in the named session, if present.
+func findWindow(m snapshot.Manifest, session string, index int) (snapshot.Window, bool) {
+	for _, s := range m.Sessions {
+		if s.Name != session {
+			continue
+		}
+		for _, w := range s.Windows {
+			if w.Index == index {
+				return w, true
+			}
+		}
+	}
+	return snapshot.Window{}, false
+}
+
+// TestRelaunchOverrideSurvivesOnlyWhileProgramRuns is the rule's real-tmux
+// proof: a pane born running "sleep 300; exec /bin/sh" (the shape restore's
+// own startup gives a relaunched override) reports its shell's name in
+// pane_current_command while sleep runs — a `sh -c` has no job control, so
+// sleep stays in the shell's process group — so ChildCount, not the command
+// name, is what tells a busy pane from a stale stamp on an idle prompt.
+func TestRelaunchOverrideSurvivesOnlyWhileProgramRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	srv := testutil.StartServer(t)
+	st := scopedTmux{socket: srv.Socket}
+	const stamp = "sleep 300"
+	if _, err := srv.Tmux("set", "-g", "default-shell", "/bin/sh"); err != nil {
+		t.Fatal(err)
+	}
+
+	// (a) restore-style pane: still running its relaunched program.
+	startup := restore.BuildStartupCommand(restore.StartupOpts{DefaultShell: "/bin/sh", OverrideCmd: stamp})
+	if _, err := srv.Tmux("new-window", "-d", "-t", "init:5", "-n", "busy", startup); err != nil {
+		t.Fatal(err)
+	}
+	// (b) idle prompt carrying the same stamp — left behind by an agent that
+	// died before its SessionEnd hook could clear it.
+	if _, err := srv.Tmux("new-window", "-d", "-t", "init:6", "-n", "idle"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"init:5", "init:6"} {
+		if _, err := srv.Tmux("set", "-p", "-t", target, "@remux_relaunch", stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx := context.Background()
+	var m snapshot.Manifest
+	dump := func() string {
+		b, _ := json.MarshalIndent(m, "", "  ")
+		return string(b)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		built, err := snapshot.Build(ctx, st, "test", 0)
+		if err != nil {
+			t.Fatalf("snapshot.Build: %v", err)
+		}
+		m = built
+		if win, ok := findWindow(m, "init", 5); ok && len(win.Panes) == 1 && win.Panes[0].ChildCount >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("window 5's pane never showed a live child (sleep never spawned); last manifest:\n%s", dump())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	busy, _ := findWindow(m, "init", 5)
+	if p := busy.Panes[0]; !filter.IsShell(p.Command) || p.Relaunch != stamp {
+		t.Errorf("window 5 pane = %q with relaunch %q, want a shell name carrying %q; manifest:\n%s", p.Command, p.Relaunch, stamp, dump())
+	}
+	idle, ok := findWindow(m, "init", 6)
+	if !ok || len(idle.Panes) != 1 || idle.Panes[0].ChildCount != 0 {
+		t.Fatalf("window 6 should be one childless pane; manifest:\n%s", dump())
+	}
+
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, restore.BuildOptions{DefaultShell: "/bin/sh"})
+	want := map[int]bool{5: true, 6: false}
+	for _, a := range plan {
+		cw, ok := a.(restore.CreateWindow)
+		if !ok {
+			continue
+		}
+		keep, tracked := want[cw.Index]
+		if !tracked {
+			continue
+		}
+		delete(want, cw.Index)
+		if strings.Contains(cw.StartupCommand, stamp) != keep {
+			t.Errorf("window %d StartupCommand = %q, want override kept = %v; manifest:\n%s", cw.Index, cw.StartupCommand, keep, dump())
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("plan has no CreateWindow for windows %v; plan = %+v", want, plan)
+	}
+}
+
 // TestDecorationRestoreRoundtrip captures decoration options (@crew_name,
 // @crew_color) from a real tmux server into a manifest, then replays the
 // resulting restore plan against a fresh server and confirms the options

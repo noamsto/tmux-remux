@@ -3,6 +3,7 @@ package restore
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 
 	"github.com/noamsto/tmux-remux/internal/filter"
@@ -105,8 +106,9 @@ type PlanStats struct {
 
 // paneStartup composes the startup shell-command for a restored pane: replay
 // its stored scrollback, then relaunch via the pane's @remux_relaunch override if
-// set, else the original command when it's on the allow-list (otherwise fall
-// through to the default shell).
+// set and the pane wasn't an idle plain shell at capture, else the original
+// command when it's on the allow-list (otherwise fall through to the default
+// shell).
 func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 	so := StartupOpts{
 		Self:          opts.Self,
@@ -114,7 +116,7 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 		IsBash:        opts.IsBash,
 		ScrollbackSHA: p.ScrollbackSHA,
 	}
-	if p.Relaunch != "" {
+	if p.Relaunch != "" && !idlePlainShell(p, opts.DefaultShell) {
 		// A pane-supplied @remux_relaunch override wins over the allow-list.
 		so.OverrideCmd = p.Relaunch
 	} else {
@@ -127,6 +129,19 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 		}
 	}
 	return BuildStartupCommand(so)
+}
+
+// idlePlainShell reports whether p sat at a bare shell prompt when captured.
+// A relaunch stamp on such a pane outlived the program that set it — an agent
+// that died before its SessionEnd hook could clear it — so replaying it would
+// resume a session the user already left. The name alone can't decide: a pane
+// restored by paneStartup runs its override under `<shell> -c` and reports the
+// shell while the program runs, so a live child is what marks it as busy.
+func idlePlainShell(p snapshot.Pane, defaultShell string) bool {
+	if p.ChildCount != 0 {
+		return false
+	}
+	return filter.IsShell(p.Command) || p.Command == filepath.Base(defaultShell)
 }
 
 // setOptionActions returns a SetOption action per decoration key, sorted for

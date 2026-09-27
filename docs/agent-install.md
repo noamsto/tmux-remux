@@ -88,6 +88,12 @@ allow-list. You are responsible for quoting the value.
 tmux set -p @remux_relaunch "claude --resume <session-uuid>"
 ```
 
+Set it from the program that's actually running — it's persisted with every
+snapshot, so a stamp left on a pane that's fallen back to an idle shell prompt
+(the program exited or crashed before clearing it) is ignored on restore and
+undo. Clear it when your session ends: `tmux set -p @remux_relaunch ""`, or
+tie it to a `SessionEnd`-equivalent hook.
+
 ## 5. Verify
 
 ```bash

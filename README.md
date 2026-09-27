@@ -203,6 +203,8 @@ Allow-list of commands to re-launch on restore: `nvim`, `vim`, `htop`, `btop`, `
 
 **Per-pane relaunch override.** A pane may set the `@remux_relaunch` user option to a full shell command (e.g. `set -p @remux_relaunch "claude --resume <uuid>"`); on restore that command is exec'd verbatim, bypassing the allow-list. This lets a tool restore a pane's exact state (a resumed session, a specific REPL) that the bare command name can't capture. The owning tool is responsible for quoting the value.
 
+**Stored overrides and staleness.** The value is captured into every snapshot and close event (kept per the `prune` retention above), so `restore`, `pick`, and `undo` can replay it long after it was set. They skip a stored override when the pane was an **idle shell prompt** at capture — its command was a shell (`bash`, `fish`, `zsh`, `sh`, or your `default-shell`) with no child processes — which is what a pane looks like after an agent died before its `SessionEnd` hook cleared the stamp. A pane still running something keeps its override, including one tmux-remux itself restored (tmux shows the shell's name there, but the program is its child) and agents started through wrapper scripts. Two gaps: a prompt with background jobs or prompt workers (e.g. powerlevel10k's `gitstatusd`) counts as busy, and an override captured while its program ran replays as captured — inspect with `tmux-remux list --json`; clearing the stamp is the program's job. Child processes are counted from `/proc` on Linux and the process table on macOS; macOS snapshots taken before this release recorded no children, so an agent captured in one may restore as a shell once.
+
 > **Coding agents:** to install tmux-remux yourself and mark your own pane for exact relaunch, follow [`docs/agent-install.md`](docs/agent-install.md) (Linux + macOS).
 
 ### Agent resume-on-restore
@@ -220,7 +222,9 @@ running Claude Code or Codex restores as its exact prior session:
   before its first turn restores as a shell.
 
 Both share one binary core (`relaunch-stamp`). The stamp is exec'd verbatim
-on restore via the `@remux_relaunch` override.
+on restore via the `@remux_relaunch` override — unless the agent died without
+running `SessionEnd`, in which case the pane is back at an idle prompt and the
+stale stamp is ignored.
 
 ## Storage
 
@@ -249,6 +253,8 @@ Concurrent writers are serialized by an advisory `flock` on `$XDG_RUNTIME_DIR/tm
 - Secrets pasted into prompts, env vars echoed by buggy programs, or output of `env` / `printenv` (high)
 
 Don't sync `$XDG_DATA_HOME/tmux-remux/` to cloud storage, don't commit it, don't share snapshots. If you need cross-host portability of session structure (without the scrollback bytes), set `captureScrollback = false` and rely on cwd + command relaunch.
+
+**Stored relaunch commands.** `@remux_relaunch` values are persisted in `state.db` with the snapshot/close-event retention above, and exec'd verbatim (via the default shell) on restore and undo. Anything able to write `state.db` can make restore run commands — the same trust boundary as the store itself, and setting the option already requires tmux access. Restore and undo won't replay a stored override if the pane was an idle plain shell at capture (see "Per-pane relaunch override" above); inspect what's stored with `tmux-remux list --json`.
 
 ## Architecture
 
