@@ -252,6 +252,43 @@ func TestServerStartTimeRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestPanePIDParsesOutput(t *testing.T) {
+	fake := writeFakeTmux(t, `echo 54321`)
+	c := tmux.NewClient(fake)
+	got, err := c.PanePID(context.Background(), "%3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 54321 {
+		t.Errorf("PanePID = %d, want 54321", got)
+	}
+}
+
+func TestPanePIDRejectsGarbage(t *testing.T) {
+	fake := writeFakeTmux(t, `echo not-a-number`)
+	c := tmux.NewClient(fake)
+	if _, err := c.PanePID(context.Background(), "%3"); err == nil {
+		t.Error("expected parse error for non-numeric pane_pid")
+	}
+}
+
+func TestPanePIDIssuesDisplayMessageArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n' "$@" > %s; echo 1`, argsFile))
+	c := tmux.NewClient(fake)
+	if _, err := c.PanePID(context.Background(), "%3"); err != nil {
+		t.Fatalf("PanePID: %v", err)
+	}
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "display-message\n-p\n-t\n%3\n#{pane_pid}\n"
+	if string(got) != want {
+		t.Errorf("tmux args =\n%q\nwant\n%q", got, want)
+	}
+}
+
 func TestSetPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n' "$@" > %s`, argsFile))

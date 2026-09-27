@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -190,6 +191,61 @@ func TestBuildSkipsBridgeSessions(t *testing.T) {
 				if len(s.Windows) == 0 {
 					t.Errorf("session %q has no windows, want its own windows/panes intact", s.Name)
 				}
+			}
+		})
+	}
+}
+
+// liveChildPID starts a long-lived child of the current process and returns
+// its pid, killing and reaping it on test cleanup.
+func liveChildPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd.Process.Pid
+}
+
+func TestBuildBlanksRelaunchWhenOwnerNoLongerOwnsPane(t *testing.T) {
+	panePID := os.Getpid()
+	liveChild := liveChildPID(t)
+	deadPID := reapedPID(t)
+
+	tests := []struct {
+		name        string
+		relaunchPID int
+		wantKept    bool
+	}{
+		{name: "owner is a live direct child of the pane", relaunchPID: liveChild, wantKept: true},
+		{name: "owner already reaped", relaunchPID: deadPID, wantKept: false},
+		{name: "owner is the pane process itself", relaunchPID: panePID, wantKept: true},
+		{name: "no owner recorded", relaunchPID: 0, wantKept: true},
+		{name: "owner alive but not a child of the pane", relaunchPID: os.Getppid(), wantKept: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &fakeClient{
+				sessions: []tmux.SessionRow{{Name: "s"}},
+				windows:  []tmux.WindowRow{{Session: "s", Index: 1}},
+				panes: []tmux.PaneRow{
+					{Session: "s", WindowIndex: 1, PaneIndex: 1, PID: panePID, Relaunch: "x", RelaunchPID: tt.relaunchPID},
+				},
+			}
+			m, err := snapshot.Build(context.Background(), fc, "h", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := m.Sessions[0].Windows[0].Panes[0].Relaunch
+			if tt.wantKept && got != "x" {
+				t.Errorf("Relaunch = %q, want kept (\"x\")", got)
+			}
+			if !tt.wantKept && got != "" {
+				t.Errorf("Relaunch = %q, want blanked", got)
 			}
 		})
 	}

@@ -119,7 +119,7 @@ func withSynthesizedTmuxEnv(env []string) []string {
 const (
 	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}" + FieldSep + "#{@bridge_host}"
 	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
-	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}"
+	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}" + FieldSep + "#{@remux_relaunch_pid}"
 )
 
 // WindowFormat returns the list-windows -F format. Decoration is captured
@@ -266,6 +266,20 @@ func (c *Client) ServerStartTime(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("parse start_time %q: %w", strings.TrimSpace(out), err)
 	}
 	return secs * 1000, nil
+}
+
+// PanePID returns the pid of the process running in pane (tmux's pane_pid),
+// via `tmux display-message -p -t <pane> '#{pane_pid}'`.
+func (c *Client) PanePID(ctx context.Context, pane string) (int, error) {
+	out, err := c.Run(ctx, []string{"display-message", "-p", "-t", pane, "#{pane_pid}"})
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("parse pane_pid %q: %w", strings.TrimSpace(out), err)
+	}
+	return pid, nil
 }
 
 // SetPaneOption sets a pane-scoped option (tmux set-option -p). The -q flag

@@ -7,6 +7,16 @@ import "golang.org/x/sys/unix"
 // Returns 0 (no error) if pid is gone.
 func ChildCount(pid int) (int, error) { return childCounter()(pid) }
 
+// ParentPID returns pid's parent process id via the kern.proc.pid sysctl.
+// Returns an error if pid is gone.
+func ParentPID(pid int) (int, error) {
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return 0, err
+	}
+	return int(kp.Eproc.Ppid), nil
+}
+
 // childCounter reads the process table once and answers every pid from it,
 // so a Build costs one sysctl rather than one per pane.
 func childCounter() func(int) (int, error) {
