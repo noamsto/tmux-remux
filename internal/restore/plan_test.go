@@ -114,9 +114,6 @@ func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
 	t.Fatal("CreateWindow not found in plan")
 }
 
-// A stored @remux_relaunch override is honoured unless the pane was an idle
-// plain shell at capture (childless, and either a shared shell name or the
-// basename of the resolved default shell).
 func TestBuildPlanRelaunchOverrideStaleness(t *testing.T) {
 	const r = "claude --resume abc"
 	nuOpts := defaultOpts

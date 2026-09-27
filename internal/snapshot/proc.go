@@ -15,10 +15,9 @@ import (
 func childCounter() func(int) (int, error) { return ChildCount }
 
 // ChildCount returns the number of direct children of pid, by reading
-// /proc/<pid>/task/*/children. Returns 0 (no error) if pid is gone. If pid is
-// alive but the glob matches nothing (kernel built without
-// CONFIG_PROC_CHILDREN), the count is unknown rather than zero, so this
-// returns an error instead of silently reporting an idle process.
+// /proc/<pid>/task/*/children. Returns 0 (no error) if pid is gone, and an
+// error if pid is alive but has no children files (a kernel without
+// CONFIG_PROC_CHILDREN), where the count is unknown rather than zero.
 func ChildCount(pid int) (int, error) {
 	matches, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", pid))
 	if err != nil {

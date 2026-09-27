@@ -195,9 +195,8 @@ func panesInWindow(t *testing.T, st scopedTmux, windowIndex int) int {
 	return n
 }
 
-// findWindow returns the window at index in the "init" session, if present.
-// Every caller targets "init" (the session testutil.StartServer creates), so
-// the session name is not a parameter.
+// findWindow returns the window at index in testutil.StartServer's "init"
+// session, if present.
 func findWindow(m snapshot.Manifest, index int) (snapshot.Window, bool) {
 	for _, s := range m.Sessions {
 		if s.Name != "init" {
@@ -252,9 +251,8 @@ func TestRelaunchOverrideSurvivesOnlyWhileProgramRuns(t *testing.T) {
 		b, _ := json.MarshalIndent(m, "", "  ")
 		return string(b)
 	}
-	// Under full-suite parallelism the idle /bin/sh pane (window 6) can briefly
-	// report ChildCount 1 during login-shell startup, so the loop must wait for
-	// BOTH windows to reach their expected state, not just window 5's.
+	// The idle login shell can briefly have a child while its profile runs, so
+	// wait for both windows to settle.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		built, err := snapshot.Build(ctx, st, "test", 0)

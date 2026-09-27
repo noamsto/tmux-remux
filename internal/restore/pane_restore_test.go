@@ -119,9 +119,6 @@ func TestBuildPaneRestoreRecreatesGoneWindowIncludesPaneDecoration(t *testing.T)
 	}
 }
 
-// A stale @remux_relaunch override (idle shell, no children) is ignored on
-// both restore paths BuildPaneRestore can take: splitting into a live window
-// and recreating a gone one.
 func TestBuildPaneRestoreIgnoresStaleRelaunch(t *testing.T) {
 	const r = "claude --resume abc"
 

@@ -131,12 +131,11 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 	return BuildStartupCommand(so)
 }
 
-// idlePlainShell reports whether p sat at a bare shell prompt when captured.
-// A relaunch stamp on such a pane outlived the program that set it — an agent
-// that died before its SessionEnd hook could clear it — so replaying it would
-// resume a session the user already left. The name alone can't decide: a pane
-// restored by paneStartup runs its override under `<shell> -c` and reports the
-// shell while the program runs, so a live child is what marks it as busy.
+// idlePlainShell reports whether p sat at a bare shell prompt when captured,
+// meaning a relaunch stamp on it outlived the program that set it. The name
+// alone can't decide: a pane restored by paneStartup runs its override under
+// `<shell> -c` and reports the shell while the program runs, so a live child
+// is what marks it as busy.
 func idlePlainShell(p snapshot.Pane, defaultShell string) bool {
 	if p.ChildCount != 0 {
 		return false

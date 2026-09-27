@@ -524,11 +524,8 @@ func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
 	}
 }
 
-// TestUndoPaneCloseIgnoresStaleRelaunch mirrors the restore-path staleness
-// rule on undo's plan-building: a stale @remux_relaunch (idle shell, no
-// children) must not survive into the split back in, on both ways a close
-// event can resolve — off a prior snapshot, and off the entity embedded at
-// capture time when no snapshot survives.
+// TestUndoPaneCloseIgnoresStaleRelaunch covers both ways a close event
+// resolves: off a prior snapshot, and off the entity embedded at capture.
 func TestUndoPaneCloseIgnoresStaleRelaunch(t *testing.T) {
 	const r = "claude --resume abc"
 	live := strings.Join([]string{"mono", "4", "win", "L", "@9", "0"}, tmux.FieldSep)
