@@ -82,18 +82,12 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 				if err != nil {
 					cc = -1
 				}
-				relaunch := p.Relaunch
-				if relaunch != "" && p.RelaunchPID != 0 && p.RelaunchPID != p.PID {
-					if ppid, err := ParentPID(p.RelaunchPID); err != nil || ppid != p.PID {
-						relaunch = ""
-					}
-				}
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
 					LastUsed:   p.LastUsed,
 					ChildCount: cc,
 					ID:         p.ID,
-					Relaunch:   relaunch,
+					Relaunch:   p.Relaunch,
 					Decoration: p.Decoration,
 				})
 			}

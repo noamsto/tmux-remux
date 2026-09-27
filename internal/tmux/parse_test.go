@@ -63,25 +63,17 @@ func TestParseWindows(t *testing.T) {
 }
 
 func TestParsePanes(t *testing.T) {
-	input := "lazytmux\x1f1\x1f1\x1f/home/me\x1fnvim\x1f12345\x1f1745700000\x1f%3\x1f\x1f0\x1f\nlazytmux\x1f1\x1f2\x1f/tmp\x1fclaude\x1f12346\x1f1745699000\x1f%9\x1fclaude --resume abc-123\x1f1\x1f4242\n"
+	input := "lazytmux\x1f1\x1f1\x1f/home/me\x1fnvim\x1f12345\x1f1745700000\x1f%3\x1f\x1f0\nlazytmux\x1f1\x1f2\x1f/tmp\x1fclaude\x1f12346\x1f1745699000\x1f%9\x1fclaude --resume abc-123\x1f1\n"
 	got, err := tmux.ParsePanes(input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []tmux.PaneRow{
 		{Session: "lazytmux", WindowIndex: 1, PaneIndex: 1, Cwd: "/home/me", Command: "nvim", PID: 12345, LastUsed: 1745700000, ID: "%3"},
-		{Session: "lazytmux", WindowIndex: 1, PaneIndex: 2, Cwd: "/tmp", Command: "claude", PID: 12346, LastUsed: 1745699000, ID: "%9", Relaunch: "claude --resume abc-123", RelaunchPID: 4242, Floating: true},
+		{Session: "lazytmux", WindowIndex: 1, PaneIndex: 2, Cwd: "/tmp", Command: "claude", PID: 12346, LastUsed: 1745699000, ID: "%9", Relaunch: "claude --resume abc-123", Floating: true},
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("ParsePanes mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestParsePanesFieldCountMismatch(t *testing.T) {
-	// Missing the trailing @remux_relaunch_pid field (10 fields, pre-F1 shape).
-	input := "s1\x1f1\x1f1\x1f/x\x1fbash\x1f1234\x1f\x1f%1\x1f\x1f0\n"
-	if _, err := tmux.ParsePanes(input); err == nil {
-		t.Error("ParsePanes(10-field line) = nil error, want error")
 	}
 }
 
@@ -102,7 +94,7 @@ func TestParseSessionsEmptyLastAttached(t *testing.T) {
 
 func TestParsePanesEmptyLastUsed(t *testing.T) {
 	// tmux emits empty pane_last_used for freshly-created panes.
-	input := "s1\x1f1\x1f1\x1f/x\x1fbash\x1f1234\x1f\x1f%1\x1f\x1f0\x1f\n"
+	input := "s1\x1f1\x1f1\x1f/x\x1fbash\x1f1234\x1f\x1f%1\x1f\x1f0\n"
 	got, err := tmux.ParsePanes(input)
 	if err != nil {
 		t.Fatalf("ParsePanes: %v", err)
@@ -115,7 +107,7 @@ func TestParsePanesEmptyLastUsed(t *testing.T) {
 func TestParsePanesDeadPane(t *testing.T) {
 	// A pane whose process exited under remain-on-exit lingers in the layout,
 	// but tmux reports pane_pid, pane_current_path and pane_last_used empty.
-	input := "s1\x1f1\x1f1\x1f\x1flztmux-remote-picker\x1f\x1f\x1f%1\x1f\x1f0\x1f\n"
+	input := "s1\x1f1\x1f1\x1f\x1flztmux-remote-picker\x1f\x1f\x1f%1\x1f\x1f0\n"
 	got, err := tmux.ParsePanes(input)
 	if err != nil {
 		t.Fatalf("ParsePanes: %v", err)

@@ -7,19 +7,12 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
-	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/tmux"
 )
 
 const relaunchOption = "@remux_relaunch"
-
-// relaunchPIDOption records the pid of the process that owns @remux_relaunch
-// (see relaunchOwner), so snapshot.Build can tell a still-owned stamp from one
-// left behind by a dead agent.
-const relaunchPIDOption = "@remux_relaunch_pid"
 
 // sessionIDPattern bounds hook-supplied session ids to a shell-safe charset.
 // The id is interpolated into a resume command that restore later exec's
@@ -47,29 +40,6 @@ var relaunchPresets = map[string]relaunchPreset{
 // can assert the (pane, name, value) triple without a real tmux server.
 type paneOptionSetter interface {
 	SetPaneOption(ctx context.Context, pane, name, value string) error
-	PanePID(ctx context.Context, pane string) (int, error)
-}
-
-// relaunchOwner returns the ancestor of self that sits directly under panePID
-// (or panePID itself): the agent, or its wrapper, which lives exactly as long
-// as the session, unlike the hook's own transient shell. Returns 0 when the
-// chain can't be resolved.
-func relaunchOwner(self, panePID int, parent func(int) (int, error)) int {
-	pid := self
-	for range 64 {
-		if pid == panePID {
-			return panePID
-		}
-		ppid, err := parent(pid)
-		if err != nil || ppid <= 1 {
-			return 0
-		}
-		if ppid == panePID {
-			return pid
-		}
-		pid = ppid
-	}
-	return 0
 }
 
 type relaunchStampOpts struct {
@@ -117,7 +87,6 @@ func runRelaunchStamp(ctx context.Context, setter paneOptionSetter, r io.Reader,
 		return nil
 	}
 	if opts.clear {
-		_ = setter.SetPaneOption(ctx, opts.pane, relaunchPIDOption, "")
 		_ = setter.SetPaneOption(ctx, opts.pane, relaunchOption, "")
 		return nil
 	}
@@ -143,16 +112,6 @@ func runRelaunchStamp(ctx context.Context, setter paneOptionSetter, r io.Reader,
 		// verbatim, so a malformed id is dropped rather than quoted.
 		return nil
 	}
-	owner := 0
-	if panePID, err := setter.PanePID(ctx, opts.pane); err == nil {
-		owner = relaunchOwner(os.Getpid(), panePID, snapshot.ParentPID)
-	}
-	ownerValue := ""
-	if owner != 0 {
-		ownerValue = strconv.Itoa(owner)
-	}
-	_ = setter.SetPaneOption(ctx, opts.pane, relaunchPIDOption, ownerValue)
-
 	value := strings.ReplaceAll(tmpl, "{id}", id)
 	_ = setter.SetPaneOption(ctx, opts.pane, relaunchOption, value)
 	return nil

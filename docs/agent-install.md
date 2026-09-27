@@ -89,11 +89,10 @@ tmux set -p @remux_relaunch "claude --resume <session-uuid>"
 ```
 
 Set it from the program that's actually running — it's persisted with every
-snapshot. Setting it this way (not through `relaunch-stamp`) gives it no owning
-process to bind to, so only the idle-shell rule protects it: it's ignored on
-restore and undo if the pane has fallen back to a bare shell prompt with no
-child processes (the program exited or crashed before clearing it). Clear it
-when your session ends: `tmux set -p @remux_relaunch ""`, or tie it to a
+snapshot. A stamp left on a pane that has fallen back to an idle shell prompt
+(the program exited or crashed before clearing it) is ignored on restore and
+undo, but one left on a pane that went on to run another program is not. Clear
+it when your session ends: `tmux set -p @remux_relaunch ""`, or tie it to a
 `SessionEnd`-equivalent hook.
 
 ## 5. Verify

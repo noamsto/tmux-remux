@@ -95,7 +95,6 @@ type PaneRow struct {
 	LastUsed    int64
 	ID          string // tmux pane id, e.g. "%3"
 	Relaunch    string // @remux_relaunch pane option; verbatim relaunch command, empty when unset
-	RelaunchPID int    // @remux_relaunch_pid pane option; pid of the process that set Relaunch, 0 when unset/invalid
 	Floating    bool
 	Decoration  map[string]string // allow-listed options captured via show-options -qv; nil when none set
 }
@@ -108,8 +107,8 @@ func ParsePanes(s string) ([]PaneRow, error) {
 	var out []PaneRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
-		if len(fields) != 11 {
-			return nil, fmt.Errorf("pane line %d: expected 11 fields, got %d", i+1, len(fields))
+		if len(fields) != 10 {
+			return nil, fmt.Errorf("pane line %d: expected 10 fields, got %d", i+1, len(fields))
 		}
 		wi, err := strconv.Atoi(fields[1])
 		if err != nil {
@@ -127,14 +126,10 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pane line %d: last_used: %w", i+1, err)
 		}
-		rpid, err := parseIntOrZero(fields[10])
-		if err != nil {
-			return nil, fmt.Errorf("pane line %d: relaunch_pid: %w", i+1, err)
-		}
 		out = append(out, PaneRow{
 			Session: fields[0], WindowIndex: wi, PaneIndex: pi,
 			Cwd: fields[3], Command: fields[4], PID: int(pid), LastUsed: lu, ID: fields[7],
-			Relaunch: fields[8], RelaunchPID: int(rpid), Floating: fields[9] == "1",
+			Relaunch: fields[8], Floating: fields[9] == "1",
 		})
 	}
 	return out, nil

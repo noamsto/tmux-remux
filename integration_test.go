@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +58,7 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	return tmux.ParseWindows(out)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
-	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}\x1f#{@remux_relaunch_pid}"})
+	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
@@ -302,139 +301,6 @@ func TestRelaunchOverrideSurvivesOnlyWhileProgramRuns(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("plan has no CreateWindow for windows %v; plan = %+v", want, plan)
-	}
-}
-
-// shellSingleQuote returns s embedded in single quotes, safe for content that
-// itself contains single quotes (via the standard close-quote/escaped-quote/
-// reopen-quote trick), suitable for building nested shell -c arguments.
-func shellSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// findDirectChild returns one direct child pid of parent, read from
-// /proc/<parent>/task/*/children (the same source snapshot.ChildCount uses).
-func findDirectChild(t *testing.T, parent int) int {
-	t.Helper()
-	matches, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", parent))
-	if err != nil {
-		t.Fatalf("glob children of %d: %v", parent, err)
-	}
-	for _, m := range matches {
-		data, err := os.ReadFile(m)
-		if err != nil {
-			continue
-		}
-		if fields := strings.Fields(string(data)); len(fields) > 0 {
-			if child, err := strconv.Atoi(fields[0]); err == nil {
-				return child
-			}
-		}
-	}
-	t.Fatalf("no direct child found under /proc/%d/task/*/children", parent)
-	return 0
-}
-
-// TestRelaunchStampBindsOwnerAndClearsWhenOwnerDies is the real relaunch-stamp
-// binary's end-to-end proof that a stamp is bound to its owning process: an
-// agent stand-in process (one level below the pane's own shell — mirroring
-// how a real agent wrapper sits under the pane) stamps
-// @remux_relaunch/@remux_relaunch_pid, snapshot.Build reports the override
-// while that process lives, and drops it the moment the process dies — even
-// though the pane and its own shell are still running.
-func TestRelaunchStampBindsOwnerAndClearsWhenOwnerDies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in short mode")
-	}
-
-	bin := buildRemux(t)
-	srv := testutil.StartServer(t)
-	st := scopedTmux{socket: srv.Socket}
-	if _, err := srv.Tmux("set", "-g", "default-shell", "/bin/sh"); err != nil {
-		t.Fatal(err)
-	}
-
-	// agentStandIn stands in for an agent's start hook, running one level
-	// below the pane's own shell — exactly the layer relaunchOwner must bind
-	// to, as opposed to relaunch-stamp's own transient invocation underneath.
-	agentStandIn := fmt.Sprintf(`sh -c 'printf "{\"session_id\":\"abc-123\"}" | %s relaunch-stamp --agent claude; sleep 300'`, bin)
-	startup := "sh -c " + shellSingleQuote(agentStandIn) + "; exec sh"
-	if out, err := srv.Tmux("new-window", "-d", "-t", "init:1", "-n", "agent", startup); err != nil {
-		t.Fatalf("new-window: %v\n%s", err, out)
-	}
-
-	ctx := context.Background()
-	const wantRelaunch = "claude --resume abc-123"
-	var m snapshot.Manifest
-	dump := func() string {
-		b, _ := json.MarshalIndent(m, "", "  ")
-		return string(b)
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		built, err := snapshot.Build(ctx, st, "test", 0)
-		if err != nil {
-			t.Fatalf("snapshot.Build: %v", err)
-		}
-		m = built
-		if win, ok := findWindow(m, 1); ok && len(win.Panes) == 1 && win.Panes[0].Relaunch == wantRelaunch {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pane never showed relaunch %q; last manifest:\n%s", wantRelaunch, dump())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	rows, err := st.ListPanes(ctx)
-	if err != nil {
-		t.Fatalf("ListPanes: %v", err)
-	}
-	var row tmux.PaneRow
-	found := false
-	for _, r := range rows {
-		if r.Session == "init" && r.WindowIndex == 1 {
-			row = r
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("raw ListPanes missing init:1; manifest:\n%s", dump())
-	}
-	if row.RelaunchPID == 0 {
-		t.Fatalf("raw ListPanes row has no RelaunchPID set: %+v; manifest:\n%s", row, dump())
-	}
-
-	owner := findDirectChild(t, row.PID)
-	proc, err := os.FindProcess(owner)
-	if err != nil {
-		t.Fatalf("FindProcess(%d): %v", owner, err)
-	}
-	if err := proc.Kill(); err != nil {
-		t.Fatalf("kill owner pid %d: %v", owner, err)
-	}
-
-	deadline = time.Now().Add(5 * time.Second)
-	for {
-		built, err := snapshot.Build(ctx, st, "test", 0)
-		if err != nil {
-			t.Fatalf("snapshot.Build: %v", err)
-		}
-		m = built
-		if win, ok := findWindow(m, 1); ok && len(win.Panes) == 1 && win.Panes[0].ChildCount == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pane's shell never settled back to childless after owner death; last manifest:\n%s", dump())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	win, ok := findWindow(m, 1)
-	if !ok || len(win.Panes) != 1 || win.Panes[0].Relaunch != "" {
-		t.Errorf("relaunch not cleared after owner died; manifest:\n%s", dump())
 	}
 }
 
