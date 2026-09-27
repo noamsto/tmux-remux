@@ -524,6 +524,80 @@ func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
 	}
 }
 
+// TestUndoPaneCloseIgnoresStaleRelaunch covers both ways a close event
+// resolves: off a prior snapshot, and off the entity embedded at capture.
+func TestUndoPaneCloseIgnoresStaleRelaunch(t *testing.T) {
+	const r = "claude --resume abc"
+	live := strings.Join([]string{"mono", "4", "win", "L", "@9", "0"}, tmux.FieldSep)
+
+	cases := []struct {
+		name        string
+		childCount  int
+		wantPresent bool
+	}{
+		{"idle shell, override dropped", 0, false},
+		{"busy shell, override kept", 1, true},
+	}
+	for _, c := range cases {
+		pane := snapshot.Pane{Index: 1, Cwd: "/m", Command: "fish", ID: "%9", ChildCount: c.childCount, Relaunch: r}
+		window := snapshot.Window{Index: 4, Name: "win", Layout: "L", ID: "@9", Panes: []snapshot.Pane{pane}}
+
+		t.Run(c.name+"/snapshot", func(t *testing.T) {
+			ctx := context.Background()
+			db := emptyStore(ctx, t)
+			snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+				Name: "mono", Windows: []snapshot.Window{window},
+			}}}
+			insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
+			ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))}
+			item, prior, ok := resolveEvent(ctx, db, ev)
+			if !ok {
+				t.Fatal("resolveEvent: expected a recoverable pane close")
+			}
+
+			plan, _ := buildRestorePlan(ctx, tmux.NewClient(fakeTmuxEmitting(t, live)), item, prior, restore.BuildOptions{DefaultShell: "/bin/zsh"})
+			sp := findSplitPane(t, plan)
+			if got := strings.Contains(sp.StartupCommand, r); got != c.wantPresent {
+				t.Errorf("SplitPane.StartupCommand = %q, contains override = %v, want %v", sp.StartupCommand, got, c.wantPresent)
+			}
+		})
+
+		t.Run(c.name+"/embedded", func(t *testing.T) {
+			ctx := context.Background()
+			db := emptyStore(ctx, t)
+			man := closeevent.CloseManifest{
+				PaneID: "%9", WindowID: "@9", SessionName: "mono",
+				Resolved: &closeevent.ResolvedClose{
+					Item:    closeevent.ClosedItem{Pane: &pane, Window: &window, SessionName: "mono", WindowIndex: 4},
+					SavedAt: 100,
+				},
+			}
+			ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, man))}
+			item, prior, ok := resolveEvent(ctx, db, ev)
+			if !ok {
+				t.Fatal("resolveEvent: expected a recoverable pane close")
+			}
+
+			plan, _ := buildRestorePlan(ctx, tmux.NewClient(fakeTmuxEmitting(t, live)), item, prior, restore.BuildOptions{DefaultShell: "/bin/zsh"})
+			sp := findSplitPane(t, plan)
+			if got := strings.Contains(sp.StartupCommand, r); got != c.wantPresent {
+				t.Errorf("SplitPane.StartupCommand = %q, contains override = %v, want %v", sp.StartupCommand, got, c.wantPresent)
+			}
+		})
+	}
+}
+
+func findSplitPane(t *testing.T, plan []restore.Action) restore.SplitPane {
+	t.Helper()
+	for _, a := range plan {
+		if sp, ok := a.(restore.SplitPane); ok {
+			return sp
+		}
+	}
+	t.Fatal("SplitPane not found in plan")
+	return restore.SplitPane{}
+}
+
 // fakeTmuxEmitting writes a stand-in tmux that prints `out` verbatim, so
 // ListWindows can be driven without a real server.
 //

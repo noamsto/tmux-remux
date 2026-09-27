@@ -1,3 +1,5 @@
+//go:build !darwin
+
 package snapshot
 
 import (
@@ -8,12 +10,24 @@ import (
 	"strings"
 )
 
+// childCounter returns the per-pid counter a Build uses. /proc answers each pid
+// directly, so there is nothing to share across panes.
+func childCounter() func(int) (int, error) { return ChildCount }
+
 // ChildCount returns the number of direct children of pid, by reading
-// /proc/<pid>/task/*/children. Returns 0 (no error) if pid is gone.
+// /proc/<pid>/task/*/children. Returns 0 (no error) if pid is gone, and an
+// error if pid is alive but has no children files (a kernel without
+// CONFIG_PROC_CHILDREN), where the count is unknown rather than zero.
 func ChildCount(pid int) (int, error) {
 	matches, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", pid))
 	if err != nil {
 		return 0, err
+	}
+	if len(matches) == 0 {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+			return 0, fmt.Errorf("no children files under /proc/%d/task", pid)
+		}
+		return 0, nil
 	}
 	seen := map[int]struct{}{}
 	for _, m := range matches {

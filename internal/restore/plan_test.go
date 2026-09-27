@@ -114,6 +114,89 @@ func TestBuildPlanRelaunchOverrideBypassesAllowList(t *testing.T) {
 	t.Fatal("CreateWindow not found in plan")
 }
 
+func TestBuildPlanRelaunchOverrideStaleness(t *testing.T) {
+	const r = "claude --resume abc"
+	nuOpts := defaultOpts
+	nuOpts.DefaultShell = "/usr/bin/nu"
+
+	cases := []struct {
+		name string
+		pane snapshot.Pane
+		opts restore.BuildOptions
+		want string
+	}{
+		{
+			name: "busy agent name honoured",
+			pane: snapshot.Pane{Cwd: "/a", Command: "claude", ChildCount: 0, Relaunch: r},
+			opts: defaultOpts,
+			want: r + "; exec /bin/zsh",
+		},
+		{
+			name: "busy version-string command honoured",
+			pane: snapshot.Pane{Cwd: "/a", Command: "2.1.19", ChildCount: 0, Relaunch: r},
+			opts: defaultOpts,
+			want: r + "; exec /bin/zsh",
+		},
+		{
+			name: "shell with a live child honoured (restored -c pane)",
+			pane: snapshot.Pane{Cwd: "/a", Command: "fish", ChildCount: 1, Relaunch: r},
+			opts: defaultOpts,
+			want: r + "; exec /bin/zsh",
+		},
+		{
+			name: "idle shell ignored, no scrollback to fall back to",
+			pane: snapshot.Pane{Cwd: "/a", Command: "fish", ChildCount: 0, Relaunch: r},
+			opts: defaultOpts,
+			want: "",
+		},
+		{
+			name: "idle shell ignored, scrollback kept",
+			pane: snapshot.Pane{Cwd: "/a", Command: "bash", ChildCount: 0, Relaunch: r, ScrollbackSHA: "deadbeef"},
+			opts: defaultOpts,
+			want: `'/usr/bin/tmux-remux' cat-scrollback deadbeef; exec /bin/zsh`,
+		},
+		{
+			name: "idle default-shell basename ignored",
+			pane: snapshot.Pane{Cwd: "/a", Command: "nu", ChildCount: 0, Relaunch: r},
+			opts: nuOpts,
+			want: "",
+		},
+		{
+			name: "same idle pane under a different default shell honoured",
+			pane: snapshot.Pane{Cwd: "/a", Command: "nu", ChildCount: 0, Relaunch: r},
+			opts: defaultOpts,
+			want: r + "; exec /bin/zsh",
+		},
+		{
+			name: "no override, unchanged allow-list relaunch",
+			pane: snapshot.Pane{Cwd: "/a", Command: "nvim", ChildCount: 0, Relaunch: ""},
+			opts: defaultOpts,
+			want: "nvim; exec /bin/zsh",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := snapshot.Manifest{Sessions: []snapshot.Session{{
+				Name: "s1",
+				Windows: []snapshot.Window{{
+					Index: 1, Name: "main", Layout: "L",
+					Panes: []snapshot.Pane{c.pane},
+				}},
+			}}}
+			plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, c.opts)
+			for _, a := range plan {
+				if cw, ok := a.(restore.CreateWindow); ok {
+					if cw.StartupCommand != c.want {
+						t.Errorf("CreateWindow.StartupCommand = %q, want %q", cw.StartupCommand, c.want)
+					}
+					return
+				}
+			}
+			t.Fatal("CreateWindow not found in plan")
+		})
+	}
+}
+
 func TestBuildPlanScrollbackWithoutAllowedCommandUsesShell(t *testing.T) {
 	m := snapshot.Manifest{
 		Sessions: []snapshot.Session{{

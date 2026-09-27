@@ -15,9 +15,13 @@ type Lister interface {
 	ListPanes(context.Context) ([]tmux.PaneRow, error)
 }
 
+// newChildCounter is childCounter behind a package var, so tests can inject a
+// counter that errors without touching the real process table.
+var newChildCounter = childCounter
+
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
-// is populated best-effort from /proc; errors are ignored (missing PID just
-// leaves it zero).
+// is populated best-effort from the process table; a count error is stored
+// as -1 (unknown) rather than mistaken for zero children.
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
 	var sessions []tmux.SessionRow
 	var windows []tmux.WindowRow
@@ -57,6 +61,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		pansByWin[p.Session][p.WindowIndex] = append(pansByWin[p.Session][p.WindowIndex], p)
 	}
 
+	countChildren := newChildCounter()
 	for _, s := range sessions {
 		if s.BridgeHost != "" {
 			m.Bridged = append(m.Bridged, s.Name)
@@ -73,7 +78,10 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 				if p.Floating {
 					continue
 				}
-				cc, _ := ChildCount(p.PID)
+				cc, err := countChildren(p.PID)
+				if err != nil {
+					cc = -1
+				}
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
 					LastUsed:   p.LastUsed,

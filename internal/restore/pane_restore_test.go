@@ -1,6 +1,7 @@
 package restore_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -115,6 +116,58 @@ func TestBuildPaneRestoreRecreatesGoneWindowIncludesPaneDecoration(t *testing.T)
 	}
 	if !found {
 		t.Errorf("plan = %+v, want it to contain the lost pane's decoration SetOption %+v", plan, want)
+	}
+}
+
+func TestBuildPaneRestoreIgnoresStaleRelaunch(t *testing.T) {
+	const r = "claude --resume abc"
+
+	cases := []struct {
+		name        string
+		childCount  int
+		wantPresent bool
+	}{
+		{"idle shell, override dropped", 0, false},
+		{"busy shell, override kept", 1, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lost := snapshot.Pane{Cwd: "/b", Command: "fish", ChildCount: c.childCount, Relaunch: r}
+			win := snapshot.Window{Index: 2, Name: "w", Layout: "LAY", ID: "@7", Panes: []snapshot.Pane{lost}}
+
+			plan := restore.BuildPaneRestore(lost, win, "s", "@1", defaultOpts)
+			var sp restore.SplitPane
+			found := false
+			for _, a := range plan {
+				if s, ok := a.(restore.SplitPane); ok {
+					sp = s
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("SplitPane not found in plan")
+			}
+			if got := strings.Contains(sp.StartupCommand, r); got != c.wantPresent {
+				t.Errorf("SplitPane.StartupCommand = %q, contains override = %v, want %v", sp.StartupCommand, got, c.wantPresent)
+			}
+
+			recreated := restore.BuildPaneRestore(lost, win, "s", "", defaultOpts)
+			var cw restore.CreateWindow
+			found = false
+			for _, a := range recreated {
+				if c2, ok := a.(restore.CreateWindow); ok {
+					cw = c2
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatal("CreateWindow not found in recreated plan")
+			}
+			if got := strings.Contains(cw.StartupCommand, r); got != c.wantPresent {
+				t.Errorf("CreateWindow.StartupCommand = %q, contains override = %v, want %v", cw.StartupCommand, got, c.wantPresent)
+			}
+		})
 	}
 }
 

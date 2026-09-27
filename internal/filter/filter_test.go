@@ -29,6 +29,28 @@ func TestSkipIdleShells(t *testing.T) {
 	}
 }
 
+func TestIsShell(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"fish", true},
+		{"bash", true},
+		{"zsh", true},
+		{"sh", true},
+		{"claude", false},
+		{"nvim", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := filter.IsShell(c.name); got != c.want {
+				t.Errorf("IsShell(%q) = %v, want %v", c.name, got, c.want)
+			}
+		})
+	}
+}
+
 func TestSkipStaleSession(t *testing.T) {
 	now := time.Unix(1000000, 0)
 	f := filter.Filter{Now: now, MaxSessionAge: time.Hour}
