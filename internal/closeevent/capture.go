@@ -22,6 +22,10 @@ type Args struct {
 	WindowID    string
 	PaneID      string
 	Host        string
+	// ServerStarted is the current tmux server's start time in Unix
+	// milliseconds, or 0 when unknown. tmux reuses pane and window ids after a
+	// restart, so resolution ignores snapshots and close events older than it.
+	ServerStarted int64
 	// Index is the live tmux structure queried AFTER the close (the closed
 	// entity is already gone when the hook fires). Empty when the server is
 	// unreachable — i.e. the last session closed and nothing survived.
@@ -196,14 +200,11 @@ func resolveAtCapture(ctx context.Context, db *store.Store, a Args, man CloseMan
 		return nil
 	}
 
-	snap, err := db.LatestSnapshot(ctx)
-	if err != nil || snap == nil {
+	snap := preCloseSnapshot(ctx, db, a)
+	if snap == nil {
 		return nil
 	}
-	var prior snapshot.Manifest
-	if json.Unmarshal([]byte(snap.ManifestJSON), &prior) != nil {
-		return nil
-	}
+	prior := *snap
 
 	// findClosedWindow/findClosedPane only refuse to guess inside their id
 	// branch when the prior is also id-aware; an old, id-less snapshot falls
@@ -261,21 +262,109 @@ func linkResolvedScrollback(ctx context.Context, db *store.Store, id int64, reso
 	}
 }
 
+// snapshotScanLimit bounds how far back resolveKilledPane and preCloseSnapshot
+// look. A handful of background saves can land inside one close's window; far
+// more than this would mean snapshots are arriving faster than hooks run.
+const snapshotScanLimit = 100
+
+// recentSnapshots returns the server's snapshots newest-first, skipping any row
+// that fails to parse and, when serverStarted > 0, any written before the
+// current server incarnation began (tmux ids reset on restart, so an older
+// incarnation's ids would otherwise collide). ListEvents already orders by
+// ts DESC, id DESC.
+func recentSnapshots(ctx context.Context, db *store.Store, serverStarted int64) ([]snapshot.Manifest, error) {
+	evs, err := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"snapshot"}, Limit: snapshotScanLimit})
+	if err != nil {
+		return nil, err
+	}
+	snaps := make([]snapshot.Manifest, 0, len(evs))
+	for _, ev := range evs {
+		var m snapshot.Manifest
+		if json.Unmarshal([]byte(ev.ManifestJSON), &m) != nil {
+			continue
+		}
+		if serverStarted > 0 && m.SavedAt < serverStarted {
+			continue
+		}
+		snaps = append(snaps, m)
+	}
+	return snaps, nil
+}
+
+// preCloseSnapshot returns the newest snapshot manifest that still holds the
+// entity a close event refers to, or nil. Saves run from backgrounded hooks, so
+// the newest snapshot can land after the close and already show the entity
+// gone; resolution and embedding both need the snapshot taken just before the
+// close, which is the newest one that still contains it.
+func preCloseSnapshot(ctx context.Context, db *store.Store, a Args) *snapshot.Manifest {
+	if (a.Kind != "pane-died" || a.PaneID == "") && (a.Kind != "window-unlinked" || a.WindowID == "") {
+		return nil
+	}
+	snaps, err := recentSnapshots(ctx, db, a.ServerStarted)
+	if err != nil {
+		return nil
+	}
+	for i := range snaps {
+		m := &snaps[i]
+		for si := range m.Sessions {
+			for wi := range m.Sessions[si].Windows {
+				w := &m.Sessions[si].Windows[wi]
+				if a.Kind == "window-unlinked" && w.ID == a.WindowID {
+					return m
+				}
+				if a.Kind != "pane-died" {
+					continue
+				}
+				for pi := range w.Panes {
+					if w.Panes[pi].ID == a.PaneID {
+						return m
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// recordedPaneDeaths returns the set of panes this server incarnation already
+// recorded a close for. A pane that died earlier and was recorded must not be
+// mistaken for the pane an id-less hook just killed.
+func recordedPaneDeaths(ctx context.Context, db *store.Store, serverStarted int64) (map[string]bool, error) {
+	evs, err := db.ListEvents(ctx, store.ListOpts{Kinds: []string{"pane-died"}})
+	if err != nil {
+		return nil, err
+	}
+	recorded := make(map[string]bool, len(evs))
+	for _, ev := range evs {
+		if serverStarted > 0 && ev.Ts < serverStarted {
+			continue
+		}
+		var m CloseManifest
+		if json.Unmarshal([]byte(ev.ManifestJSON), &m) != nil || m.PaneID == "" {
+			continue
+		}
+		recorded[m.PaneID] = true
+	}
+	return recorded, nil
+}
+
 // resolveKilledPane fills in the pane and window ids of an id-less pane-died
-// event by finding the pane the latest snapshot knows about but the post-close
-// index no longer lists. It reports false unless exactly one pane went missing
-// AND its window survived: more than one missing pane means the snapshot is
-// stale or a whole window/session came down (which window-unlinked and
-// session-closed already record), and guessing there would restore the wrong
-// pane. Recording nothing beats recording a lie.
+// event. A save runs from a backgrounded hook, so the newest snapshot can
+// postdate the kill and already show the pane gone; reading only it loses the
+// event entirely. Instead, consider every pane this server incarnation has
+// snapshotted whose window still exists, drop the ones already recorded, and
+// accept the survivor only when exactly one remains. A second unresolved pane
+// means either a bulk teardown (which window-unlinked/session-closed record) or
+// an earlier death this hook cannot distinguish from its own — guessing would
+// restore the wrong pane, and recording nothing beats recording a lie.
 func resolveKilledPane(ctx context.Context, db *store.Store, a Args) (Args, bool, error) {
-	snap, err := db.LatestSnapshot(ctx)
-	if err != nil || snap == nil {
+	snaps, err := recentSnapshots(ctx, db, a.ServerStarted)
+	if err != nil {
 		return a, false, err
 	}
-	var prior snapshot.Manifest
-	if json.Unmarshal([]byte(snap.ManifestJSON), &prior) != nil {
-		return a, false, nil
+	recorded, err := recordedPaneDeaths(ctx, db, a.ServerStarted)
+	if err != nil {
+		return a, false, err
 	}
 
 	live := map[string]bool{}
@@ -287,22 +376,34 @@ func resolveKilledPane(ctx context.Context, db *store.Store, a Args) (Args, bool
 		liveWindows[w.ID] = true
 	}
 
-	missing := 0
-	lost := a
-	for i := range prior.Sessions {
-		for j := range prior.Sessions[i].Windows {
-			w := &prior.Sessions[i].Windows[j]
-			for k := range w.Panes {
-				p := &w.Panes[k]
-				if p.ID == "" || live[p.ID] {
-					continue
+	// Newest occurrence wins, so the window id is the one the pane had when it
+	// was last seen alive.
+	alive := map[string]string{}
+	for i := range snaps {
+		for j := range snaps[i].Sessions {
+			for k := range snaps[i].Sessions[j].Windows {
+				w := &snaps[i].Sessions[j].Windows[k]
+				for l := range w.Panes {
+					if p := w.Panes[l]; p.ID != "" {
+						if _, ok := alive[p.ID]; !ok {
+							alive[p.ID] = w.ID
+						}
+					}
 				}
-				missing++
-				lost.PaneID, lost.WindowID = p.ID, w.ID
 			}
 		}
 	}
-	if missing != 1 || !liveWindows[lost.WindowID] {
+
+	lost := a
+	found := 0
+	for id, windowID := range alive {
+		if live[id] || recorded[id] || !liveWindows[windowID] {
+			continue
+		}
+		found++
+		lost.PaneID, lost.WindowID = id, windowID
+	}
+	if found != 1 {
 		return a, false, nil
 	}
 	return lost, true, nil
