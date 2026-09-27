@@ -751,6 +751,10 @@ func TestTriggersKillPaneResolvesViaSurvivorDiff(t *testing.T) {
 	if m.WindowID == "" {
 		t.Error("survivor diff resolved the pane but not its window")
 	}
+	// The event's own embedding must also survive a save landing after the kill.
+	if m.Resolved == nil || m.Resolved.Item.Pane == nil || m.Resolved.Item.Pane.ID != victim {
+		t.Errorf("embedded entity = %+v, want the killed pane %s", m.Resolved, victim)
+	}
 }
 
 // The monitor hook watches #{T:@remux_save_tick}, whose format string lives in

@@ -31,7 +31,7 @@ import (
 
 // Version is the released version. release-please bumps the annotated value on
 // each release; goreleaser and the nix build stamp the tag over it.
-var Version = "0.7.0" // x-release-please-version
+var Version = "0.7.1" // x-release-please-version
 
 var hostname = sync.OnceValue(func() string {
 	h, _ := os.Hostname()
@@ -860,19 +860,24 @@ func (c CaptureEventCmd) Run() error {
 		var post closeevent.IndexPost
 		post.Windows, _ = t.ListWindows(ctx)
 		post.Panes, _ = t.ListPanes(ctx)
+		// Best-effort: with no start time the resolver cannot tell this
+		// incarnation's ids from a restarted server's, so it skips the
+		// incarnation guard rather than refusing to record.
+		serverStarted, _ := t.ServerStartTime(ctx)
 		// Same best-effort read as the index above: a session list that fails
 		// to come back leaves the set empty, which drops nothing — the old
 		// behaviour, not a new refusal to record.
 		sessions, _ := t.ListSessions(ctx)
 		_, err := closeevent.Capture(ctx, db, closeevent.Args{
-			Kind:        c.Kind,
-			SessionID:   c.Session,
-			SessionName: c.SessionName,
-			WindowID:    c.Window,
-			PaneID:      c.Pane,
-			Host:        hostname(),
-			Index:       post,
-			Bridged:     bridgedSessions(sessions),
+			Kind:          c.Kind,
+			SessionID:     c.Session,
+			SessionName:   c.SessionName,
+			WindowID:      c.Window,
+			PaneID:        c.Pane,
+			Host:          hostname(),
+			ServerStarted: serverStarted,
+			Index:         post,
+			Bridged:       bridgedSessions(sessions),
 		})
 		return err
 	})
