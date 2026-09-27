@@ -282,6 +282,301 @@ func TestCaptureDropsIDLessPaneWhenAmbiguous(t *testing.T) {
 	}
 }
 
+// seedSnapshotAt stores a one-window (@1) snapshot at ts holding exactly the
+// given panes. Its sibling seedSnapshot is the fixed two-pane case.
+func seedSnapshotAt(ctx context.Context, t *testing.T, db *store.Store, ts int64, panes ...snapshot.Pane) {
+	t.Helper()
+	m := snapshot.Manifest{V: 1, Host: "h", SavedAt: ts, Sessions: []snapshot.Session{{
+		Name:    "s1",
+		Windows: []snapshot.Window{{Index: 1, ID: "@1", Panes: panes}},
+	}}}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertEvent(ctx, store.Event{
+		Ts: ts, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(b),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A background save can acquire the writer lock after kill-pane and before the
+// after-kill-pane hook fires, inserting a snapshot that already shows the
+// victim gone. Resolution must fall back to the pre-close snapshot instead of
+// reading the newest one and finding nothing missing.
+func TestCaptureResolvesIDLessPanePastPostKillSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedSnapshot(ctx, t, db)
+	// The post-kill save: %2 is already gone.
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1", Command: "fish"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("no event recorded though exactly one pane (%2) vanished")
+	}
+
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.PaneID != "%2" || man.WindowID != "@1" {
+		t.Errorf("resolved pane=%q window=%q, want %%2 in @1", man.PaneID, man.WindowID)
+	}
+	if man.Resolved == nil || man.Resolved.Item.Pane == nil || man.Resolved.Item.Pane.ID != "%2" {
+		t.Errorf("embedded entity = %+v, want %%2 (the pre-close snapshot)", man.Resolved)
+	}
+}
+
+// A post-kill save that shows no missing pane must not make the scan fall
+// through to an older snapshot whose one missing pane is unrelated: a nonzero
+// count of two or more is ambiguous and ends the scan.
+func TestCaptureDropsIDLessPaneRatherThanReachOlderOneMissing(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Oldest first: %4 is already gone from the live index but was never
+	// attributed. Newer pre-close snapshot shows %3 and %4 both missing; newest
+	// (post-kill) shows none missing.
+	seedSnapshotAt(ctx, t, db, 100, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%4"})
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%3"}, snapshot.Pane{Index: 2, ID: "%4"})
+	seedSnapshotAt(ctx, t, db, 300, snapshot.Pane{Index: 0, ID: "%1"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 {
+		t.Errorf("recorded event %d, want none: the pre-close snapshot was ambiguous (%%3 and %%4 missing)", id)
+	}
+}
+
+// Two unresolved deaths between saves: the hook cannot tell which pane it is
+// for, so it must record neither rather than attribute the wrong one.
+func TestCaptureDropsIDLessPaneWhenTwoDeathsAreUnrecorded(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// %2 and %3 both died; a save landed between the deaths and another after
+	// both. Neither death is recorded yet.
+	seedSnapshotAt(ctx, t, db, 100, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%2"}, snapshot.Pane{Index: 2, ID: "%3"})
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%3"})
+	seedSnapshotAt(ctx, t, db, 300, snapshot.Pane{Index: 0, ID: "%1"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 {
+		t.Errorf("recorded event %d, want none: %%2 and %%3 are both unresolved", id)
+	}
+}
+
+// An earlier recorded death is not a competing candidate: only unresolved
+// deaths block an id-less kill.
+func TestCaptureResolvesIDLessPaneWithAnEarlierRecordedDeath(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedSnapshotAt(ctx, t, db, 100, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%2"}, snapshot.Pane{Index: 2, ID: "%3"})
+	// %3 died earlier, and its event is already stored.
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1"}, snapshot.Pane{Index: 1, ID: "%2"})
+	live := closeevent.IndexPost{
+		Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+		Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+	}
+	if _, err := closeevent.Capture(ctx, db, closeevent.Args{Kind: "pane-died", PaneID: "%3", Host: "h", Index: live}); err != nil {
+		t.Fatal(err)
+	}
+	// %2 is killed now; a save landed after it.
+	seedSnapshotAt(ctx, t, db, 300, snapshot.Pane{Index: 0, ID: "%1"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{Kind: "pane-died", Host: "h", Index: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("expected %%2 to be recorded")
+	}
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.PaneID != "%2" {
+		t.Errorf("resolved pane = %q, want %%2 (%%3 is already recorded)", man.PaneID)
+	}
+}
+
+// tmux resets pane ids on restart, so a snapshot from a previous incarnation
+// sharing the current window id must not be attributed. Without the
+// ServerStarted guard its stale %%9 would look like the just-killed pane.
+func TestCaptureIgnoresPreviousIncarnationSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	pre := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+		Name:    "s1",
+		Windows: []snapshot.Window{{Index: 1, ID: "@9", Panes: []snapshot.Pane{{Index: 0, ID: "%9"}}}},
+	}}}
+	b, err := json.Marshal(pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertEvent(ctx, store.Event{Ts: 100, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(b)}); err != nil {
+		t.Fatal(err)
+	}
+	// Current incarnation began at 200: only %%8 exists now, and it is alive.
+	cur := snapshot.Manifest{V: 1, Host: "h", SavedAt: 300, Sessions: []snapshot.Session{{
+		Name:    "s1",
+		Windows: []snapshot.Window{{Index: 1, ID: "@9", Panes: []snapshot.Pane{{Index: 0, ID: "%8"}}}},
+	}}}
+	b, err = json.Marshal(cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertEvent(ctx, store.Event{Ts: 300, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(b)}); err != nil {
+		t.Fatal(err)
+	}
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", Host: "h", ServerStarted: 200,
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@9"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%8"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 {
+		t.Errorf("recorded event %d, want none: %%9 belongs to a previous incarnation", id)
+	}
+}
+
+// A newer post-kill snapshot must not stop an id-known pane from embedding its
+// pre-close entity — the same race as the id-less after-kill-pane hook.
+func TestCaptureEmbedsPaneFromPreCloseSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedSnapshot(ctx, t, db)
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1", Command: "fish"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "pane-died", PaneID: "%2", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("expected the closed pane to be recorded")
+	}
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.Resolved == nil || man.Resolved.Item.Pane == nil || man.Resolved.Item.Pane.ID != "%2" {
+		t.Errorf("embedded entity = %+v, want %%2 from the pre-close snapshot", man.Resolved)
+	}
+}
+
+// The same content-based prior selection fixes window-unlinked embedding when a
+// post-close save lands first.
+func TestCaptureEmbedsWindowFromPreCloseSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	pre := snapshot.Manifest{V: 1, Host: "h", SavedAt: 100, Sessions: []snapshot.Session{{
+		Name: "s1",
+		Windows: []snapshot.Window{
+			{Index: 1, ID: "@1", Panes: []snapshot.Pane{{Index: 0, ID: "%1"}}},
+			{Index: 2, ID: "@2", Panes: []snapshot.Pane{{Index: 0, ID: "%2"}}},
+		},
+	}}}
+	b, err := json.Marshal(pre)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertEvent(ctx, store.Event{Ts: 100, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: string(b)}); err != nil {
+		t.Fatal(err)
+	}
+	// Post-close save with @2 already gone.
+	seedSnapshotAt(ctx, t, db, 200, snapshot.Pane{Index: 0, ID: "%1"})
+
+	id, err := closeevent.Capture(ctx, db, closeevent.Args{
+		Kind: "window-unlinked", WindowID: "@2", Host: "h",
+		Index: closeevent.IndexPost{
+			Windows: []tmux.WindowRow{{Session: "s1", Index: 1, ID: "@1"}},
+			Panes:   []tmux.PaneRow{{Session: "s1", WindowIndex: 1, PaneIndex: 0, ID: "%1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 {
+		t.Fatal("expected the closed window to be recorded")
+	}
+	all, _ := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: 10})
+	man, err := closeevent.ParseManifest(all[0].ManifestJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if man.Resolved == nil || man.Resolved.Item.Window == nil || man.Resolved.Item.Window.ID != "@2" {
+		t.Errorf("embedded entity = %+v, want window @2 from the pre-close snapshot", man.Resolved)
+	}
+}
+
 func TestCaptureStoresSessionName(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), "/tmp/tmux-test/default")
