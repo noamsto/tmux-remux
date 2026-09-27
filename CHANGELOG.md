@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/noamsto/tmux-remux/compare/v0.7.0...v0.7.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **closeevent:** resolve killed panes against recorded deaths ([#161](https://github.com/noamsto/tmux-remux/issues/161)) ([e196218](https://github.com/noamsto/tmux-remux/commit/e196218bd0ed454d71aca0489aa02302ca635467))
+
 ## [0.7.0](https://github.com/noamsto/tmux-remux/compare/v0.6.0...v0.7.0) (2026-09-22)
 
 
