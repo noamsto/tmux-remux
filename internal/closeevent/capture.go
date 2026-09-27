@@ -353,10 +353,8 @@ func recordedPaneDeaths(ctx context.Context, db *store.Store, serverStarted int6
 // postdate the kill and already show the pane gone; reading only it loses the
 // event entirely. Instead, consider every pane this server incarnation has
 // snapshotted whose window still exists, drop the ones already recorded, and
-// accept the survivor only when exactly one remains. A second unresolved pane
-// means either a bulk teardown (which window-unlinked/session-closed record) or
-// an earlier death this hook cannot distinguish from its own — guessing would
-// restore the wrong pane, and recording nothing beats recording a lie.
+// accept the survivor only when exactly one remains — a second unresolved pane
+// cannot be told apart from its own, and guessing would restore the wrong one.
 func resolveKilledPane(ctx context.Context, db *store.Store, a Args) (Args, bool, error) {
 	snaps, err := recentSnapshots(ctx, db, a.ServerStarted)
 	if err != nil {
