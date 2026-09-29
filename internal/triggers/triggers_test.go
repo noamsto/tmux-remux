@@ -18,12 +18,12 @@ var update = flag.Bool("update", false, "rewrite golden files")
 func checkGolden(t *testing.T, path, got string) {
 	t.Helper()
 	if *update {
-		if err := os.WriteFile(path, []byte(got), 0o644); err != nil { //nolint:gosec // generated config, world-readable by design
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatalf("write golden %s: %v", path, err)
 		}
 		return
 	}
-	want, err := os.ReadFile(path) //nolint:gosec // test-controlled path
+	want, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read golden %s (run: go test ./internal/triggers/ -update): %v", path, err)
 	}

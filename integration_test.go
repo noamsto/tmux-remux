@@ -34,7 +34,7 @@ type scopedTmux struct {
 
 func (s scopedTmux) Run(ctx context.Context, args []string) (string, error) {
 	full := append([]string{"-f", "/dev/null", "-u", "-S", s.socket}, args...)
-	cmd := exec.CommandContext(ctx, "tmux", full...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "tmux", full...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), err
@@ -749,7 +749,7 @@ func TestUndoDropsFloatingPane(t *testing.T) {
 	if len(fields) != 2 {
 		t.Fatalf("target identity = %q, want session and window id", identity)
 	}
-	if out, err := exec.Command(bin, "save", "--reason=test").CombinedOutput(); err != nil { //nolint:gosec
+	if out, err := exec.Command(bin, "save", "--reason=test").CombinedOutput(); err != nil {
 		t.Fatalf("save: %v\n%s", err, out)
 	}
 	// Capture events resolve against snapshots strictly before their timestamp.
@@ -757,10 +757,10 @@ func TestUndoDropsFloatingPane(t *testing.T) {
 	if out, err := srv.Tmux("kill-window", "-t", "work:doomed"); err != nil {
 		t.Fatalf("kill-window: %v\n%s", err, out)
 	}
-	if out, err := exec.Command(bin, "capture-event", "window-unlinked", "--session", fields[0], "--session-name", "work", "--window", fields[1]).CombinedOutput(); err != nil { //nolint:gosec
+	if out, err := exec.Command(bin, "capture-event", "window-unlinked", "--session", fields[0], "--session-name", "work", "--window", fields[1]).CombinedOutput(); err != nil {
 		t.Fatalf("capture-event: %v\n%s", err, out)
 	}
-	if out, err := exec.Command(bin, "undo", "--pop", "--session", "work").CombinedOutput(); err != nil { //nolint:gosec
+	if out, err := exec.Command(bin, "undo", "--pop", "--session", "work").CombinedOutput(); err != nil {
 		t.Fatalf("undo --pop: %v\n%s", err, out)
 	}
 	if got := tiledPaneGeometry(t, srv, "work:doomed"); !reflect.DeepEqual(got, wantGeometry) {
