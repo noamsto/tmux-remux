@@ -34,6 +34,22 @@ jobs:
         with:
           version: latest
 
+  # -test=false: nilaway can't see that require.NoError/t.Fatal end a test, so
+  # test files report false positives on every checked-then-used result.
+  nilaway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@v17
+        with:
+          name: lazytmux
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix develop --command nilaway -test=false -include-pkgs=github.com/noamsto/tmux-remux ./...
+
   build:
     runs-on: ubuntu-latest
     steps:

@@ -92,7 +92,7 @@ func (s *Saver) Save(ctx context.Context, reason string) error {
 	}
 
 	if s.opts.CaptureScrollback && !throttled {
-		if err := s.captureScrollbacks(ctx, &manifest); err != nil {
+		if err := s.captureScrollbacks(ctx, manifest); err != nil {
 			return err
 		}
 	} else if s.opts.CaptureScrollback {
@@ -142,7 +142,9 @@ func (s *Saver) Save(ctx context.Context, reason string) error {
 	return nil
 }
 
-func (s *Saver) captureScrollbacks(ctx context.Context, m *Manifest) error {
+// captureScrollbacks fills ScrollbackSHA in place through m's slices, so m is
+// taken by value.
+func (s *Saver) captureScrollbacks(ctx context.Context, m Manifest) error {
 	type job struct {
 		sessIdx, winIdx, paneIdx int
 		target                   string
@@ -165,7 +167,6 @@ func (s *Saver) captureScrollbacks(ctx context.Context, m *Manifest) error {
 	var firstErr error
 
 	for _, j := range jobs {
-		j := j
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {

@@ -94,8 +94,8 @@ func previewHintKey(keys keyMap) string {
 	letters := make([]string, 0, 4)
 	for _, b := range []key.Binding{keys.PreviewLeft, keys.PreviewDown, keys.PreviewUp, keys.PreviewRight} {
 		for _, k := range b.Keys() {
-			if strings.HasPrefix(k, "alt+") {
-				letters = append(letters, strings.TrimPrefix(k, "alt+"))
+			if after, ok := strings.CutPrefix(k, "alt+"); ok {
+				letters = append(letters, after)
 				break
 			}
 		}
@@ -167,10 +167,7 @@ func (m PickerModel) renderFooter(width int) string {
 	}
 	// Truncate: footerBar.Width wraps overflow to a second row otherwise, which
 	// would break the single-row height View() reserves for the footer.
-	innerWidth := width - footerBar.GetHorizontalFrameSize()
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-footerBar.GetHorizontalFrameSize(), 1)
 	line = ansi.Truncate(line, innerWidth, "…")
 	return footerBar.Width(width).Render(line)
 }
@@ -178,10 +175,7 @@ func (m PickerModel) renderFooter(width int) string {
 // bodyHeight is the height available to the panes above the footer. View and
 // previewInnerHeight must agree on it, so both read it from here.
 func (m PickerModel) bodyHeight() int {
-	h := m.height - lipgloss.Height(m.renderFooter(m.width))
-	if h < 5 {
-		h = 5
-	}
+	h := max(m.height-lipgloss.Height(m.renderFooter(m.width)), 5)
 	return h
 }
 
@@ -242,10 +236,7 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 	}
 	if m.width < 120 {
 		// Two-pane fallback (current behavior).
-		listW := m.width / 3
-		if listW < 28 {
-			listW = 28
-		}
+		listW := max(m.width/3, 28)
 		return listW, m.width - listW, 0
 	}
 	// Three-pane: 1/4 list, 1/3 tree, remainder preview. At width ≥ 120 the
@@ -265,13 +256,7 @@ func (m PickerModel) paneWidthsThree() (int, int, int) {
 // closePreviewMax and the surplus goes to the list. Below that cap the two
 // grow together, with the list holding its floor.
 func closeListWidth(width int) int {
-	preview := width * 3 / 5
-	if preview > closePreviewMax {
-		preview = closePreviewMax
-	}
-	if preview < closePreviewMin {
-		preview = closePreviewMin
-	}
+	preview := max(min(width*3/5, closePreviewMax), closePreviewMin)
 	if w := width - preview; w > closeListMin {
 		return w
 	}
@@ -305,10 +290,7 @@ const closePreviewMax = closePreviewMin + 20
 // hidden-count footer is showing. renderList draws from it and mouse
 // hit-testing maps a clicked row through it, so the two cannot disagree.
 func (m PickerModel) listWindow(height int) (start, end, eventRows int, showFooter bool) {
-	rows := height - 2
-	if rows < 1 {
-		rows = 1
-	}
+	rows := max(height-2, 1)
 	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	eventRows = rows
 	if showFooter {
@@ -326,10 +308,7 @@ func renderList(m PickerModel, width, height int) string {
 	// Inner content width excludes border + padding; rows and the footer must be
 	// truncated to it, since lipgloss .Width() wraps overflow onto extra physical
 	// lines and breaks the one-row-per-event assumption scrollWindow depends on.
-	innerWidth := width - listFrame.GetHorizontalFrameSize()
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-listFrame.GetHorizontalFrameSize(), 1)
 	// Inner content height = frame height − 2 (top+bottom border). Reserve the
 	// bottom line for the hidden-count footer, but only when there is more than
 	// one row — at the minimum height the lone row goes to events.
@@ -373,10 +352,7 @@ func renderList(m PickerModel, width, height int) string {
 // Shrinking the window can only push start further down, so the pinned header
 // cannot come back into view and this settles in one pass.
 func (m PickerModel) closeListWindow(height int) (start, end, pin, rowBudget int, showFooter bool) {
-	rows := height - 2
-	if rows < 1 {
-		rows = 1
-	}
+	rows := max(height-2, 1)
 	showFooter = m.hiddenCount+m.ignoredCount > 0 && rows > 1
 	rowBudget = rows
 	if showFooter {
@@ -400,10 +376,7 @@ func (m PickerModel) closeListWindow(height int) (start, end, pin, rowBudget int
 // whose closes they are looking at.
 func renderCloseList(m PickerModel, width, height int) string {
 	frame := listFrame.Width(width).Height(height).MaxHeight(height)
-	innerWidth := width - listFrame.GetHorizontalFrameSize()
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-listFrame.GetHorizontalFrameSize(), 1)
 	if len(m.closeRows) == 0 {
 		msg := "No close events yet."
 		if n := m.hiddenCount + m.ignoredCount; n > 0 {
@@ -476,10 +449,7 @@ func scrollWindow(cursor, total, rows int) (int, int) {
 		return 0, total
 	}
 	half := rows / 2
-	start := cursor - half
-	if start < 0 {
-		start = 0
-	}
+	start := max(cursor-half, 0)
 	end := start + rows
 	if end > total {
 		end = total
@@ -508,10 +478,7 @@ func renderTree(m PickerModel, width, height int) string {
 	// Inner content width excludes border + padding; every node row (and the
 	// header) is truncated to it — lipgloss frames wrap overflow, which would
 	// desync the one-row-per-node windowing below.
-	innerWidth := width - treeFrame.GetHorizontalFrameSize()
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-treeFrame.GetHorizontalFrameSize(), 1)
 
 	var b strings.Builder
 	header := fmt.Sprintf("Contents (#%d)", id)
@@ -526,16 +493,13 @@ func renderTree(m PickerModel, width, height int) string {
 	toggleHint := skipRunningHint.Key + ":" + skipRunningHint.Desc
 
 	idx := 0
-	var rows []string
+	rows := []string{}
 	for _, sess := range tree.Children {
 		appendNodeRows(&rows, sess, 0, &idx, highlightIdx, toggleHint, innerWidth)
 	}
 
 	// Header (1) + border (2) consume 3 rows inside the frame's height.
-	visible := height - 3
-	if visible < 1 {
-		visible = 1
-	}
+	visible := max(height-3, 1)
 	start, end := scrollWindow(highlightIdx, len(rows), visible)
 	for i := start; i < end; i++ {
 		b.WriteString(ansi.Truncate(rows[i], innerWidth, "…"))
@@ -758,7 +722,7 @@ func newCloseListView(rows []CloseRow, ctxs map[int64]CloseContext, live map[str
 	sections := [][]closeCells{{}}
 	for _, r := range rows {
 		if r.Kind == RowSectionHeader && len(sections[len(sections)-1]) > 0 {
-			sections = append(sections, nil)
+			sections = append(sections, []closeCells{})
 		}
 		i := len(sections) - 1
 		if r.Kind == RowSectionHeader {
@@ -807,7 +771,7 @@ func modalCwd(byCwd map[string]int) string {
 // by its neighbours. Keying the strip on modal would print full absolute
 // paths whenever the session has no modal cwd — the common two-close case.
 func commonPathPrefix(byCwd map[string]int) string {
-	var base []string
+	base := []string{}
 	first := true
 	for cwd := range byCwd {
 		segs := strings.Split(cwd, "/")

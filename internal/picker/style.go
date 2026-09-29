@@ -35,8 +35,8 @@ var (
 	// closeRailStyles and closeLabelStyles colour the stacked close preview's
 	// pane blocks. Indexed by block position and cycled, so two blocks are
 	// told apart by colour without reading their labels.
-	closeRailStyles  []lipgloss.Style
-	closeLabelStyles []lipgloss.Style
+	closeRailStyles  [2]lipgloss.Style
+	closeLabelStyles [2]lipgloss.Style
 
 	rowFocusBg color.Color
 )
@@ -87,9 +87,7 @@ func applyTheme(t Theme) {
 	// adjacent in a row, over glyph-dense window names with no other boundary.
 	closeRowCmd = lipgloss.NewStyle().Foreground(t.Yellow())
 
-	accents := []color.Color{t.Blue(), t.Yellow()}
-	closeRailStyles = make([]lipgloss.Style, len(accents))
-	closeLabelStyles = make([]lipgloss.Style, len(accents))
+	accents := [len(closeRailStyles)]color.Color{t.Blue(), t.Yellow()}
 	for i, a := range accents {
 		closeRailStyles[i] = lipgloss.NewStyle().Foreground(a)
 		closeLabelStyles[i] = lipgloss.NewStyle().Foreground(t.Base()).Background(a).Bold(true)

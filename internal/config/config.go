@@ -160,7 +160,7 @@ func (c Config) migrateLegacyDataDir() error {
 		return nil
 	}
 	if _, err := os.Stat(legacyRoot); err != nil {
-		return nil
+		return nil //nolint:nilerr // any Stat failure means there is no legacy dir to migrate
 	}
 	if err := os.Rename(legacyRoot, dataRoot); err != nil {
 		return fmt.Errorf("migrate legacy data dir %q → %q: %w", legacyRoot, dataRoot, err)

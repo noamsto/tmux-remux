@@ -81,6 +81,7 @@
             pkgs.gopls
             pkgs.gotools
             pkgs.golangci-lint
+            pkgs.nilaway
             pkgs.goreleaser
             (mkTmux pkgs)
             pkgs.fzf

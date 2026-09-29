@@ -139,7 +139,7 @@ func TestRender_NilLabelShowsBoxNumber(t *testing.T) {
 // A label longer than its box must not spill past the border.
 func TestRender_LabelTruncatedToBox(t *testing.T) {
 	got := render(mustParse(t, "x,80x24,0,0,0"), 24, 6, func(int) string { return strings.Repeat("x", 100) }, nil)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if len([]rune(line)) != 24 {
 			t.Fatalf("line %q is %d runes, want 24", line, len([]rune(line)))
 		}

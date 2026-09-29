@@ -38,7 +38,7 @@ var columnRoles = map[string]ColumnRole{
 // unusable column should cost that column, not blank the picker.
 func ParseDecorationColumns(spec string) []DecorationColumn {
 	var cols []DecorationColumn
-	for _, entry := range strings.Split(spec, ",") {
+	for entry := range strings.SplitSeq(spec, ",") {
 		parts := strings.Split(entry, ":")
 		if len(parts) != 3 {
 			continue
@@ -89,7 +89,7 @@ func (c Config) CaptureOptions() []string {
 // back. Empty entries are skipped so a trailing comma is harmless.
 func ParseIgnoreWindows(spec string) []string {
 	var out []string
-	for _, p := range strings.Split(spec, ",") {
+	for p := range strings.SplitSeq(spec, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}

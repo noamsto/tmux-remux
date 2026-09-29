@@ -38,7 +38,7 @@ func ChildCount(pid int) (int, error) {
 			}
 			return 0, fmt.Errorf("read %s: %w", m, err)
 		}
-		for _, f := range strings.Fields(string(data)) {
+		for f := range strings.FieldsSeq(string(data)) {
 			n, err := strconv.Atoi(f)
 			if err == nil {
 				seen[n] = struct{}{}

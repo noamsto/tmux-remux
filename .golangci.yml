@@ -18,6 +18,12 @@ linters:
     - prealloc
     - unconvert
     - unparam
+    - exhaustive
+    - nilerr
+    - modernize
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
   exclusions:
     rules:
       - path: _test\.go
