@@ -1012,7 +1012,7 @@ func loadConfig() config.Config {
 // whitespace and dropping empty entries.
 func splitCommaList(spec string) []string {
 	var out []string
-	for _, s := range strings.Split(spec, ",") {
+	for s := range strings.SplitSeq(spec, ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			out = append(out, s)
 		}

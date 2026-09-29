@@ -63,10 +63,7 @@ func (m PickerModel) renderPreview(width int) string {
 	}
 	frameHeight := m.panelFrameHeight()
 	innerHeight := m.previewInnerHeight()
-	innerWidth := width - 4
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-4, 1)
 	frame := previewFrame.Width(width).Height(frameHeight).MaxHeight(frameHeight)
 
 	if m.focus != focusTree {
@@ -135,10 +132,7 @@ const closeHeaderLines = 2
 func (m PickerModel) renderClosePreview(width int) string {
 	frameHeight := m.panelFrameHeight()
 	innerHeight := m.previewInnerHeight()
-	innerWidth := width - 4
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
+	innerWidth := max(width-4, 1)
 	frame := previewFrame.Width(width).Height(frameHeight).MaxHeight(frameHeight)
 
 	if m.cursor < 0 || m.cursor >= len(m.closeRows) {
@@ -281,10 +275,7 @@ func closeBlockHeights(fixed []bool, body int) []int {
 // content rows each led by the block's rail.
 func (m PickerModel) closePaneBlock(p snapshot.Pane, i, total, innerWidth, height int, skipped bool) []string {
 	rail := closeRailStyles[i%len(closeRailStyles)].Render(closeRail)
-	contentWidth := innerWidth - 1
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
+	contentWidth := max(innerWidth-1, 1)
 	out := make([]string, 0, height)
 	out = append(out, closePaneLabel(p, i, total, innerWidth))
 	for _, l := range m.closePaneContent(p, contentWidth, height-1, skipped) {
@@ -419,17 +410,8 @@ func previewWindow(s string, width, height, scroll, scrollX int) string {
 		}
 		lines[i] = l
 	}
-	end := len(lines) - scroll
-	if end > len(lines) {
-		end = len(lines)
-	}
-	if end < 0 {
-		end = 0
-	}
-	start := end - height
-	if start < 0 {
-		start = 0
-	}
+	end := max(min(len(lines)-scroll, len(lines)), 0)
+	start := max(end-height, 0)
 	return strings.Join(lines[start:end], "\n")
 }
 

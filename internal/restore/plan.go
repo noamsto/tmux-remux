@@ -4,6 +4,7 @@ package restore
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/noamsto/tmux-remux/internal/filter"
@@ -120,12 +121,9 @@ func paneStartup(p snapshot.Pane, opts BuildOptions) string {
 		// A pane-supplied @remux_relaunch override wins over the allow-list.
 		so.OverrideCmd = p.Relaunch
 	} else {
-		for _, c := range opts.AllowList {
-			if c == p.Command {
-				so.RelaunchCmd = p.Command
-				so.RelaunchArgs = p.CommandArgs
-				break
-			}
+		if slices.Contains(opts.AllowList, p.Command) {
+			so.RelaunchCmd = p.Command
+			so.RelaunchArgs = p.CommandArgs
 		}
 	}
 	return BuildStartupCommand(so)
@@ -188,7 +186,7 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 				continue
 			}
 			var firstPane *snapshot.Pane
-			var keptPanes []snapshot.Pane
+			keptPanes := []snapshot.Pane{}
 			for i := range win.Panes {
 				p := win.Panes[i]
 				if f.SkipPane(p) {

@@ -93,13 +93,13 @@ func TestCloseGrid_ColumnsAlignAcrossRows(t *testing.T) {
 		for _, c := range rows {
 			line, _, _ := g.render(c)
 			stripped := ansi.Strip(line)
-			arrow := strings.Index(stripped, "→")
-			if arrow < 0 {
+			before, _, ok := strings.Cut(stripped, "→")
+			if !ok {
 				t.Fatalf("%s: no target column in %q", name, stripped)
 			}
 			// Cells, not the byte index: two rows whose titles differ in rune
 			// width can share a byte offset while their columns are askew.
-			at = append(at, lipgloss.Width(stripped[:arrow]))
+			at = append(at, lipgloss.Width(before))
 		}
 		for i := 1; i < len(at); i++ {
 			if at[i] != at[0] {

@@ -37,7 +37,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	ctx := context.Background()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		db, err := store.Open(ctx, dbPath, "/tmp/tmux-test/default")
 		if err != nil {
 			t.Fatalf("Open #%d: %v", i, err)
@@ -543,7 +543,7 @@ func TestPruneSnapshotsKeepsNewestPerDayWithinWeek(t *testing.T) {
 	insert(now - 3*day + 3_600_000)
 	insert(now - 2*day)
 	insert(now - 2*day + 3_600_000)
-	for i := int64(0); i < 4; i++ {
+	for i := range int64(4) {
 		insert(now - 3000 + i*1000)
 	}
 
@@ -903,7 +903,7 @@ func TestPruneIsScopedByServerKey(t *testing.T) {
 	// Same day so the per-day retention floor cannot rescue anything, and
 	// older than a week so it does not apply at all.
 	base := now - 30*24*int64(time.Hour/time.Millisecond)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		snap := store.Event{Ts: base + int64(i), Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}
 		if _, err := a.InsertEvent(ctx, snap); err != nil {
 			t.Fatalf("insert a snapshot: %v", err)
@@ -953,7 +953,7 @@ func TestPruneCloseEventsIsScopedByServerKey(t *testing.T) {
 	if _, err := a.InsertEvent(ctx, store.Event{Ts: 9000, Kind: "snapshot", Scope: "server", Host: "h", ManifestJSON: "{}"}); err != nil {
 		t.Fatalf("insert a snapshot: %v", err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := b.InsertEvent(ctx, store.Event{Ts: int64(100 + i), Kind: "pane-died", Scope: "pane", Host: "h", ManifestJSON: "{}"}); err != nil {
 			t.Fatalf("insert b close: %v", err)
 		}

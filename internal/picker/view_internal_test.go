@@ -1551,7 +1551,7 @@ func TestAppendNodeRows_FocusedRowFillsInnerWidth(t *testing.T) {
 	}}
 
 	for _, innerWidth := range []int{12, 40} {
-		for focus := 0; focus < 3; focus++ {
+		for focus := range 3 {
 			var rows []string
 			idx := 0
 			appendNodeRows(&rows, tree, 0, &idx, focus, "s:skip", innerWidth)

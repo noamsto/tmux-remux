@@ -224,7 +224,7 @@ func (c *Client) CaptureDecoration(ctx context.Context, target string, names []s
 		return nil, err
 	}
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // best-effort read: a missing target has no options
 	}
 	all := ParseOptionLines(out)
 	var dec map[string]string

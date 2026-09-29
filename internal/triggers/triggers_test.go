@@ -149,7 +149,7 @@ func TestRenderLegacyHasNoMonitor(t *testing.T) {
 func lineContaining(t *testing.T, s, sub string) string {
 	t.Helper()
 	var found []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.Contains(line, sub) {
 			found = append(found, line)
 		}

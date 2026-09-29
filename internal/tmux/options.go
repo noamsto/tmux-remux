@@ -27,7 +27,7 @@ func GlobalOptions(binary string) map[string]string {
 // this parser started backing @remux_columns/@remux_ignore_windows.
 func ParseOptionLines(out string) map[string]string {
 	m := make(map[string]string)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		i := strings.IndexByte(line, ' ')
 		if i <= 0 {
 			continue

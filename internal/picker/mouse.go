@@ -64,6 +64,8 @@ func (m PickerModel) zoneAt(x, y int) (paneZone, int) {
 func (m *PickerModel) handleWheel(button tea.MouseButton, x, y int) tea.Cmd {
 	zone, _ := m.zoneAt(x, y)
 	switch zone {
+	case zoneNone:
+		// outside every pane: nothing to scroll
 	case zoneList:
 		switch button {
 		case tea.MouseWheelUp:
@@ -164,6 +166,8 @@ func (m *PickerModel) moveTreeCursor(delta int) tea.Cmd {
 func (m *PickerModel) handleClick(x, y int) tea.Cmd {
 	zone, row := m.zoneAt(x, y)
 	switch zone {
+	case zoneNone, zonePreview:
+		return nil
 	case zoneList:
 		return m.clickListRow(row)
 	case zoneTree:
@@ -224,10 +228,7 @@ func (m *PickerModel) clickTreeRow(row int) tea.Cmd {
 	if m.focus == focusTree {
 		highlight = m.treeCursor
 	}
-	visible := m.listPaneHeight() - 3
-	if visible < 1 {
-		visible = 1
-	}
+	visible := max(m.listPaneHeight()-3, 1)
 	start, end := scrollWindow(highlight, len(nodes), visible)
 	idx := start + row - 1
 	if idx < 0 || idx >= end || idx >= len(nodes) || !isNavTarget(nodes[idx]) {

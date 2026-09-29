@@ -203,8 +203,8 @@ func pruneFloatingCells(n *layoutCell, floatIDs map[string]bool) *layoutCell {
 	}
 	kept := make([]*layoutCell, 0, len(n.children))
 	for _, c := range n.children {
-		if c = pruneFloatingCells(c, floatIDs); c != nil {
-			kept = append(kept, c)
+		if pruned := pruneFloatingCells(c, floatIDs); pruned != nil {
+			kept = append(kept, pruned)
 		}
 	}
 	switch len(kept) {

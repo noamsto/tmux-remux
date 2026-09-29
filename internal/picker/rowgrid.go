@@ -124,10 +124,7 @@ func newCloseGrid(rows []closeCells, innerWidth int) closeGrid {
 		} else {
 			g.target = 0
 		}
-		g.title = innerWidth - g.fixed() - 1
-		if g.title < 1 {
-			g.title = 1
-		}
+		g.title = max(innerWidth-g.fixed()-1, 1)
 	}
 	return g
 }
