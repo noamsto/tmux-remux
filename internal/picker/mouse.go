@@ -72,6 +72,8 @@ func (m *PickerModel) handleWheel(button tea.MouseButton, x, y int) tea.Cmd {
 			return m.moveListCursor(-wheelRows)
 		case tea.MouseWheelDown:
 			return m.moveListCursor(+wheelRows)
+		default:
+			// other buttons don't scroll
 		}
 	case zoneTree:
 		switch button {
@@ -79,6 +81,8 @@ func (m *PickerModel) handleWheel(button tea.MouseButton, x, y int) tea.Cmd {
 			return m.moveTreeCursor(-wheelRows)
 		case tea.MouseWheelDown:
 			return m.moveTreeCursor(+wheelRows)
+		default:
+			// other buttons don't scroll
 		}
 	case zonePreview:
 		switch button {
@@ -100,6 +104,8 @@ func (m *PickerModel) handleWheel(button tea.MouseButton, x, y int) tea.Cmd {
 			}
 		case tea.MouseWheelRight:
 			m.previewScrollX += wheelRows
+		default:
+			// other buttons don't scroll
 		}
 	}
 	return nil
