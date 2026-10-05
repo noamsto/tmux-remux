@@ -117,7 +117,7 @@ func TestBuildCloseContextsPropagatesScrollbackSkipped(t *testing.T) {
 	}
 	evs := []store.Event{{ID: 42, Ts: 2000, Kind: "session-closed", ManifestJSON: string(closeJSON)}}
 
-	ctxs := buildCloseContexts(ctx, db, evs)
+	ctxs := buildCloseContexts(ctx, db, evs, 0)
 	cc, ok := ctxs[42]
 	if !ok {
 		t.Fatalf("no CloseContext resolved for the close event; ctxs = %+v", ctxs)
@@ -168,7 +168,7 @@ func TestBuildCloseContextsScrollbackSkippedReflectsResolvedItem(t *testing.T) {
 	}
 	evs := []store.Event{{ID: 7, Ts: 2000, Kind: "pane-died", Host: "h", ManifestJSON: string(closeJSON)}}
 
-	ctxs := buildCloseContexts(ctx, db, evs)
+	ctxs := buildCloseContexts(ctx, db, evs, 0)
 	cc, ok := ctxs[7]
 	if !ok {
 		t.Fatalf("no CloseContext resolved for the close event; ctxs = %+v", ctxs)
@@ -229,7 +229,7 @@ func TestBuildCloseContextsAdoptsScrollbackFromAnEarlierSnapshot(t *testing.T) {
 	}
 	evs := []store.Event{{ID: 9, Ts: 3000, Kind: "pane-died", Host: "h", ManifestJSON: string(closeJSON)}}
 
-	ctxs := buildCloseContexts(ctx, db, evs)
+	ctxs := buildCloseContexts(ctx, db, evs, 0)
 	cc, ok := ctxs[9]
 	if !ok {
 		t.Fatalf("no CloseContext resolved for the close event; ctxs = %+v", ctxs)

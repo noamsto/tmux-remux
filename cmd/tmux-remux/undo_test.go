@@ -93,7 +93,7 @@ func TestRestorableCloseReportsUnrecoverableHead(t *testing.T) {
 	// be stepped over — restoring @9 here would look like undo doing nothing.
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db, "")
+	target, err := restorableClose(ctx, db, "", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestRestorableClosePicksLonePane(t *testing.T) {
 	paneMan := string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))
 	pane := insertEvent(ctx, t, db, 300, "pane-died", paneMan)
 
-	target, err := restorableClose(ctx, db, "")
+	target, err := restorableClose(ctx, db, "", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestRestorableCloseEmptyWhenNothingRecoverable(t *testing.T) {
 	db := seedStore(ctx, t)
 	unrecoverable := insertEvent(ctx, t, db, 300, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db, "")
+	target, err := restorableClose(ctx, db, "", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRestorableCloseUsesEmbeddedEntityWithoutAPriorSnapshot(t *testing.T) {
 	db := emptyStore(ctx, t)
 	id := insertEvent(ctx, t, db, 200, "window-unlinked", resolvedWindowManifest(t))
 
-	target, err := restorableClose(ctx, db, "")
+	target, err := restorableClose(ctx, db, "", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestBuildCloseContextsUsesEmbeddedEntityWithoutAPriorSnapshot(t *testing.T)
 	db := emptyStore(ctx, t)
 	ev := store.Event{ID: 1, Ts: 200, Kind: "window-unlinked", Host: "h", ManifestJSON: resolvedWindowManifest(t)}
 
-	ctxs := buildCloseContexts(ctx, db, []store.Event{ev})
+	ctxs := buildCloseContexts(ctx, db, []store.Event{ev}, 0)
 
 	got, ok := ctxs[ev.ID]
 	if !ok {
@@ -249,7 +249,7 @@ func TestRestorableCloseStillDiscardsWithNoEmbeddedEntity(t *testing.T) {
 	db := emptyStore(ctx, t)
 	id := insertEvent(ctx, t, db, 200, "window-unlinked", closeWindowManifest(t, "@14"))
 
-	target, err := restorableClose(ctx, db, "")
+	target, err := restorableClose(ctx, db, "", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestRestorableClosePrefersTheCurrentSession(t *testing.T) {
 	// reach across and resurrect it.
 	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
 
-	target, err := restorableClose(ctx, db, "mono")
+	target, err := restorableClose(ctx, db, "mono", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestRestorableCloseFallsBackAcrossSessions(t *testing.T) {
 
 	other := insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
 
-	target, err := restorableClose(ctx, db, "mono")
+	target, err := restorableClose(ctx, db, "mono", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestRestorableCloseDiscardsOnlyThisSessionsDeadRows(t *testing.T) {
 	// session still gets its own "never made it into a snapshot" message.
 	insertEvent(ctx, t, db, 500, "window-unlinked", namedCloseManifest(t, "@88", "lazytmux"))
 
-	target, err := restorableClose(ctx, db, "mono")
+	target, err := restorableClose(ctx, db, "mono", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestRestorableCloseReportsMoreWhenOnlyAFallbackSurvives(t *testing.T) {
 	dead := insertEvent(ctx, t, db, 400, "window-unlinked", namedCloseManifest(t, "@77", "mono"))
 	insertEvent(ctx, t, db, 300, "window-unlinked", namedCloseManifest(t, "@20", "lazytmux"))
 
-	target, err := restorableClose(ctx, db, "mono")
+	target, err := restorableClose(ctx, db, "mono", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestBuildRestorePlan_WindowCloseInsertsAtItsIndex(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
 	ev := store.Event{Ts: 200, Kind: "window-unlinked", ManifestJSON: closeWindowManifest(t, "@9")}
-	item, prior, ok := resolveEvent(ctx, db, ev)
+	item, prior, ok := resolveEvent(ctx, db, ev, 0)
 	if !ok {
 		t.Fatal("resolveEvent: expected a recoverable window close")
 	}
@@ -483,7 +483,7 @@ func TestBuildRestorePlan_SessionCloseNeverInserts(t *testing.T) {
 	insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
 
 	ev := store.Event{Ts: 200, Kind: "session-closed", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{}))}
-	item, prior, ok := resolveEvent(ctx, db, ev)
+	item, prior, ok := resolveEvent(ctx, db, ev, 0)
 	if !ok {
 		t.Fatal("resolveEvent: expected a recoverable session close")
 	}
@@ -508,7 +508,7 @@ func TestBuildRestorePlan_PaneCloseNeverCreatesAWindow(t *testing.T) {
 	ctx := context.Background()
 	db := seedStore(ctx, t)
 	ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))}
-	item, prior, ok := resolveEvent(ctx, db, ev)
+	item, prior, ok := resolveEvent(ctx, db, ev, 0)
 	if !ok {
 		t.Fatal("resolveEvent: expected a recoverable pane close")
 	}
@@ -550,7 +550,7 @@ func TestUndoPaneCloseIgnoresStaleRelaunch(t *testing.T) {
 			}}}
 			insertEvent(ctx, t, db, 100, "snapshot", string(mustJSON(t, snap)))
 			ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, closeevent.CloseManifest{PaneID: "%9", WindowID: "@9"}))}
-			item, prior, ok := resolveEvent(ctx, db, ev)
+			item, prior, ok := resolveEvent(ctx, db, ev, 0)
 			if !ok {
 				t.Fatal("resolveEvent: expected a recoverable pane close")
 			}
@@ -573,7 +573,7 @@ func TestUndoPaneCloseIgnoresStaleRelaunch(t *testing.T) {
 				},
 			}
 			ev := store.Event{Ts: 200, Kind: "pane-died", ManifestJSON: string(mustJSON(t, man))}
-			item, prior, ok := resolveEvent(ctx, db, ev)
+			item, prior, ok := resolveEvent(ctx, db, ev, 0)
 			if !ok {
 				t.Fatal("resolveEvent: expected a recoverable pane close")
 			}
@@ -645,11 +645,85 @@ func TestBridgeSessionCloseNeverReachesUndo(t *testing.T) {
 		t.Errorf("Capture stored event %d, want it dropped at the source", id)
 	}
 
-	target, err := restorableClose(ctx, db, "halo-houston")
+	target, err := restorableClose(ctx, db, "halo-houston", 0)
 	if err != nil {
 		t.Fatalf("restorableClose: %v", err)
 	}
 	if len(target.Discarded) > 0 {
 		t.Errorf("Discarded = %+v, want undo to report nothing to undo", target.Discarded)
 	}
+}
+
+// TestResolveEventIgnoresSnapshotsFromPreviousServer pins the read-time bound:
+// tmux reuses window ids after a restart, so a snapshot older than the current
+// server must never resolve an event that carries no embedded entity.
+func TestResolveEventIgnoresSnapshotsFromPreviousServer(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t) // snapshot saved at 100 holds @9
+	const serverStarted = 500
+
+	tests := []struct {
+		name string
+		ts   int64
+	}{
+		{"event from the current server", 600},
+		{"event from a previous server", 200},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := store.Event{Ts: tc.ts, Kind: "window-unlinked", ManifestJSON: closeWindowManifest(t, "@9")}
+			if _, _, ok := resolveEvent(ctx, db, ev, serverStarted); ok {
+				t.Fatal("resolved against a snapshot from a previous server")
+			}
+		})
+	}
+
+	t.Run("snapshot from the current server still resolves", func(t *testing.T) {
+		snap := snapshot.Manifest{V: 1, Host: "h", SavedAt: 550, Sessions: []snapshot.Session{{
+			Name: "mono",
+			Windows: []snapshot.Window{{
+				Index: 4, Name: "win", Layout: "L", ID: "@9",
+				Panes: []snapshot.Pane{{Index: 1, Cwd: "/new", Command: "fish", ID: "%9"}},
+			}},
+		}}}
+		insertEvent(ctx, t, db, 550, "snapshot", string(mustJSON(t, snap)))
+		ev := store.Event{Ts: 600, Kind: "window-unlinked", ManifestJSON: closeWindowManifest(t, "@9")}
+		item, _, ok := resolveEvent(ctx, db, ev, serverStarted)
+		if !ok || item.Window.Panes[0].Cwd != "/new" {
+			t.Fatalf("ok = %v, item = %+v, want the current server's snapshot", ok, item)
+		}
+	})
+}
+
+func TestResolveEventPreRestartEvents(t *testing.T) {
+	ctx := context.Background()
+	db := seedStore(ctx, t) // snapshot saved at 100 holds @9 and session mono
+	const serverStarted = 500
+
+	t.Run("embedded entity still resolves", func(t *testing.T) {
+		ev := store.Event{Ts: 200, Kind: "window-unlinked", ManifestJSON: resolvedWindowManifest(t)}
+		item, _, ok := resolveEvent(ctx, db, ev, serverStarted)
+		if !ok || item.Window == nil || item.Window.ID != "@9" {
+			t.Fatalf("ok = %v, item = %+v, want the embedded window @9", ok, item)
+		}
+	})
+
+	t.Run("session close resolves by name across a restart", func(t *testing.T) {
+		man := string(mustJSON(t, closeevent.CloseManifest{SessionName: "mono"}))
+		ev := store.Event{Ts: 200, Kind: "session-closed", ManifestJSON: man}
+		if _, _, ok := resolveEvent(ctx, db, ev, serverStarted); !ok {
+			t.Fatal("session close from before the restart no longer resolves")
+		}
+	})
+
+	t.Run("undo skips rather than deletes a bound-rejected event", func(t *testing.T) {
+		insertEvent(ctx, t, db, 200, "window-unlinked", closeWindowManifest(t, "@9"))
+		target, err := restorableClose(ctx, db, "", serverStarted)
+		if err != nil {
+			t.Fatalf("restorableClose: %v", err)
+		}
+		if len(target.Discarded) != 0 {
+			t.Errorf("Discarded = %+v, want none — the snapshot may still exist", target.Discarded)
+		}
+	})
 }
