@@ -302,7 +302,9 @@ func (c UndoCmd) Run() error {
 		defer func() { _ = log.Close() }()
 
 		t := tmux.NewClient("tmux")
-		target, err := restorableClose(ctx, db, currentSession(ctx, t, c.Session))
+		// Best-effort, like capture: on error the bound is off (0 = unknown).
+		serverStarted, _ := t.ServerStartTime(ctx)
+		target, err := restorableClose(ctx, db, currentSession(ctx, t, c.Session), serverStarted)
 		if err != nil {
 			return err
 		}
@@ -355,7 +357,8 @@ type undoTarget struct {
 	// neither a prior snapshot nor the entity embedded at capture time accounts
 	// for them. Recoverability only decays (snapshots get pruned, never added
 	// behind a timestamp), so these can never become restorable and undo drops
-	// them.
+	// them. Events rejected by the server-incarnation bound are exempt: they
+	// are skipped, since deleting is irreversible if the bound is wrong.
 	Discarded []store.Event
 	// FromSession names the session an event was borrowed from when the current
 	// session had nothing restorable. Empty for a same-session undo.
@@ -377,7 +380,7 @@ type undoTarget struct {
 // never become restorable — but scoping it keeps the message honest: consuming
 // another session's dead rows here would rob that session of its own
 // explanation.
-func restorableClose(ctx context.Context, db *store.Store, session string) (undoTarget, error) {
+func restorableClose(ctx context.Context, db *store.Store, session string, serverStarted int64) (undoTarget, error) {
 	evs, err := db.ListEvents(ctx, store.ListOpts{ExcludeKinds: []string{"snapshot"}, Limit: undoScanLimit})
 	if err != nil {
 		return undoTarget{}, err
@@ -385,14 +388,16 @@ func restorableClose(ctx context.Context, db *store.Store, session string) (undo
 	var t undoTarget
 	var fallback *undoTarget
 	for _, ev := range evs {
-		item, prior, ok := resolveEvent(ctx, db, ev)
+		item, prior, ok := resolveEvent(ctx, db, ev, serverStarted)
 		owner := eventOwner(ev, item)
 		mine := session == "" || owner == session
 		// Defense-in-depth on the sub-manifest: every item closeevent.Resolve
 		// returns now yields a non-empty one, but guard against a future resolver
 		// that can't build a restore plan rather than popping an un-restorable head.
 		if !ok || len(item.SubManifest(prior.Host, prior.SavedAt).Sessions) == 0 {
-			if mine {
+			// Rejected by the incarnation bound, not proven unrecoverable: leave
+			// the row, since deleting it is irreversible if the bound is wrong.
+			if mine && !outOfIncarnation(ev, serverStarted) {
 				t.Discarded = append(t.Discarded, ev)
 			}
 			continue
@@ -476,17 +481,44 @@ func discardSummary(evs []store.Event, more bool) string {
 	return fmt.Sprintf("%s never made it into a snapshot — discarded; %s", what, tail)
 }
 
-// priorSnapshot loads the most recent snapshot before ts, best-effort: a
+// idKeyed reports whether a close kind resolves its entity by tmux pane or
+// window id, the namespace tmux resets on restart. A session close resolves
+// by name, which survives a restart.
+func idKeyed(kind string) bool {
+	return kind == "pane-died" || kind == "window-unlinked"
+}
+
+// outOfIncarnation reports whether ev closed an id-keyed entity in a server
+// older than serverStarted (Unix ms, 0 when unknown). Which snapshot belongs
+// to that server is not recorded, so none can be trusted for it.
+func outOfIncarnation(ev store.Event, serverStarted int64) bool {
+	return serverStarted > 0 && idKeyed(ev.Kind) && ev.Ts < serverStarted
+}
+
+// priorSnapshot loads the most recent snapshot before ev, best-effort: a
 // missing snapshot or one that fails to unmarshal yields a zero Manifest
 // rather than an error, so callers can still fall back to a close event's
 // embedded entity via closeevent.Resolve.
-func priorSnapshot(ctx context.Context, db *store.Store, ts int64) snapshot.Manifest {
+//
+// tmux reuses pane and window ids after a restart, so for those kinds a
+// snapshot from before serverStarted (Unix ms, 0 when unknown) can hold a
+// different entity under the closed one's id; such snapshots are never
+// returned, and an event from before serverStarted gets none at all. The
+// start time has one-second resolution, so a snapshot or an event from the
+// same second as a restart can still slip through.
+func priorSnapshot(ctx context.Context, db *store.Store, ev store.Event, serverStarted int64) snapshot.Manifest {
 	var prior snapshot.Manifest
-	snap, err := db.LatestSnapshotBefore(ctx, ts)
+	if outOfIncarnation(ev, serverStarted) {
+		return prior
+	}
+	snap, err := db.LatestSnapshotBefore(ctx, ev.Ts)
 	if err != nil || snap == nil {
 		return prior
 	}
 	if json.Unmarshal([]byte(snap.ManifestJSON), &prior) != nil {
+		return snapshot.Manifest{}
+	}
+	if serverStarted > 0 && idKeyed(ev.Kind) && prior.SavedAt < serverStarted {
 		return snapshot.Manifest{}
 	}
 	return prior
@@ -496,12 +528,12 @@ func priorSnapshot(ctx context.Context, db *store.Store, ts int64) snapshot.Mani
 // recent pre-close snapshot and falling back to the entity embedded at
 // capture time (closeevent.Resolve). ok is false when the event isn't a
 // recoverable close: unparsable, or neither source resolves it.
-func resolveEvent(ctx context.Context, db *store.Store, ev store.Event) (*closeevent.ClosedItem, snapshot.Manifest, bool) {
+func resolveEvent(ctx context.Context, db *store.Store, ev store.Event, serverStarted int64) (*closeevent.ClosedItem, snapshot.Manifest, bool) {
 	closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
 	if err != nil {
 		return nil, snapshot.Manifest{}, false
 	}
-	prior := priorSnapshot(ctx, db, ev.Ts)
+	prior := priorSnapshot(ctx, db, ev, serverStarted)
 	item, savedAt, ok := closeevent.Resolve(prior, closeMan, ev.Kind)
 	if !ok {
 		return nil, snapshot.Manifest{}, false
@@ -626,11 +658,12 @@ func (c PickCmd) Run() error {
 		}
 		bridged := bridgedSessions(sessions)
 
+		serverStarted, _ := t.ServerStartTime(ctx)
 		sb := scrollback.New(cfg.ScrollbackDir)
 		var ctxs map[int64]picker.CloseContext
 		hidden, ignored := 0, 0
 		if mode == picker.ModeClose {
-			ctxs = buildCloseContexts(ctx, db, evs)
+			ctxs = buildCloseContexts(ctx, db, evs, serverStarted)
 			evs, hidden, ignored = partitionRecoverable(evs, ctxs, bridged, cfg.IgnoreWindows)
 		}
 		m := picker.NewPickerModel(mode, evs, runningSet, sb)
@@ -658,7 +691,7 @@ func (c PickCmd) Run() error {
 		// Close mode restores one lost entity (the same split-or-recreate
 		// path as undo); snapshot mode replays a whole snapshot.
 		if mode == picker.ModeClose {
-			item, prior, ok := resolveEvent(ctx, db, eventByID(evs, final.SelectedID()))
+			item, prior, ok := resolveEvent(ctx, db, eventByID(evs, final.SelectedID()), serverStarted)
 			if !ok {
 				return nil
 			}
@@ -757,18 +790,23 @@ func bridgedSessions(rows []tmux.SessionRow) map[string]bool {
 // On the embedded-entity fallback path, prior can be a different, unrelated
 // snapshot, so its throttle flag is cleared whenever the resolved item
 // carries scrollback of its own; otherwise it's propagated as-is.
-func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event) map[int64]picker.CloseContext {
+func buildCloseContexts(ctx context.Context, db *store.Store, evs []store.Event, serverStarted int64) map[int64]picker.CloseContext {
 	out := make(map[int64]picker.CloseContext, len(evs))
-	priorCache := map[int64]snapshot.Manifest{}
+	type priorKey struct {
+		ts   int64
+		kind string
+	}
+	priorCache := map[priorKey]snapshot.Manifest{}
 	for _, ev := range evs {
 		closeMan, err := closeevent.ParseManifest(ev.ManifestJSON)
 		if err != nil {
 			continue
 		}
-		prior, cached := priorCache[ev.Ts]
+		key := priorKey{ev.Ts, ev.Kind}
+		prior, cached := priorCache[key]
 		if !cached {
-			prior = priorSnapshot(ctx, db, ev.Ts)
-			priorCache[ev.Ts] = prior
+			prior = priorSnapshot(ctx, db, ev, serverStarted)
+			priorCache[key] = prior
 		}
 		item, savedAt, ok := closeevent.Resolve(prior, closeMan, ev.Kind)
 		if !ok {
