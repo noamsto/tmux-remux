@@ -3,11 +3,14 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // childCounter returns the per-pid counter a Build uses. /proc answers each pid
@@ -46,4 +49,48 @@ func ChildCount(pid int) (int, error) {
 		}
 	}
 	return len(seen), nil
+}
+
+// ProcInfo reads pid's parent, start time and command name from
+// /proc/<pid>/stat. A missing, zombie or dead pid yields ErrNoProcess.
+func ProcInfo(pid int) (Proc, error) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) //nolint:gosec // /proc paths are project-controlled
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			return Proc{}, fmt.Errorf("pid %d: %w", pid, ErrNoProcess)
+		}
+		return Proc{}, fmt.Errorf("read /proc/%d/stat: %w", pid, err)
+	}
+	p, state, err := parseStat(string(data))
+	if err != nil {
+		return Proc{}, fmt.Errorf("pid %d: %w", pid, err)
+	}
+	if state == 'Z' || state == 'X' {
+		return Proc{}, fmt.Errorf("pid %d: %w", pid, ErrNoProcess)
+	}
+	return p, nil
+}
+
+// parseStat splits a /proc/<pid>/stat line. comm may itself contain spaces and
+// parentheses, so it spans the first '(' to the last ')'; the fixed fields
+// follow it.
+func parseStat(data string) (Proc, byte, error) {
+	open := strings.IndexByte(data, '(')
+	closing := strings.LastIndexByte(data, ')')
+	if open < 0 || closing < open {
+		return Proc{}, 0, errors.New("malformed stat: no comm parentheses")
+	}
+	fields := strings.Fields(data[closing+1:])
+	if len(fields) < 20 {
+		return Proc{}, 0, fmt.Errorf("malformed stat: %d fields after comm, want >= 20", len(fields))
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return Proc{}, 0, fmt.Errorf("parse ppid: %w", err)
+	}
+	start, err := strconv.ParseInt(fields[19], 10, 64)
+	if err != nil {
+		return Proc{}, 0, fmt.Errorf("parse starttime: %w", err)
+	}
+	return Proc{PPID: ppid, Start: start, Comm: data[open+1 : closing]}, fields[0][0], nil
 }

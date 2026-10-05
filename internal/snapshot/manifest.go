@@ -77,7 +77,7 @@ type Pane struct {
 	ChildCount    int               `json:"child_count"` // -1 means unknown (count error), not zero children
 	ScrollbackSHA string            `json:"scrollback_sha,omitempty"`
 	ID            string            `json:"id,omitempty"`       // tmux pane id ("%7"); stable within a server lifetime
-	Relaunch      string            `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list, unless the pane was an idle plain shell at capture
+	Relaunch      string            `json:"relaunch,omitempty"` // @remux_relaunch override; exec'd verbatim on restore, bypassing the allow-list, unless the pane was an idle plain shell at capture; also dropped at capture when its recorded owner process (@remux_relaunch_owner) is gone
 	Decoration    map[string]string `json:"decoration,omitempty"`
 }
 

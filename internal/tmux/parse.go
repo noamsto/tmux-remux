@@ -86,17 +86,18 @@ func ParseWindows(s string) ([]WindowRow, error) {
 
 // PaneRow is a parsed tmux list-panes row.
 type PaneRow struct {
-	Session     string
-	WindowIndex int
-	PaneIndex   int
-	Cwd         string
-	Command     string
-	PID         int
-	LastUsed    int64
-	ID          string // tmux pane id, e.g. "%3"
-	Relaunch    string // @remux_relaunch pane option; verbatim relaunch command, empty when unset
-	Floating    bool
-	Decoration  map[string]string // allow-listed options captured via show-options -qv; nil when none set
+	Session       string
+	WindowIndex   int
+	PaneIndex     int
+	Cwd           string
+	Command       string
+	PID           int
+	LastUsed      int64
+	ID            string // tmux pane id, e.g. "%3"
+	Relaunch      string // @remux_relaunch pane option; verbatim relaunch command, empty when unset
+	RelaunchOwner string // @remux_relaunch_owner pane option: "<pid> <start> <stamp>" binding Relaunch to its owning process, empty when unset
+	Floating      bool
+	Decoration    map[string]string // allow-listed options captured via show-options -qv; nil when none set
 }
 
 // ParsePanes parses tmux list-panes -F output.
@@ -107,8 +108,8 @@ func ParsePanes(s string) ([]PaneRow, error) {
 	var out []PaneRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
-		if len(fields) != 10 {
-			return nil, fmt.Errorf("pane line %d: expected 10 fields, got %d", i+1, len(fields))
+		if len(fields) != 11 {
+			return nil, fmt.Errorf("pane line %d: expected 11 fields, got %d", i+1, len(fields))
 		}
 		wi, err := strconv.Atoi(fields[1])
 		if err != nil {
@@ -129,7 +130,7 @@ func ParsePanes(s string) ([]PaneRow, error) {
 		out = append(out, PaneRow{
 			Session: fields[0], WindowIndex: wi, PaneIndex: pi,
 			Cwd: fields[3], Command: fields[4], PID: int(pid), LastUsed: lu, ID: fields[7],
-			Relaunch: fields[8], Floating: fields[9] == "1",
+			Relaunch: fields[8], Floating: fields[9] == "1", RelaunchOwner: fields[10],
 		})
 	}
 	return out, nil
