@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/noamsto/tmux-remux/compare/v0.7.1...v0.7.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **restore:** ignore stale [@remux](https://github.com/remux)_relaunch overrides from idle shell panes ([#163](https://github.com/noamsto/tmux-remux/issues/163)) ([12d2833](https://github.com/noamsto/tmux-remux/commit/12d28334889e8c57a194edef6281461951e24507))
+
 ## [0.7.1](https://github.com/noamsto/tmux-remux/compare/v0.7.0...v0.7.1) (2026-09-27)
 
 
