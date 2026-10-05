@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.3](https://github.com/noamsto/tmux-remux/compare/v0.7.2...v0.7.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **closeevent:** bound read-time close resolution to the current tmux server ([#173](https://github.com/noamsto/tmux-remux/issues/173)) ([3cda72c](https://github.com/noamsto/tmux-remux/commit/3cda72c9ee4472c0210b6be8f673a592c38cd61d))
+* **filter:** keep stamped idle shell panes on restore ([#171](https://github.com/noamsto/tmux-remux/issues/171)) ([d1eeef2](https://github.com/noamsto/tmux-remux/commit/d1eeef2bf10d963394d31e14d4b030fcc24e2129))
+
 ## [0.7.2](https://github.com/noamsto/tmux-remux/compare/v0.7.1...v0.7.2) (2026-09-29)
 
 
