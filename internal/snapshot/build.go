@@ -19,9 +19,14 @@ type Lister interface {
 // counter that errors without touching the real process table.
 var newChildCounter = childCounter
 
+// newProcLookup is ProcInfo behind a package var, so tests can fake the
+// process table.
+var newProcLookup = func() func(int) (Proc, error) { return ProcInfo }
+
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
 // is populated best-effort from the process table; a count error is stored
-// as -1 (unknown) rather than mistaken for zero children.
+// as -1 (unknown) rather than mistaken for zero children. A relaunch stamp
+// whose recorded owner process is gone is dropped.
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
 	var sessions []tmux.SessionRow
 	var windows []tmux.WindowRow
@@ -62,6 +67,7 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 	}
 
 	countChildren := newChildCounter()
+	lookup := newProcLookup()
 	for _, s := range sessions {
 		if s.BridgeHost != "" {
 			m.Bridged = append(m.Bridged, s.Name)
@@ -82,12 +88,16 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 				if err != nil {
 					cc = -1
 				}
+				relaunch := p.Relaunch
+				if relaunch != "" && relaunchStale(p.RelaunchOwner, relaunch, p.PID, lookup) {
+					relaunch = ""
+				}
 				win.Panes = append(win.Panes, Pane{
 					Index: p.PaneIndex, Cwd: p.Cwd, Command: p.Command,
 					LastUsed:   p.LastUsed,
 					ChildCount: cc,
 					ID:         p.ID,
-					Relaunch:   p.Relaunch,
+					Relaunch:   relaunch,
 					Decoration: p.Decoration,
 				})
 			}

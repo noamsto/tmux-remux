@@ -252,6 +252,37 @@ func TestServerStartTimeRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestPaneProcessSplitsPidAndDefaultShell(t *testing.T) {
+	tests := []struct {
+		name, output, wantShell string
+	}{
+		{"with shell", "4242 /run/current-system/sw/bin/fish", "/run/current-system/sw/bin/fish"},
+		{"empty shell", "4242 ", ""},
+		{"no separator", "4242", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := writeFakeTmux(t, fmt.Sprintf(`echo '%s'`, tt.output))
+			c := tmux.NewClient(fake)
+			pid, shell, err := c.PaneProcess(context.Background(), "%3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pid != 4242 || shell != tt.wantShell {
+				t.Errorf("PaneProcess = (%d, %q), want (4242, %q)", pid, shell, tt.wantShell)
+			}
+		})
+	}
+}
+
+func TestPaneProcessRejectsGarbagePid(t *testing.T) {
+	fake := writeFakeTmux(t, `echo 'not-a-pid /bin/sh'`)
+	c := tmux.NewClient(fake)
+	if _, _, err := c.PaneProcess(context.Background(), "%3"); err == nil {
+		t.Error("expected parse error for non-numeric pane_pid")
+	}
+}
+
 func TestSetPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n' "$@" > %s`, argsFile))

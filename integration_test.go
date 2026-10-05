@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -58,7 +60,7 @@ func (s scopedTmux) ListWindows(ctx context.Context) ([]tmux.WindowRow, error) {
 	return tmux.ParseWindows(out)
 }
 func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
-	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}"})
+	out, err := s.Run(ctx, []string{"list-panes", "-a", "-F", "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_current_path}\x1f#{pane_current_command}\x1f#{pane_pid}\x1f#{pane_last_used}\x1f#{pane_id}\x1f#{@remux_relaunch}\x1f#{pane_floating_flag}\x1f#{@remux_relaunch_owner}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
@@ -300,6 +302,203 @@ func TestRelaunchOverrideSurvivesOnlyWhileProgramRuns(t *testing.T) {
 	if len(want) != 0 {
 		t.Errorf("plan has no CreateWindow for windows %v; plan = %+v", want, plan)
 	}
+}
+
+// standinStamp is the @remux_relaunch value the stand-in agent's hook writes.
+const standinStamp = "claude --resume standin-1"
+
+// buildStandin compiles testdata/standin-agent into t.TempDir() and returns its
+// path. testdata/ is skipped by ./..., so it is built explicitly.
+func buildStandin(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "standin-agent")
+	cmd := exec.Command("go", "build", "-o", bin, "./testdata/standin-agent")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build standin-agent: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// singleQuote quotes s for a POSIX shell.
+func singleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// paneOption reads a pane option of target; unset options read as "".
+func paneOption(t *testing.T, srv *testutil.Server, target, option string) string {
+	t.Helper()
+	out, err := srv.Tmux("show-options", "-pqv", "-t", target, option)
+	if err != nil {
+		t.Fatalf("show-options %s %s: %v\n%s", target, option, err, out)
+	}
+	return strings.TrimSpace(out)
+}
+
+// panePID returns #{pane_pid} of target.
+func panePID(t *testing.T, srv *testutil.Server, target string) int {
+	t.Helper()
+	out, err := srv.Tmux("display-message", "-p", "-t", target, "#{pane_pid}")
+	if err != nil {
+		t.Fatalf("display-message %s: %v\n%s", target, err, out)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		t.Fatalf("pane_pid %q: %v", out, err)
+	}
+	return pid
+}
+
+// waitForOwner polls until the stand-in agent's hook has stamped target, then
+// returns the pid recorded in @remux_relaunch_owner.
+func waitForOwner(t *testing.T, srv *testutil.Server, target string) int {
+	t.Helper()
+	var stamp, owner string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		stamp = paneOption(t, srv, target, "@remux_relaunch")
+		if stamp == standinStamp {
+			owner = paneOption(t, srv, target, "@remux_relaunch_owner")
+			fields := strings.Fields(owner)
+			if len(fields) == 0 {
+				t.Fatalf("%s: @remux_relaunch = %q but @remux_relaunch_owner is empty", target, stamp)
+			}
+			pid, err := strconv.Atoi(fields[0])
+			if err != nil {
+				t.Fatalf("%s: @remux_relaunch_owner = %q: %v", target, owner, err)
+			}
+			return pid
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("%s never stamped; @remux_relaunch = %q, @remux_relaunch_owner = %q", target, stamp, owner)
+	return 0
+}
+
+// waitForPane polls snapshot.Build until the single pane of window index
+// satisfies ok, and returns that pane. On timeout it fails with the last
+// manifest.
+func waitForPane(t *testing.T, st scopedTmux, index int, ok func(snapshot.Pane) bool) snapshot.Pane {
+	t.Helper()
+	var m snapshot.Manifest
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		built, err := snapshot.Build(context.Background(), st, "test", 0)
+		if err != nil {
+			t.Fatalf("snapshot.Build: %v", err)
+		}
+		m = built
+		if w, found := findWindow(m, index); found && len(w.Panes) == 1 && ok(w.Panes[0]) {
+			return w.Panes[0]
+		}
+		if time.Now().After(deadline) {
+			dump, _ := json.MarshalIndent(m, "", "  ")
+			t.Fatalf("window %d pane never reached the expected state; last manifest:\n%s", index, dump)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestRelaunchStampOwnerAgentIsPane covers an agent that is the pane process:
+// the stamp is bound to the pane process, survives capture while the agent
+// runs, and is dropped by Build once the agent is gone even though tmux still
+// holds the option.
+func TestRelaunchStampOwnerAgentIsPane(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	bin := buildRemux(t)
+	standin := buildStandin(t)
+	srv := testutil.StartServer(t)
+	st := scopedTmux{socket: srv.Socket}
+	for _, opt := range [][]string{{"default-shell", "/bin/sh"}, {"remain-on-exit", "on"}} {
+		if out, err := srv.Tmux("set", "-g", opt[0], opt[1]); err != nil {
+			t.Fatalf("set %s: %v\n%s", opt[0], err, out)
+		}
+	}
+
+	const target = "init:7"
+	if out, err := srv.Tmux("new-window", "-d", "-t", target, "-n", "agent", "exec "+singleQuote(standin)+" "+singleQuote(bin)); err != nil {
+		t.Fatalf("new-window: %v\n%s", err, out)
+	}
+
+	ownerPID := waitForOwner(t, srv, target)
+	if panePID := panePID(t, srv, target); ownerPID != panePID {
+		t.Fatalf("owner pid = %d, want the pane process %d", ownerPID, panePID)
+	}
+	waitForPane(t, st, 7, func(p snapshot.Pane) bool { return p.Relaunch == standinStamp })
+
+	if err := syscall.Kill(ownerPID, syscall.SIGTERM); err != nil {
+		t.Fatalf("kill agent: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out, err := srv.Tmux("display-message", "-p", "-t", target, "#{pane_dead}")
+		if err != nil {
+			t.Fatalf("display-message: %v\n%s", err, out)
+		}
+		if strings.TrimSpace(out) == "1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pane never died after the agent was killed")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if out, err := srv.Tmux("respawn-pane", "-t", target, "exec sleep 300"); err != nil {
+		t.Fatalf("respawn-pane: %v\n%s", err, out)
+	}
+	// tmux keeps the option across respawn, so a dropped Relaunch below is Build's doing.
+	if got := paneOption(t, srv, target, "@remux_relaunch"); got != standinStamp {
+		t.Fatalf("@remux_relaunch after respawn = %q, want %q still set", got, standinStamp)
+	}
+	if p := waitForPane(t, st, 7, func(p snapshot.Pane) bool { return p.Command == "sleep" }); p.Relaunch != "" {
+		t.Errorf("Relaunch = %q for a pane whose agent is gone, want it dropped", p.Relaunch)
+	}
+}
+
+// TestRelaunchStampOwnerUnderShell covers an agent launched from an
+// interactive shell prompt: the owner is the agent, not the pane's shell, and
+// the stamp is dropped once the agent exits and another program runs.
+func TestRelaunchStampOwnerUnderShell(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	bin := buildRemux(t)
+	standin := buildStandin(t)
+	srv := testutil.StartServer(t)
+	st := scopedTmux{socket: srv.Socket}
+	if out, err := srv.Tmux("set", "-g", "default-shell", "/bin/sh"); err != nil {
+		t.Fatalf("set default-shell: %v\n%s", err, out)
+	}
+
+	const target = "init:8"
+	if out, err := srv.Tmux("new-window", "-d", "-t", target, "-n", "shell"); err != nil {
+		t.Fatalf("new-window: %v\n%s", err, out)
+	}
+	// The shell can briefly have a child while its profile runs; wait for the prompt.
+	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount == 0 })
+	if out, err := srv.Tmux("send-keys", "-t", target, singleQuote(standin)+" "+singleQuote(bin), "Enter"); err != nil {
+		t.Fatalf("send-keys: %v\n%s", err, out)
+	}
+
+	ownerPID := waitForOwner(t, srv, target)
+	if panePID := panePID(t, srv, target); ownerPID == panePID {
+		t.Fatalf("owner pid = %d is the pane's shell, want the agent beneath it", ownerPID)
+	}
+	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.Relaunch == standinStamp })
+
+	if err := syscall.Kill(ownerPID, syscall.SIGTERM); err != nil {
+		t.Fatalf("kill agent: %v", err)
+	}
+	if out, err := srv.Tmux("send-keys", "-t", target, "sleep 300", "Enter"); err != nil {
+		t.Fatalf("send-keys: %v\n%s", err, out)
+	}
+	// A pane with a live child keeps owner-less stamps, so the drop here comes
+	// from the owner check, not the idle-shell rule.
+	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount >= 1 && p.Relaunch == "" })
 }
 
 // TestDecorationRestoreRoundtrip captures decoration options (@crew_name,

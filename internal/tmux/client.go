@@ -119,7 +119,7 @@ func withSynthesizedTmuxEnv(env []string) []string {
 const (
 	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}" + FieldSep + "#{@bridge_host}"
 	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
-	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}"
+	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}" + FieldSep + "#{@remux_relaunch_owner}"
 )
 
 // WindowFormat returns the list-windows -F format. Decoration is captured
@@ -266,6 +266,24 @@ func (c *Client) ServerStartTime(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("parse start_time %q: %w", strings.TrimSpace(out), err)
 	}
 	return secs * 1000, nil
+}
+
+// PaneProcess returns pane's process id and tmux's default-shell, in one
+// display-message round trip.
+func (c *Client) PaneProcess(ctx context.Context, pane string) (pid int, defaultShell string, err error) {
+	// Space-separated, not FieldSep: tmux 3.4 rewrites \x1f to "_" in output
+	// when not run from a client, which is how a hook invokes this.
+	out, err := c.Run(ctx, []string{"display-message", "-p", "-t", pane, "#{pane_pid} #{default-shell}"})
+	if err != nil {
+		return 0, "", err
+	}
+	out = strings.TrimSpace(out)
+	pidStr, defaultShell, _ := strings.Cut(out, " ")
+	pid, err = strconv.Atoi(pidStr)
+	if err != nil {
+		return 0, "", fmt.Errorf("parse pane_pid %q: %w", pidStr, err)
+	}
+	return pid, defaultShell, nil
 }
 
 // SetPaneOption sets a pane-scoped option (tmux set-option -p). The -q flag
