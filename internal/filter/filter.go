@@ -88,8 +88,8 @@ func (f Filter) SkipPane(p snapshot.Pane) bool {
 }
 
 // carriesIdentity reports whether the pane is stamped with something that makes
-// dropping it lose information: a relaunch override, or a user option such as
-// @crew_role. Built-in style options (pane-border-*) are not identity, since
+// dropping it lose information: a relaunch override, or any captured user option
+// (@-prefixed, e.g. @crew_role). Built-in style options (pane-border-*) are not identity, since
 // any ordinary pane may carry them.
 func carriesIdentity(p snapshot.Pane) bool {
 	if p.Relaunch != "" {

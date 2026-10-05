@@ -424,7 +424,10 @@ func TestBuildPlanKeepsStampedIdleShellAsFirstPane(t *testing.T) {
 		}},
 	}
 	f := filter.Filter{SkipIdleShells: true, SkipIdleWindows: true}
-	plan, _ := restore.BuildPlan(m, f, nil, defaultOpts)
+	plan, stats := restore.BuildPlan(m, f, nil, defaultOpts)
+	if stats.WindowsSkippedIdle != 0 || stats.SessionsKept != 1 {
+		t.Errorf("stats = %+v, want window kept", stats)
+	}
 	want := []restore.Action{
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "grid", Cwd: "/a", StartupCommand: "", NewSession: true},
 		restore.SetOption{Target: "s1:1", Pane: true, Name: "@crew_role", Value: "lead"},

@@ -88,6 +88,18 @@ func TestSkipIdleWindow(t *testing.T) {
 		{Command: "bash", ChildCount: 0},
 		{Command: "nvim", ChildCount: 0},
 	}}
+	stamped := snapshot.Window{Panes: []snapshot.Pane{
+		{Command: "fish", Relaunch: "codex resume"},
+	}}
+	borderOnly := snapshot.Window{Panes: []snapshot.Pane{
+		{Command: "fish", Decoration: map[string]string{"pane-border-style": "fg=red"}},
+	}}
+	if f.SkipWindow(stamped) {
+		t.Error("window with a stamped idle shell should be kept")
+	}
+	if !f.SkipWindow(borderOnly) {
+		t.Error("window of idle shells with only border style should be skipped")
+	}
 	if !f.SkipWindow(allIdle) {
 		t.Error("all-idle window should be skipped")
 	}
