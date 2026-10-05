@@ -80,16 +80,19 @@ func isShellComm(comm, defaultShell, loginShell string) bool {
 // When the pane process is not a shell, the agent is the pane process
 // (`tmux new-window claude`, `exec claude`), so it owns the stamp however deep
 // the hook's own helpers nest beneath it. When the pane process is a shell, the
-// agent was started from it, so the owner is the ancestor directly under the
-// shell; if that is self, relaunch-stamp was run by hand at a prompt and
-// nothing durable owns the stamp. self being the pane process is likewise
-// transient.
+// agent was started from it, possibly via nested shells (`bash`, `nix shell`)
+// that outlive it, so the owner is the first non-shell process on the way down
+// from the pane to self. If there is none, relaunch-stamp was run by hand at a
+// prompt and nothing durable owns the stamp; self being the pane process is
+// likewise transient. A long-lived non-shell launcher between the pane shell
+// and the agent (nvim's :terminal, `nix develop`'s nix) still becomes the
+// owner and keeps the stamp while it lives.
 func relaunchOwner(self, panePID int, info func(int) (snapshot.Proc, error), isShell func(string) bool) (pid int, start int64) {
 	if self == panePID {
 		return 0, 0
 	}
-	under := paneChild(self, panePID, info)
-	if under == 0 {
+	chain := paneChain(self, panePID, info)
+	if chain == nil {
 		return 0, 0
 	}
 	pane, err := info(panePID)
@@ -98,10 +101,16 @@ func relaunchOwner(self, panePID int, info func(int) (snapshot.Proc, error), isS
 	}
 	owner := panePID
 	if isShell(pane.Comm) {
-		if under == self {
+		owner = 0
+		for i := len(chain) - 1; i > 0; i-- {
+			if !isShell(chain[i].comm) {
+				owner = chain[i].pid
+				break
+			}
+		}
+		if owner == 0 {
 			return 0, 0
 		}
-		owner = under
 	}
 	p, err := info(owner)
 	if err != nil {
@@ -110,21 +119,28 @@ func relaunchOwner(self, panePID int, info func(int) (snapshot.Proc, error), isS
 	return owner, p.Start
 }
 
-// paneChild returns the process on self's ancestor chain whose parent is
-// panePID, or 0 when the chain breaks, reaches init, or runs too deep.
-func paneChild(self, panePID int, info func(int) (snapshot.Proc, error)) int {
+type chainProc struct {
+	pid  int
+	comm string
+}
+
+// paneChain returns self's ancestors from self up to the child of panePID, or
+// nil when the chain breaks, reaches init, or runs too deep.
+func paneChain(self, panePID int, info func(int) (snapshot.Proc, error)) []chainProc {
+	var chain []chainProc
 	pid := self
 	for range 64 {
 		p, err := info(pid)
 		if err != nil || p.PPID <= 1 {
-			return 0
+			return nil
 		}
+		chain = append(chain, chainProc{pid: pid, comm: p.Comm})
 		if p.PPID == panePID {
-			return pid
+			return chain
 		}
 		pid = p.PPID
 	}
-	return 0
+	return nil
 }
 
 type relaunchStampOpts struct {

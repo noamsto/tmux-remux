@@ -207,7 +207,8 @@ func treeLookup(tree map[int]snapshot.Proc) procLookup {
 }
 
 // revertedOwner is the reverted owner selection (the hook's ancestor directly
-// under the pane), kept only to prove the agent-is-pane rows fail under it.
+// under the pane), kept only to prove the agent-is-pane and nested-shell rows
+// fail under it.
 func revertedOwner(self, panePID int, parent func(int) (int, error)) int {
 	pid := self
 	for range 64 {
@@ -236,9 +237,10 @@ func TestRelaunchOwner(t *testing.T) {
 		defaultShell string
 		// wrap, when set, replaces the tree lookup; it is called per row so
 		// any state it keeps starts fresh.
-		wrap        func(procLookup) procLookup
-		want        int
-		agentIsPane bool
+		wrap func(procLookup) procLookup
+		want int
+		// redProof marks rows that revertedOwner must get wrong.
+		redProof bool
 	}{
 		{
 			name: "pane-is-shell zsh(pane)→claude→sh→stamp",
@@ -276,24 +278,39 @@ func TestRelaunchOwner(t *testing.T) {
 			self: 400, defaultShell: "/bin/dash", want: 200,
 		},
 		{
+			name: "nested-shell zsh(pane)→bash→claude→sh→stamp",
+			tree: procTree(100, 1, "zsh", 200, 100, "bash", 300, 200, "claude", 400, 300, "sh", 500, 400, "tmux-remux"),
+			self: 500, want: 300, redProof: true,
+		},
+		{
+			name: "nested-shell nix shell fish(pane)→fish→.claude-wrapped→bash→stamp",
+			tree: procTree(100, 1, "fish", 200, 100, "fish", 300, 200, ".claude-wrapped", 400, 300, "bash", 500, 400, "tmux-remux"),
+			self: 500, want: 300, redProof: true,
+		},
+		{
+			name: "accepted fail-open: non-shell launcher owns zsh(pane)→nvim→zsh→claude→sh→stamp",
+			tree: procTree(100, 1, "zsh", 200, 100, "nvim", 300, 200, "zsh", 400, 300, "claude", 500, 400, "sh", 600, 500, "tmux-remux"),
+			self: 600, want: 200,
+		},
+		{
 			name: "agent-is-pane claude(pane)→sh→stamp",
 			tree: procTree(100, 1, "claude", 200, 100, "sh", 300, 200, "tmux-remux"),
-			self: 300, want: pane, agentIsPane: true,
+			self: 300, want: pane, redProof: true,
 		},
 		{
 			name: "agent-is-pane exec-optimised claude(pane)→stamp",
 			tree: procTree(100, 1, "claude", 200, 100, "tmux-remux"),
-			self: 200, want: pane, agentIsPane: true,
+			self: 200, want: pane, redProof: true,
 		},
 		{
 			name: "agent-is-pane version comm 2.1.3(pane)→sh→hookyard→sh→stamp",
 			tree: procTree(100, 1, "2.1.3", 200, 100, "sh", 300, 200, "hookyard", 400, 300, "sh", 500, 400, "tmux-remux"),
-			self: 500, want: pane, agentIsPane: true,
+			self: 500, want: pane, redProof: true,
 		},
 		{
 			name: "agent-is-pane node(pane)→codex→codex-relaunch-→stamp",
 			tree: procTree(100, 1, "node", 200, 100, "codex", 300, 200, "codex-relaunch-", 400, 300, "tmux-remux"),
-			self: 400, want: pane, agentIsPane: true,
+			self: 400, want: pane, redProof: true,
 		},
 		{
 			name: "owner-less self is the pane process",
@@ -328,6 +345,11 @@ func TestRelaunchOwner(t *testing.T) {
 			name: "owner-less run by hand at a prompt zsh(pane)→stamp",
 			tree: procTree(100, 1, "zsh", 200, 100, "tmux-remux"),
 			self: 200, want: 0,
+		},
+		{
+			name: "owner-less run by hand in a nested shell zsh(pane)→bash→stamp",
+			tree: procTree(100, 1, "zsh", 200, 100, "bash", 300, 200, "tmux-remux"),
+			self: 300, want: 0, redProof: true,
 		},
 		{
 			name: "owner-less pane comm unreadable claude(pane, EPERM)→stamp",
@@ -376,7 +398,7 @@ func TestRelaunchOwner(t *testing.T) {
 			if pid != tc.want || start != wantStart {
 				t.Errorf("relaunchOwner = (%d, %d), want (%d, %d)", pid, start, tc.want, wantStart)
 			}
-			if !tc.agentIsPane {
+			if !tc.redProof {
 				return
 			}
 			parent := func(pid int) (int, error) {

@@ -33,10 +33,11 @@ func parseRelaunchOwner(v string) (pid int, start int64, stamp string, ok bool) 
 }
 
 // relaunchStale reports whether the process that recorded owner for stamp is
-// gone. A missing, unparsable, or differently-stamped record is owner-less
-// and never stale, leaving restore's idle-shell rule to decide. A lookup error
-// other than ErrNoProcess is unknown, not gone, and fails open like a
-// ChildCount of -1.
+// gone or no longer runs under the pane: its ancestry must reach panePID
+// within 64 steps. A missing, unparsable, or differently-stamped record is
+// owner-less and never stale, leaving restore's idle-shell rule to decide. A
+// lookup error other than ErrNoProcess, or an ancestry too deep to resolve, is
+// unknown, not gone, and fails open like a ChildCount of -1.
 func relaunchStale(owner, stamp string, panePID int, lookup func(int) (Proc, error)) bool {
 	pid, start, ownerStamp, ok := parseRelaunchOwner(owner)
 	if !ok || ownerStamp != stamp {
@@ -49,5 +50,19 @@ func relaunchStale(owner, stamp string, panePID int, lookup func(int) (Proc, err
 	if p.Start != start {
 		return true
 	}
-	return pid != panePID && p.PPID != panePID
+	if pid == panePID {
+		return false
+	}
+	for range 64 {
+		if p.PPID == panePID {
+			return false
+		}
+		if p.PPID <= 1 {
+			return true
+		}
+		if p, err = lookup(p.PPID); err != nil {
+			return errors.Is(err, ErrNoProcess)
+		}
+	}
+	return false
 }

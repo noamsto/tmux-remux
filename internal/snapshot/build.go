@@ -26,7 +26,8 @@ var newProcLookup = func() func(int) (Proc, error) { return ProcInfo }
 // Build queries the live tmux server via l and returns a Manifest. ChildCount
 // is populated best-effort from the process table; a count error is stored
 // as -1 (unknown) rather than mistaken for zero children. A relaunch stamp
-// whose recorded owner process is gone is dropped.
+// whose recorded owner process is gone, or no longer runs under the pane, is
+// dropped.
 func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest, error) {
 	var sessions []tmux.SessionRow
 	var windows []tmux.WindowRow

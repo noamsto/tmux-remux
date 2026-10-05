@@ -62,12 +62,17 @@ func TestBuildDropsStampOfDeadOwner(t *testing.T) {
 		200: {PPID: 100, Start: 5000},
 		100: {PPID: 1, Start: 4000},
 		300: {PPID: 1, Start: 6000},
+		310: {PPID: 200, Start: 7000},
+		320: {PPID: 300, Start: 8000},
+		330: {PPID: 250, Start: 9000},
+		340: {PPID: 260, Start: 9500},
 	}
 	tests := []struct {
 		name         string
 		owner        string
 		command      string
 		lookupErr    error
+		errPID       int
 		wantRelaunch string
 	}{
 		{name: "owner gone", owner: FormatRelaunchOwner(999, 1, stamp), command: "nvim", wantRelaunch: ""},
@@ -77,7 +82,11 @@ func TestBuildDropsStampOfDeadOwner(t *testing.T) {
 		{name: "start mismatch", owner: FormatRelaunchOwner(200, 4999, stamp), command: "nvim", wantRelaunch: ""},
 		{name: "record bound to other stamp", owner: FormatRelaunchOwner(999, 1, "claude --resume old"), command: "nvim", wantRelaunch: stamp},
 		{name: "owner reparented", owner: FormatRelaunchOwner(300, 6000, stamp), command: "nvim", wantRelaunch: ""},
-		{name: "lookup error is unknown", owner: FormatRelaunchOwner(200, 5000, stamp), command: "nvim", lookupErr: errors.New("boom"), wantRelaunch: stamp},
+		{name: "live grandchild owner", owner: FormatRelaunchOwner(310, 7000, stamp), command: "zsh", wantRelaunch: stamp},
+		{name: "owner ancestry reaches init before the pane", owner: FormatRelaunchOwner(320, 8000, stamp), command: "nvim", wantRelaunch: ""},
+		{name: "owner ancestor gone", owner: FormatRelaunchOwner(330, 9000, stamp), command: "nvim", wantRelaunch: ""},
+		{name: "lookup error is unknown", owner: FormatRelaunchOwner(200, 5000, stamp), command: "nvim", lookupErr: errors.New("boom"), errPID: 200, wantRelaunch: stamp},
+		{name: "ancestor lookup error is unknown", owner: FormatRelaunchOwner(340, 9500, stamp), command: "nvim", lookupErr: errors.New("boom"), errPID: 260, wantRelaunch: stamp},
 		{name: "unparsable record", owner: "garbage", command: "nvim", wantRelaunch: stamp},
 	}
 	for _, tc := range tests {
@@ -86,7 +95,7 @@ func TestBuildDropsStampOfDeadOwner(t *testing.T) {
 			t.Cleanup(func() { newProcLookup, newChildCounter = origLookup, origCounter })
 			newProcLookup = func() func(int) (Proc, error) {
 				return func(pid int) (Proc, error) {
-					if tc.lookupErr != nil {
+					if pid == tc.errPID {
 						return Proc{}, tc.lookupErr
 					}
 					p, ok := table[pid]

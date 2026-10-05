@@ -459,8 +459,9 @@ func TestRelaunchStampOwnerAgentIsPane(t *testing.T) {
 }
 
 // TestRelaunchStampOwnerUnderShell covers an agent launched from an
-// interactive shell prompt: the owner is the agent, not the pane's shell, and
-// the stamp is dropped once the agent exits and another program runs.
+// interactive shell prompt, directly or from a nested shell: the owner is the
+// agent, not a shell above it, and the stamp is dropped once the agent exits
+// and another program runs.
 func TestRelaunchStampOwnerUnderShell(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -468,37 +469,63 @@ func TestRelaunchStampOwnerUnderShell(t *testing.T) {
 
 	bin := buildRemux(t)
 	standin := buildStandin(t)
-	srv := testutil.StartServer(t)
-	st := scopedTmux{socket: srv.Socket}
-	if out, err := srv.Tmux("set", "-g", "default-shell", "/bin/sh"); err != nil {
-		t.Fatalf("set default-shell: %v\n%s", err, out)
-	}
+	for _, tc := range []struct {
+		name   string
+		nested bool
+	}{
+		{name: "prompt"},
+		{name: "nested shell", nested: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := testutil.StartServer(t)
+			st := scopedTmux{socket: srv.Socket}
+			if out, err := srv.Tmux("set", "-g", "default-shell", "/bin/sh"); err != nil {
+				t.Fatalf("set default-shell: %v\n%s", err, out)
+			}
 
-	const target = "init:8"
-	if out, err := srv.Tmux("new-window", "-d", "-t", target, "-n", "shell"); err != nil {
-		t.Fatalf("new-window: %v\n%s", err, out)
-	}
-	// The shell can briefly have a child while its profile runs; wait for the prompt.
-	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount == 0 })
-	if out, err := srv.Tmux("send-keys", "-t", target, singleQuote(standin)+" "+singleQuote(bin), "Enter"); err != nil {
-		t.Fatalf("send-keys: %v\n%s", err, out)
-	}
+			const target = "init:8"
+			if out, err := srv.Tmux("new-window", "-d", "-t", target, "-n", "shell"); err != nil {
+				t.Fatalf("new-window: %v\n%s", err, out)
+			}
+			// The shell can briefly have a child while its profile runs; wait for the prompt.
+			waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount == 0 })
+			if tc.nested {
+				if out, err := srv.Tmux("send-keys", "-t", target, "/bin/sh", "Enter"); err != nil {
+					t.Fatalf("send-keys: %v\n%s", err, out)
+				}
+				waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount >= 1 })
+			}
+			if out, err := srv.Tmux("send-keys", "-t", target, singleQuote(standin)+" "+singleQuote(bin), "Enter"); err != nil {
+				t.Fatalf("send-keys: %v\n%s", err, out)
+			}
 
-	ownerPID := waitForOwner(t, srv, target)
-	if panePID := panePID(t, srv, target); ownerPID == panePID {
-		t.Fatalf("owner pid = %d is the pane's shell, want the agent beneath it", ownerPID)
-	}
-	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.Relaunch == standinStamp })
+			ownerPID := waitForOwner(t, srv, target)
+			pane := panePID(t, srv, target)
+			if ownerPID == pane {
+				t.Fatalf("owner pid = %d is the pane's shell, want the agent beneath it", ownerPID)
+			}
+			if tc.nested {
+				owner, err := snapshot.ProcInfo(ownerPID)
+				if err != nil {
+					t.Fatalf("ProcInfo(%d): %v", ownerPID, err)
+				}
+				if owner.PPID == pane {
+					t.Fatalf("owner pid = %d is the nested shell, want the agent beneath it", ownerPID)
+				}
+			}
+			waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.Relaunch == standinStamp })
 
-	if err := syscall.Kill(ownerPID, syscall.SIGTERM); err != nil {
-		t.Fatalf("kill agent: %v", err)
+			if err := syscall.Kill(ownerPID, syscall.SIGTERM); err != nil {
+				t.Fatalf("kill agent: %v", err)
+			}
+			if out, err := srv.Tmux("send-keys", "-t", target, "sleep 300", "Enter"); err != nil {
+				t.Fatalf("send-keys: %v\n%s", err, out)
+			}
+			// A pane with a live child keeps owner-less stamps, so the drop here
+			// comes from the owner check, not the idle-shell rule.
+			waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount >= 1 && p.Relaunch == "" })
+		})
 	}
-	if out, err := srv.Tmux("send-keys", "-t", target, "sleep 300", "Enter"); err != nil {
-		t.Fatalf("send-keys: %v\n%s", err, out)
-	}
-	// A pane with a live child keeps owner-less stamps, so the drop here comes
-	// from the owner check, not the idle-shell rule.
-	waitForPane(t, st, 8, func(p snapshot.Pane) bool { return p.ChildCount >= 1 && p.Relaunch == "" })
 }
 
 // TestDecorationRestoreRoundtrip captures decoration options (@crew_name,
