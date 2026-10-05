@@ -66,6 +66,8 @@ func TestBuildDropsStampOfDeadOwner(t *testing.T) {
 		320: {PPID: 300, Start: 8000},
 		330: {PPID: 250, Start: 9000},
 		340: {PPID: 260, Start: 9500},
+		400: {PPID: 410, Start: 9700},
+		410: {PPID: 400, Start: 9800},
 	}
 	tests := []struct {
 		name         string
@@ -87,6 +89,7 @@ func TestBuildDropsStampOfDeadOwner(t *testing.T) {
 		{name: "owner ancestor gone", owner: FormatRelaunchOwner(330, 9000, stamp), command: "nvim", wantRelaunch: ""},
 		{name: "lookup error is unknown", owner: FormatRelaunchOwner(200, 5000, stamp), command: "nvim", lookupErr: errors.New("boom"), errPID: 200, wantRelaunch: stamp},
 		{name: "ancestor lookup error is unknown", owner: FormatRelaunchOwner(340, 9500, stamp), command: "nvim", lookupErr: errors.New("boom"), errPID: 260, wantRelaunch: stamp},
+		{name: "ancestry too deep to resolve is unknown", owner: FormatRelaunchOwner(400, 9700, stamp), command: "nvim", wantRelaunch: stamp},
 		{name: "unparsable record", owner: "garbage", command: "nvim", wantRelaunch: stamp},
 	}
 	for _, tc := range tests {
