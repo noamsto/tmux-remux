@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/noamsto/tmux-remux/compare/v0.7.3...v0.7.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **snapshot:** bind relaunch stamps to their owning agent ([#175](https://github.com/noamsto/tmux-remux/issues/175)) ([47a5798](https://github.com/noamsto/tmux-remux/commit/47a57985b277f75df4a60399bf3fc5f2f119c0db))
+
 ## [0.7.3](https://github.com/noamsto/tmux-remux/compare/v0.7.2...v0.7.3) (2026-10-05)
 
 
