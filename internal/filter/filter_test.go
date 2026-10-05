@@ -18,6 +18,9 @@ func TestSkipIdleShells(t *testing.T) {
 		{"bash with children", snapshot.Pane{Command: "bash", ChildCount: 2}, false},
 		{"nvim no children", snapshot.Pane{Command: "nvim", ChildCount: 0}, false},
 		{"fish no children", snapshot.Pane{Command: "fish", ChildCount: 0}, true},
+		{"fish with relaunch", snapshot.Pane{Command: "fish", Relaunch: "codex resume"}, false},
+		{"fish with @crew_role", snapshot.Pane{Command: "fish", Decoration: map[string]string{"@crew_role": "lead"}}, false},
+		{"fish with only border style", snapshot.Pane{Command: "fish", Decoration: map[string]string{"pane-border-style": "fg=red"}}, true},
 	}
 	f := filter.Filter{SkipIdleShells: true}
 	for _, c := range cases {
@@ -85,6 +88,18 @@ func TestSkipIdleWindow(t *testing.T) {
 		{Command: "bash", ChildCount: 0},
 		{Command: "nvim", ChildCount: 0},
 	}}
+	stamped := snapshot.Window{Panes: []snapshot.Pane{
+		{Command: "fish", Relaunch: "codex resume"},
+	}}
+	borderOnly := snapshot.Window{Panes: []snapshot.Pane{
+		{Command: "fish", Decoration: map[string]string{"pane-border-style": "fg=red"}},
+	}}
+	if f.SkipWindow(stamped) {
+		t.Error("window with a stamped idle shell should be kept")
+	}
+	if !f.SkipWindow(borderOnly) {
+		t.Error("window of idle shells with only border style should be skipped")
+	}
 	if !f.SkipWindow(allIdle) {
 		t.Error("all-idle window should be skipped")
 	}
