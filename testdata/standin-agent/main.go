@@ -1,8 +1,7 @@
 // Command standin-agent mimics an agent's start hook for the integration
 // tests: it stamps its pane via relaunch-stamp, then blocks. It is a non-shell
 // process, so tests exercise both the agent-is-pane and agent-under-shell
-// shapes on a real tmux. testdata/ is skipped by ./..., so it is built
-// explicitly.
+// shapes on a real tmux.
 package main
 
 import (
