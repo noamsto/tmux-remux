@@ -2,6 +2,7 @@
 package filter
 
 import (
+	"strings"
 	"time"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
@@ -73,7 +74,8 @@ func (f Filter) SkipSession(s snapshot.Session, running map[string]bool) bool {
 	return f.SessionSkipReason(s, running) != ""
 }
 
-// SkipPane returns true if the pane should be filtered out (idle plain shell).
+// SkipPane returns true if the pane should be filtered out (idle plain shell
+// carrying no relaunch stamp or identity decoration).
 func (f Filter) SkipPane(p snapshot.Pane) bool {
 	if !f.SkipIdleShells {
 		return false
@@ -82,7 +84,23 @@ func (f Filter) SkipPane(p snapshot.Pane) bool {
 	if idle == nil {
 		idle = defaultIdleShells
 	}
-	return idle[p.Command] && p.ChildCount == 0
+	return idle[p.Command] && p.ChildCount == 0 && !carriesIdentity(p)
+}
+
+// carriesIdentity reports whether the pane is stamped with something that makes
+// dropping it lose information: a relaunch override, or a user option such as
+// @crew_role. Built-in style options (pane-border-*) are not identity, since
+// any ordinary pane may carry them.
+func carriesIdentity(p snapshot.Pane) bool {
+	if p.Relaunch != "" {
+		return true
+	}
+	for k := range p.Decoration {
+		if strings.HasPrefix(k, "@") {
+			return true
+		}
+	}
+	return false
 }
 
 // SkipWindow returns true if every pane in the window would itself be skipped.

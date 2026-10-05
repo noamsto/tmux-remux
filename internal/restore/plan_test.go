@@ -407,3 +407,32 @@ func TestBuildPlan_SkipsLiveBridgeMirrors(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPlanKeepsStampedIdleShellAsFirstPane(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "s1",
+			Windows: []snapshot.Window{{
+				Index: 1, Name: "grid", Layout: "L",
+				Panes: []snapshot.Pane{
+					{Index: 1, Cwd: "/a", Command: "fish", ChildCount: 0, Relaunch: "codex resume",
+						Decoration: map[string]string{"@crew_role": "lead"}},
+					{Index: 2, Cwd: "/b", Command: "sleep", ChildCount: 0, Relaunch: "claude --resume",
+						Decoration: map[string]string{"@crew_role": "plan-critic"}},
+				},
+			}},
+		}},
+	}
+	f := filter.Filter{SkipIdleShells: true, SkipIdleWindows: true}
+	plan, _ := restore.BuildPlan(m, f, nil, defaultOpts)
+	want := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Name: "grid", Cwd: "/a", StartupCommand: "", NewSession: true},
+		restore.SetOption{Target: "s1:1", Pane: true, Name: "@crew_role", Value: "lead"},
+		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: "claude --resume; exec /bin/zsh"},
+		restore.SetOption{Target: "s1:1", Pane: true, Name: "@crew_role", Value: "plan-critic"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+	}
+	if diff := cmp.Diff(want, plan); diff != "" {
+		t.Errorf("plan mismatch (-want +got):\n%s", diff)
+	}
+}
