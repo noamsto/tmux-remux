@@ -144,6 +144,9 @@ func settleWindow(ctx context.Context, t Runner, target, layout string, panes []
 		}
 	}
 	for _, p := range panes {
+		// respawn-pane keeps history, so whatever the placeholder shell printed
+		// would sit above the scrollback the startup command replays.
+		_, _ = t.Run(ctx, []string{"clear-history", "-t", p.id})
 		if _, err := t.Run(ctx, []string{"respawn-pane", "-k", "-t", p.id, p.startup}); err != nil {
 			failed = append(failed, FailedAction{Action: SplitPane{Target: target}, Err: err})
 		}

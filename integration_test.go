@@ -1290,13 +1290,10 @@ func TestRestoreStartupCommandsSeeFinalPaneSize(t *testing.T) {
 	layout = strings.TrimSpace(layout)
 
 	hookLog := filepath.Join(t.TempDir(), "hooks")
-	for _, hook := range []string{"pane-died", "after-kill-pane"} {
+	for _, hook := range []string{"pane-died", "pane-exited", "after-kill-pane"} {
 		if _, err := dst.Tmux("set-hook", "-g", hook, "run-shell 'echo "+hook+" >> "+hookLog+"'"); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if _, err := dst.Tmux("set-option", "-g", "remain-on-exit", "on"); err != nil {
-		t.Fatal(err)
 	}
 
 	dir := t.TempDir()

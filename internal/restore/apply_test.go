@@ -90,6 +90,7 @@ func TestApplyCreatesSessionAndFirstWindowInOneCall(t *testing.T) {
 	}
 	want := [][]string{
 		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
+		{"clear-history", "-t", "%1"},
 		{"respawn-pane", "-k", "-t", "%1", startup},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
@@ -156,7 +157,9 @@ func TestApplyRespawnsStartupCommandsOnlyAfterLayoutAndFit(t *testing.T) {
 		{"show-options", "-wv", "-t", "s1:1", "window-size"},
 		{"resize-window", "-t", "s1:1", "-x", "138", "-y", "39"},
 		{"set-window-option", "-u", "-t", "s1:1", "window-size"},
+		{"clear-history", "-t", "%11"},
 		{"respawn-pane", "-k", "-t", "%11", startup},
+		{"clear-history", "-t", "%12"},
 		{"respawn-pane", "-k", "-t", "%12", "htop"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
@@ -369,6 +372,7 @@ func TestApplyRestoresPinnedWindowSizeAfterFit(t *testing.T) {
 		{"show-options", "-wv", "-t", "@7", "window-size"},
 		{"resize-window", "-t", "@7", "-x", "138", "-y", "39"},
 		{"set-window-option", "-t", "@7", "window-size", "smallest"},
+		{"clear-history", "-t", "%11"},
 		{"respawn-pane", "-k", "-t", "%11", "htop"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
