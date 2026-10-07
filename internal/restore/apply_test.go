@@ -3,6 +3,7 @@ package restore_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -11,18 +12,20 @@ import (
 	"github.com/noamsto/tmux-remux/internal/restore"
 )
 
-const newSessionFormat = "#{window_id} #{window_index}"
+const newSessionFormat = "#{window_id} #{window_index} #{pane_id}"
 
 type recordingTmux struct {
 	calls [][]string
 	// windowOut stands in for what `new-session -P -F` prints: the window id
-	// and the index tmux actually placed it at. Defaults to "@1 1".
+	// and the index tmux actually placed it at, plus its first pane. Defaults to
+	// "@1 1 %1".
 	windowOut     string
 	newSessionErr error
 	// failFlag makes Run return failErr for any call containing that argument,
 	// which is how the -b fallback path is exercised.
 	failFlag string
 	failErr  error
+	nextPane int
 }
 
 func (r *recordingTmux) Run(_ context.Context, args []string) (string, error) {
@@ -30,16 +33,22 @@ func (r *recordingTmux) Run(_ context.Context, args []string) (string, error) {
 	if r.failFlag != "" && slices.Contains(args, r.failFlag) {
 		return "", r.failErr
 	}
-	if len(args) == 0 || args[0] != "new-session" {
-		return "", nil
+	switch args[0] {
+	case "new-session":
+		if r.newSessionErr != nil {
+			return "", r.newSessionErr
+		}
+		if r.windowOut != "" {
+			return r.windowOut, nil
+		}
+		return "@1 1 %1", nil
+	case "new-window", "split-window":
+		r.nextPane++
+		return fmt.Sprintf("%%%d", 10+r.nextPane), nil
+	case "display-message":
+		return "138 39", nil
 	}
-	if r.newSessionErr != nil {
-		return "", r.newSessionErr
-	}
-	if r.windowOut != "" {
-		return r.windowOut, nil
-	}
-	return "@1 1", nil
+	return "", nil
 }
 
 func TestApplyEmitsTmuxCallsWithoutStartup(t *testing.T) {
@@ -58,8 +67,12 @@ func TestApplyEmitsTmuxCallsWithoutStartup(t *testing.T) {
 	}
 	want := [][]string{
 		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
-		{"split-window", "-t", "s1:1", "-c", "/b"},
+		{"split-window", "-t", "s1:1", "-c", "/b", "-P", "-F", "#{pane_id}"},
+		{"display-message", "-p", "-t", "s1:1", "#{window_width} #{window_height}"},
 		{"select-layout", "-t", "s1:1", "L"},
+		{"show-options", "-wv", "-t", "s1:1", "window-size"},
+		{"resize-window", "-t", "s1:1", "-x", "138", "-y", "39"},
+		{"set-window-option", "-u", "-t", "s1:1", "window-size"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -76,7 +89,9 @@ func TestApplyCreatesSessionAndFirstWindowInOneCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat, startup},
+		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
+		{"clear-history", "-t", "%1"},
+		{"respawn-pane", "-k", "-t", "%1", startup},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -84,7 +99,7 @@ func TestApplyCreatesSessionAndFirstWindowInOneCall(t *testing.T) {
 }
 
 func TestApplyMovesFirstWindowToItsRecordedIndex(t *testing.T) {
-	rt := &recordingTmux{windowOut: "@7 1"}
+	rt := &recordingTmux{windowOut: "@7 1 %7"}
 	plan := []restore.Action{
 		restore.CreateWindow{Session: "s1", Index: 3, Name: "main", Cwd: "/a", NewSession: true},
 	}
@@ -116,26 +131,36 @@ func TestApplyFallsBackToNewWindowWhenSessionExists(t *testing.T) {
 	}
 	want := [][]string{
 		{"new-session", "-d", "-s", "s1", "-n", "main", "-c", "/a", "-P", "-F", newSessionFormat},
-		{"new-window", "-t", "s1:2", "-n", "main", "-c", "/a"},
+		{"new-window", "-t", "s1:2", "-n", "main", "-c", "/a", "-P", "-F", "#{pane_id}"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
 	}
 }
 
-func TestApplyAppendsStartupCommandWhenPresent(t *testing.T) {
+func TestApplyRespawnsStartupCommandsOnlyAfterLayoutAndFit(t *testing.T) {
 	rt := &recordingTmux{}
 	startup := `'/usr/bin/tmux-remux' cat-scrollback abc; exec /bin/zsh`
 	plan := []restore.Action{
 		restore.CreateWindow{Session: "s1", Index: 1, Name: "main", Cwd: "/a", StartupCommand: startup},
 		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: "htop"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
 	}
 	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a", startup},
-		{"split-window", "-t", "s1:1", "-c", "/b", "htop"},
+		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a", "-P", "-F", "#{pane_id}"},
+		{"split-window", "-t", "s1:1", "-c", "/b", "-P", "-F", "#{pane_id}"},
+		{"display-message", "-p", "-t", "s1:1", "#{window_width} #{window_height}"},
+		{"select-layout", "-t", "s1:1", "L"},
+		{"show-options", "-wv", "-t", "s1:1", "window-size"},
+		{"resize-window", "-t", "s1:1", "-x", "138", "-y", "39"},
+		{"set-window-option", "-u", "-t", "s1:1", "window-size"},
+		{"clear-history", "-t", "%11"},
+		{"respawn-pane", "-k", "-t", "%11", startup},
+		{"clear-history", "-t", "%12"},
+		{"respawn-pane", "-k", "-t", "%12", "htop"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -152,9 +177,9 @@ func TestApplyReenablesAutomaticRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a"},
+		{"new-window", "-t", "s1:1", "-n", "main", "-c", "/a", "-P", "-F", "#{pane_id}"},
 		{"set-window-option", "-t", "s1:1", "automatic-rename", "on"},
-		{"new-window", "-t", "s1:2", "-n", "named", "-c", "/a"},
+		{"new-window", "-t", "s1:2", "-n", "named", "-c", "/a", "-P", "-F", "#{pane_id}"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -182,8 +207,8 @@ func TestApplyContinuesPastIndividualFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply should swallow per-action errors, got %v", err)
 	}
-	if calls != 3 {
-		t.Errorf("expected 3 attempted calls (best-effort), got %d", calls)
+	if calls < 3 {
+		t.Errorf("expected the layout to still be attempted after the failure, got %d calls", calls)
 	}
 	if len(failed) != 1 {
 		t.Errorf("expected 1 reported failure, got %d: %v", len(failed), failed)
@@ -242,7 +267,7 @@ func TestApplyInsertsWindowAtOriginalIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a", "-P", "-F", "#{pane_id}"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -258,7 +283,7 @@ func TestApplyOmitsInsertBeforeByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a", "-P", "-F", "#{pane_id}"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -280,8 +305,8 @@ func TestApplyRetriesWithoutInsertBeforeOnUsageError(t *testing.T) {
 		t.Fatalf("unexpected action failures: %v", failed)
 	}
 	want := [][]string{
-		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a"},
-		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a"},
+		{"new-window", "-b", "-t", "s1:3", "-n", "docs", "-c", "/a", "-P", "-F", "#{pane_id}"},
+		{"new-window", "-t", "s1:3", "-n", "docs", "-c", "/a", "-P", "-F", "#{pane_id}"},
 	}
 	if diff := cmp.Diff(want, rt.calls); diff != "" {
 		t.Errorf("calls mismatch (-want +got):\n%s", diff)
@@ -326,5 +351,88 @@ func TestApplySkipsActionsTargetingAFailedCreateWindow(t *testing.T) {
 	}
 	if len(rt.calls) != 1 {
 		t.Errorf("calls = %v, want only the failed new-window call", rt.calls)
+	}
+}
+
+// A pane restored into a live window the user has pinned to a window-size must
+// get that setting back after the fit.
+func TestApplyRestoresPinnedWindowSizeAfterFit(t *testing.T) {
+	rt := &windowSizeTmux{recordingTmux: &recordingTmux{}, pinned: "smallest"}
+	plan := []restore.Action{
+		restore.SplitPane{Target: "@7", Cwd: "/b", StartupCommand: "htop"},
+		restore.SetLayout{Window: "@7", Layout: "L"},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"split-window", "-t", "@7", "-c", "/b", "-P", "-F", "#{pane_id}"},
+		{"display-message", "-p", "-t", "@7", "#{window_width} #{window_height}"},
+		{"select-layout", "-t", "@7", "L"},
+		{"show-options", "-wv", "-t", "@7", "window-size"},
+		{"resize-window", "-t", "@7", "-x", "138", "-y", "39"},
+		{"set-window-option", "-t", "@7", "window-size", "smallest"},
+		{"clear-history", "-t", "%11"},
+		{"respawn-pane", "-k", "-t", "%11", "htop"},
+	}
+	if diff := cmp.Diff(want, rt.calls); diff != "" {
+		t.Errorf("calls mismatch (-want +got):\n%s", diff)
+	}
+}
+
+type windowSizeTmux struct {
+	*recordingTmux
+	pinned string
+}
+
+func (w *windowSizeTmux) Run(ctx context.Context, args []string) (string, error) {
+	out, err := w.recordingTmux.Run(ctx, args)
+	if args[0] == "show-options" {
+		return w.pinned, err
+	}
+	return out, err
+}
+
+// A failed split must neither respawn nor disturb a sibling pane's launch.
+func TestApplyDoesNotRespawnFailedSplit(t *testing.T) {
+	rt := &recordingTmux{failFlag: "/b", failErr: errors.New("no space for new pane")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Cwd: "/a", StartupCommand: "a"},
+		restore.SplitPane{Target: "s1:1", Cwd: "/b", StartupCommand: "b"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want only the split", failed)
+	}
+	var respawns [][]string
+	for _, c := range rt.calls {
+		if c[0] == "respawn-pane" {
+			respawns = append(respawns, c)
+		}
+	}
+	if diff := cmp.Diff([][]string{{"respawn-pane", "-k", "-t", "%11", "a"}}, respawns); diff != "" {
+		t.Errorf("respawns mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Panes without a startup command keep tmux's default-command: nothing to
+// respawn.
+func TestApplyDoesNotRespawnPanesWithoutStartupCommand(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "s1", Index: 1, Cwd: "/a"},
+		restore.SetLayout{Window: "s1:1", Layout: "L"},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range rt.calls {
+		if c[0] == "respawn-pane" {
+			t.Errorf("unexpected respawn: %v", c)
+		}
 	}
 }

@@ -19,8 +19,8 @@ type Action interface {
 }
 
 // CreateWindow creates a new tmux window inside a session. StartupCommand,
-// when non-empty, is passed as the trailing shell-command argument to
-// tmux new-window — the new window's first pane is born running it.
+// when non-empty, is run in the window's first pane by respawn-pane once the
+// window's SetLayout has settled its geometry — see Apply.
 type CreateWindow struct {
 	Session        string
 	Index          int
@@ -45,8 +45,8 @@ type CreateWindow struct {
 func (CreateWindow) isAction() {}
 
 // SplitPane creates a new pane inside a window via split-window.
-// StartupCommand, when non-empty, is passed as the trailing shell-command
-// argument; the new pane is born running it.
+// StartupCommand, when non-empty, is run in the new pane by respawn-pane once
+// the window's SetLayout has settled its geometry — see Apply.
 type SplitPane struct {
 	Target         string // <session>:<window_index>
 	Cwd            string
