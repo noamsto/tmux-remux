@@ -1265,3 +1265,92 @@ func waitForThrottledSnapshot(t *testing.T, dbPath, socket string) {
 	}
 	t.Fatal("no scrollback-skipped snapshot within 5s")
 }
+
+// TestRestoreStartupCommandsSeeFinalPaneSize restores a two-pane window saved
+// on a larger screen. select-layout resizes the window to the saved size, so a
+// startup command launched with the panes would observe sizes that are wrong
+// by the time the window settles; each must instead read the final size on its
+// first look. The respawn that launches them must not look like a pane closing.
+func TestRestoreStartupCommandsSeeFinalPaneSize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dst := testutil.StartServer(t)
+	if _, err := dst.Tmux("new-session", "-d", "-s", "big", "-x", "154", "-y", "40", "/bin/sh"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dst.Tmux("split-window", "-t", "big:0", "-h", "/bin/sh"); err != nil {
+		t.Fatal(err)
+	}
+	layout, err := dst.Tmux("display-message", "-p", "-t", "big:0", "#{window_layout}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout = strings.TrimSpace(layout)
+
+	hookLog := filepath.Join(t.TempDir(), "hooks")
+	for _, hook := range []string{"pane-died", "after-kill-pane"} {
+		if _, err := dst.Tmux("set-hook", "-g", hook, "run-shell 'echo "+hook+" >> "+hookLog+"'"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := dst.Tmux("set-option", "-g", "remain-on-exit", "on"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	sizeFile := func(n int) string { return filepath.Join(dir, fmt.Sprintf("size%d", n)) }
+	startup := func(n int) string {
+		return fmt.Sprintf("stty size > %s; exec sleep 30", sizeFile(n))
+	}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "r", Index: 0, Name: "w", Cwd: "/tmp", StartupCommand: startup(0), NewSession: true},
+		restore.SplitPane{Target: "r:0", Cwd: "/tmp", StartupCommand: startup(1)},
+		restore.SetLayout{Window: "r:0", Layout: layout},
+	}
+	t.Setenv("TMUX", dst.Socket+",0,0")
+	failed, err := restore.Apply(context.Background(), tmux.NewClient("tmux"), plan)
+	if err != nil || len(failed) != 0 {
+		t.Fatalf("apply: err=%v failed=%v", err, failed)
+	}
+
+	out, err := dst.Tmux("list-panes", "-t", "r:0", "-F", "#{pane_height} #{pane_width}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSizes := strings.Fields(strings.ReplaceAll(strings.TrimSpace(out), "\n", " "))
+	if len(wantSizes) != 4 {
+		t.Fatalf("list-panes = %q", out)
+	}
+	winSize, err := dst.Tmux("display-message", "-p", "-t", "r:0", "#{window_width}x#{window_height}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(winSize) == "154x40" {
+		t.Fatalf("window kept the saved 154x40 size; the restore must fit it to the current size")
+	}
+
+	for n := 0; n < 2; n++ {
+		var got string
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if b, err := os.ReadFile(sizeFile(n)); err == nil && len(b) > 0 {
+				got = strings.TrimSpace(string(b))
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		want := wantSizes[2*n] + " " + wantSizes[2*n+1]
+		if got != want {
+			t.Errorf("pane %d startup saw size %q, want final %q", n, got, want)
+		}
+	}
+
+	if b, err := os.ReadFile(hookLog); err == nil {
+		t.Errorf("respawn fired close hooks: %q", b)
+	}
+	if v, _ := dst.Tmux("show-options", "-wv", "-t", "r:0", "window-size"); strings.TrimSpace(v) != "" {
+		t.Errorf("window-size left pinned locally: %q", v)
+	}
+}
