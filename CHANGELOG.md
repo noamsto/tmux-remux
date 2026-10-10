@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/noamsto/tmux-remux/compare/v0.7.4...v0.7.5) (2026-10-10)
+
+
+### Bug Fixes
+
+* **restore:** launch pane startup commands after layout and final size ([#180](https://github.com/noamsto/tmux-remux/issues/180)) ([f2e2a39](https://github.com/noamsto/tmux-remux/commit/f2e2a394f6039268251737c6a8a6dd4e1bd3c7a0))
+
 ## [0.7.4](https://github.com/noamsto/tmux-remux/compare/v0.7.3...v0.7.4) (2026-10-05)
 
 
