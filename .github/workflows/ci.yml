@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release-please PRs are opened with GITHUB_TOKEN, so their pull_request runs
+  # stall at action_required; release.yml dispatches CI on the PR branch instead.
+  workflow_dispatch:
 
 jobs:
   test:
