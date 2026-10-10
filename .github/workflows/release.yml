@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   release-please:
@@ -21,6 +22,21 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
+      # PRs opened by GITHUB_TOKEN only get pull_request runs that sit at
+      # action_required, so the required test/lint/build checks never report and
+      # the release PR can't merge. workflow_dispatch is the exception: dispatch
+      # CI on the release PR branch so its check runs land on the PR head.
+      - name: Run CI on the release PR branch
+        if: ${{ steps.rp.outputs.prs_created == 'true' }}
+        # Must not fail the job: goreleaser needs it, and a release can be cut in
+        # the same run that updates the next release PR.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.rp.outputs.pr }}
+        run: |
+          branch=$(jq -r '.headBranchName' <<<"$PR")
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
 
   # Gated on the same workflow run rather than the tag-push event: a tag created
   # by GITHUB_TOKEN does not trigger downstream workflows, so chaining via job

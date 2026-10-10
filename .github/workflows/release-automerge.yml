@@ -2,6 +2,9 @@ name: release-automerge
 
 # Bounds how long a release-please PR can sit unmerged. A GITHUB_TOKEN merge
 # won't trigger release.yml on its own, so we dispatch it explicitly afterwards.
+# Likewise its PR never gets CI from the pull_request event (stuck at
+# action_required), so dispatch ci.yml on the PR branch and merge on a later run
+# once the required checks have passed.
 on:
   schedule:
     - cron: "0 9 * * 1,4" # Mon & Thu, 09:00 UTC
@@ -22,9 +25,23 @@ jobs:
         run: |
           pr=$(gh pr list --repo "$GITHUB_REPOSITORY" \
             --label "autorelease: pending" --state open \
-            --json number --jq '.[0].number')
-          if [ -z "$pr" ]; then
+            --json number,headRefName --jq '.[0] | "\(.number) \(.headRefName)"')
+          if [ -z "$pr" ] || [ "$pr" = "null null" ]; then
             echo "No pending release PR — nothing to merge."
+            exit 0
+          fi
+          read -r pr branch <<<"$pr"
+          # gh pr checks --required exits 8 while checks are pending, 1 on failure
+          # or when none reported yet.
+          rc=0
+          gh pr checks "$pr" --repo "$GITHUB_REPOSITORY" --required >/dev/null || rc=$?
+          if [ "$rc" -eq 8 ]; then
+            echo "Release PR #$pr checks still running — retry on the next run."
+            exit 0
+          elif [ "$rc" -ne 0 ]; then
+            echo "::warning::Release PR #$pr required checks not passing — dispatching CI on $branch."
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch" ||
+              echo "::warning::Could not dispatch ci.yml on $branch (needs workflow_dispatch on that branch)."
             exit 0
           fi
           echo "Merging release PR #$pr"
