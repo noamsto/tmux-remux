@@ -2,7 +2,7 @@
 
 Fast, smart tmux state persistence. A Go replacement for [`tmux-resurrect`](https://github.com/tmux-plugins/tmux-resurrect) and [`tmux-continuum`](https://github.com/tmux-plugins/tmux-continuum), backed by SQLite and content-addressed scrollback files.
 
-> **Status:** pre-release. Personal tool — used and shaped by my workflow. Bug reports welcome; feature requests will be answered with "PR welcome." Tagged releases are on the [releases page](https://github.com/noamsto/tmux-remux/releases).
+> **Status:** 0.x (pre-1.0) — tagged releases are published, but config and CLI behavior may still change, and minor releases may contain breaking changes until 1.0. Personal tool — used and shaped by my workflow. Bug reports welcome; feature requests will be answered with "PR welcome." Tagged releases are on the [releases page](https://github.com/noamsto/tmux-remux/releases).
 
 ![Kill the pane an agent is working in, undo it, and the agent resumes](demo/undo.gif)
 
