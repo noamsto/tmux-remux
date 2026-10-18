@@ -298,6 +298,22 @@ func TestApplyReopenBridgeFailureIsCollected(t *testing.T) {
 	}
 }
 
+func TestApplyReopenBridgeEscapesQuotes(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "shared", Index: 0, Name: "local", Cwd: "/a", NewSession: true},
+		restore.ReopenBridge{Session: "shared", Host: "ha'lo", RemoteSession: "work"},
+	}
+	if _, err := restore.Apply(context.Background(), rt, plan); err != nil {
+		t.Fatal(err)
+	}
+	last := rt.calls[len(rt.calls)-1]
+	want := []string{"run-shell", `og-remote-open 'ha'\''lo' 'work' --into 'shared'`}
+	if diff := cmp.Diff(want, last); diff != "" {
+		t.Errorf("run-shell call mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestApplySkipsReopenBridgeForUncreatedSession(t *testing.T) {
 	rt := &recordingTmux{failFlag: "new-session", failErr: errors.New("create session failed")}
 	plan := []restore.Action{

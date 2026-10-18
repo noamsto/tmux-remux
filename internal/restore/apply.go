@@ -296,7 +296,8 @@ func reenableAutomaticRename(ctx context.Context, t Runner, on bool, target stri
 }
 
 // shellQuote wraps s in single quotes for the shell tmux runs a `run-shell`
-// command in, escaping an embedded single quote as '\”.
+// command in, escaping an embedded single quote the POSIX way (close, escaped
+// quote, reopen).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
