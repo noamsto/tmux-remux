@@ -79,9 +79,8 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 		bridges := map[PlacedBridge]bool{}
 		for _, w := range winsBySess[s.Name] {
 			// A placed bridge mirror renders a remote window: leave it out of the
-			// snapshot and re-open it on restore, never recreate it as an
-			// ordinary local window. Dedicated mirror sessions never reach here —
-			// their session-scoped @bridge_host is caught above.
+			// snapshot and re-open it on restore, never recreate it as an ordinary
+			// local window.
 			if w.BridgeHost != "" || w.BridgePlaced {
 				if w.BridgeHost != "" && w.BridgeSession != "" {
 					bridges[PlacedBridge{Host: w.BridgeHost, RemoteSession: w.BridgeSession}] = true
