@@ -117,10 +117,18 @@ func withSynthesizedTmuxEnv(env []string) []string {
 }
 
 const (
-	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}" + FieldSep + "#{@bridge_host}"
+	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}"
 	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
 	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}" + FieldSep + "#{@remux_relaunch_owner}"
 )
+
+// bridgeWindowOptions are captured by ListWindows in addition to the caller's
+// decoration allow-list. A placed bridge-mirror window stamps its identity
+// window-scoped (og-remote-open --into, tmux-og #985), and snapshot
+// classification reads it per window. show-options -w sees only the
+// window-scoped value, so a dedicated mirror's session-scoped @bridge_host
+// never leaks onto the session's windows.
+var bridgeWindowOptions = []string{"@bridge_host", "@bridge_session", "@bridge_placed"}
 
 // WindowFormat returns the list-windows -F format. Decoration is captured
 // separately via CaptureDecoration, not embedded in this format.
@@ -138,7 +146,37 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseSessions(out)
+	rows, err := ParseSessions(out)
+	if err != nil {
+		return nil, err
+	}
+	// The session-scoped @bridge_host is read with show-options, never a -F
+	// format: a format evaluated at a session resolves the session's current
+	// window first, so a placed mirror window (#985 --into) would leak its
+	// window-scoped host as the session's and a shared session would read as a
+	// dedicated mirror. show-options without -w never sees a window option.
+	for i := range rows {
+		host, err := c.sessionBridgeHost(ctx, rows[i].Name)
+		if errors.Is(err, ErrNoServer) {
+			return nil, nil // server gone mid-read
+		}
+		if err != nil {
+			continue // session closed between the list and this read
+		}
+		rows[i].BridgeHost = host
+	}
+	return rows, nil
+}
+
+// sessionBridgeHost reads session's own @bridge_host with show-options -q,
+// which never resolves through the session's current window. An unset option
+// is an empty value, not an error.
+func (c *Client) sessionBridgeHost(ctx context.Context, session string) (string, error) {
+	out, err := c.Run(ctx, []string{"show-options", "-qv", "-t", session, "@bridge_host"})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // ListWindows runs `tmux list-windows -a -F …` and parses the result, then
@@ -157,12 +195,26 @@ func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 		return nil, err
 	}
 	for i := range rows {
-		dec, err := c.CaptureDecoration(ctx, rows[i].ID, c.decorationOpts, false)
+		names := make([]string, 0, len(c.decorationOpts)+len(bridgeWindowOptions))
+		names = append(names, c.decorationOpts...)
+		names = append(names, bridgeWindowOptions...)
+		dec, err := c.CaptureDecoration(ctx, rows[i].ID, names, false)
 		if errors.Is(err, ErrNoServer) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
+		}
+		// The bridge markers are identity, not decoration: keep them out of
+		// Decoration so restore never re-applies them as window options.
+		rows[i].BridgeHost = dec["@bridge_host"]
+		rows[i].BridgeSession = dec["@bridge_session"]
+		_, rows[i].BridgePlaced = dec["@bridge_placed"]
+		for _, name := range bridgeWindowOptions {
+			delete(dec, name)
+		}
+		if len(dec) == 0 {
+			dec = nil
 		}
 		rows[i].Decoration = dec
 	}

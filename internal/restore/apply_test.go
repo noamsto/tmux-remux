@@ -250,6 +250,74 @@ func TestApplySetOptionPaneRunsSetOption(t *testing.T) {
 	}
 }
 
+func TestApplyReopenBridgeRunsRemoteOpen(t *testing.T) {
+	rt := &recordingTmux{}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "shared", Index: 0, Name: "local", Cwd: "/a", NewSession: true},
+		restore.ReopenBridge{Session: "shared", Host: "halo", RemoteSession: "work"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("unexpected action failures: %v", failed)
+	}
+	last := rt.calls[len(rt.calls)-1]
+	want := []string{"run-shell", "og-remote-open 'halo' 'work' --into 'shared'"}
+	if diff := cmp.Diff(want, last); diff != "" {
+		t.Errorf("run-shell call mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestApplyReopenBridgeFailureIsCollected(t *testing.T) {
+	rt := &recordingTmux{failFlag: "run-shell", failErr: errors.New("run-shell: exit status 127 (stderr: og-remote-open: not found)")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "shared", Index: 0, Name: "local", Cwd: "/a", NewSession: true},
+		restore.ReopenBridge{Session: "shared", Host: "halo", RemoteSession: "work"},
+		restore.SetOption{Target: "shared:0", Name: "@x", Value: "y"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want exactly the ReopenBridge", failed)
+	}
+	if _, ok := failed[0].Action.(restore.ReopenBridge); !ok {
+		t.Errorf("failed action = %T, want restore.ReopenBridge", failed[0].Action)
+	}
+	var ran bool
+	for _, c := range rt.calls {
+		if c[0] == "set-window-option" {
+			ran = true
+		}
+	}
+	if !ran {
+		t.Error("a later action did not run after a ReopenBridge failure")
+	}
+}
+
+func TestApplySkipsReopenBridgeForUncreatedSession(t *testing.T) {
+	rt := &recordingTmux{failFlag: "new-session", failErr: errors.New("create session failed")}
+	plan := []restore.Action{
+		restore.CreateWindow{Session: "shared", Index: 0, Name: "local", Cwd: "/a", NewSession: true},
+		restore.ReopenBridge{Session: "shared", Host: "halo", RemoteSession: "work"},
+	}
+	failed, err := restore.Apply(context.Background(), rt, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %v, want only the failed CreateWindow", failed)
+	}
+	for _, c := range rt.calls {
+		if c[0] == "run-shell" {
+			t.Errorf("run-shell ran for an uncreated session: %v", c)
+		}
+	}
+}
+
 type failingTmux struct {
 	runFn func(args []string) (string, error)
 }

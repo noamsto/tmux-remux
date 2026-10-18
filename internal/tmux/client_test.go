@@ -136,6 +136,62 @@ func TestServerStartTimeParsesSecondsToMillis(t *testing.T) {
 	}
 }
 
+// A session's @bridge_host is read session-scoped with show-options, so a
+// placed mirror window (og-remote-open --into, #985) can never leak its
+// window-scoped host as the session's and misread a shared session as a
+// dedicated mirror.
+func TestListSessionsReadsBridgeHostSessionScoped(t *testing.T) {
+	fake := writeFakeTmux(t, `
+case "$1" in
+  list-sessions) printf 'shared\037123\nhalo-remote\037456\n' ;;
+  show-options)
+    case "$*" in
+      *halo-remote*) printf 'halo\n' ;;
+    esac ;;
+esac
+exit 0`)
+	c := tmux.NewClient(fake)
+	got, err := c.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(got))
+	}
+	if got[0].Name != "shared" || got[0].LastAttached != 123 || got[0].BridgeHost != "" {
+		t.Errorf("got[0] = %+v, want shared/123/no host", got[0])
+	}
+	if got[1].Name != "halo-remote" || got[1].LastAttached != 456 || got[1].BridgeHost != "halo" {
+		t.Errorf("got[1] = %+v, want halo-remote/456/halo", got[1])
+	}
+}
+
+// Window-scoped bridge markers are captured via show-options and kept out of
+// Decoration, so restore never re-applies them as window options.
+func TestListWindowsCapturesBridgeOptionsAndStripsDecoration(t *testing.T) {
+	fake := writeFakeTmux(t, `
+case "$1" in
+  list-windows) printf 'shared\0371\037mirror\037L\037@1\0370\n' ;;
+  show-options) printf '@crew_name atlas\n@bridge_host halo\n@bridge_session work\n@bridge_placed 1\n' ;;
+esac
+exit 0`)
+	c := tmux.NewClient(fake, "@crew_name")
+	got, err := c.ListWindows(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d windows, want 1", len(got))
+	}
+	w := got[0]
+	if w.BridgeHost != "halo" || w.BridgeSession != "work" || !w.BridgePlaced {
+		t.Errorf("bridge fields = (%q,%q,%v), want (halo,work,true)", w.BridgeHost, w.BridgeSession, w.BridgePlaced)
+	}
+	if len(w.Decoration) != 1 || w.Decoration["@crew_name"] != "atlas" {
+		t.Errorf("Decoration = %v, want only @crew_name (bridge keys stripped)", w.Decoration)
+	}
+}
+
 func TestWindowFormatHasNoDecorationFields(t *testing.T) {
 	c := tmux.NewClient("tmux", "@crew_name", "@crew_color")
 	if strings.Contains(c.WindowFormat(), "#{@") {
