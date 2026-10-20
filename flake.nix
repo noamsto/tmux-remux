@@ -37,8 +37,8 @@
         configureFlags =
           old.configureFlags
           ++ ["--disable-asan"]
-          ++ pkgs.lib.optionals pkgs.stdenv.isDarwin ["--enable-jemalloc"];
-        buildInputs = old.buildInputs ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [pkgs.jemalloc];
+          ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin ["--enable-jemalloc"];
+        buildInputs = old.buildInputs ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [pkgs.jemalloc];
       });
 
     # Single source of truth for the version, bumped by release-please on each
