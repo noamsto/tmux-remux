@@ -195,6 +195,47 @@ func TestBuildSkipsBridgeSessions(t *testing.T) {
 	}
 }
 
+// A placed bridge mirror (og-remote-open --into, #985) is identified
+// window-scoped: a shared session keeps its local windows and records the
+// mirror's (host, remote session) pair, while a dedicated mirror session is
+// still omitted whole. A placeholder window (placed marker, no host) is left
+// out without inventing a pair.
+func TestBuildClassifiesPlacedBridgeWindows(t *testing.T) {
+	fc := &fakeClient{
+		sessions: []tmux.SessionRow{
+			{Name: "shared", LastAttached: 5},
+			{Name: "dedicated", BridgeHost: "halo"},
+		},
+		windows: []tmux.WindowRow{
+			{Session: "shared", Index: 0, Name: "local"},
+			{Session: "shared", Index: 1, Name: "mirror", BridgeHost: "halo", BridgeSession: "work", BridgePlaced: true},
+			{Session: "shared", Index: 2, Name: "placeholder", BridgePlaced: true},
+			{Session: "dedicated", Index: 0},
+		},
+		panes: []tmux.PaneRow{
+			{Session: "shared", WindowIndex: 0, PaneIndex: 0, Cwd: "/a"},
+			{Session: "shared", WindowIndex: 1, PaneIndex: 0, Cwd: "/b"},
+			{Session: "dedicated", WindowIndex: 0, PaneIndex: 0, Cwd: "/c"},
+		},
+	}
+	m, err := snapshot.Build(context.Background(), fc, "h", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Sessions) != 1 || m.Sessions[0].Name != "shared" {
+		t.Fatalf("sessions = %+v, want only shared", m.Sessions)
+	}
+	if got := m.Sessions[0].Windows; len(got) != 1 || got[0].Index != 0 {
+		t.Errorf("Windows = %+v, want only the local window index 0", got)
+	}
+	if got := m.Sessions[0].PlacedBridges; len(got) != 1 || got[0].Host != "halo" || got[0].RemoteSession != "work" {
+		t.Errorf("PlacedBridges = %+v, want [{halo work}]", got)
+	}
+	if len(m.Bridged) != 1 || m.Bridged[0] != "dedicated" {
+		t.Errorf("Bridged = %v, want [dedicated]", m.Bridged)
+	}
+}
+
 func TestBuildPopulatesChildCountFromPID(t *testing.T) {
 	// Use the current process PID as a sentinel — it has at least 0 children
 	// and we can verify the field is set (not whatever the zero value is from

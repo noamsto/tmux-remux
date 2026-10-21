@@ -75,6 +75,18 @@ type SetOption struct {
 
 func (SetOption) isAction() {}
 
+// ReopenBridge re-runs the remote-bridge launcher for a placed mirror after a
+// server restart: the local session's ordinary windows are recreated from the
+// snapshot, and og-remote-open --into re-places the mirror's windows from the
+// remote instead of restoring the renderer's local panes as ordinary windows.
+type ReopenBridge struct {
+	Session       string // local session the mirror was placed into
+	Host          string
+	RemoteSession string
+}
+
+func (ReopenBridge) isAction() {}
+
 // BuildOptions carries the values needed to compose StartupCommands. Resolved
 // once per restore by the caller.
 type BuildOptions struct {
@@ -242,6 +254,10 @@ func BuildPlan(m snapshot.Manifest, f filter.Filter, runningSessions map[string]
 		}
 		if sessionStarted {
 			stats.SessionsKept++
+			// Build already deduped and sorted the pairs; one reopen per pair.
+			for _, b := range sess.PlacedBridges {
+				plan = append(plan, ReopenBridge{Session: sess.Name, Host: b.Host, RemoteSession: b.RemoteSession})
+			}
 		} else if len(sess.Windows) > 0 {
 			stats.SessionsSkippedIdle++
 		}

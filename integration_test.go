@@ -44,7 +44,7 @@ func (s scopedTmux) Run(ctx context.Context, args []string) (string, error) {
 	return string(out), nil
 }
 func (s scopedTmux) ListSessions(ctx context.Context) ([]tmux.SessionRow, error) {
-	out, err := s.Run(ctx, []string{"list-sessions", "-F", "#{session_name}\x1f#{session_last_attached}\x1f#{@bridge_host}"})
+	out, err := s.Run(ctx, []string{"list-sessions", "-F", "#{session_name}\x1f#{session_last_attached}"})
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
@@ -69,6 +69,95 @@ func (s scopedTmux) ListPanes(ctx context.Context) ([]tmux.PaneRow, error) {
 func (s scopedTmux) CapturePane(ctx context.Context, target string) ([]byte, error) {
 	out, err := s.Run(ctx, []string{"capture-pane", "-pJ", "-t", target, "-S", "-"})
 	return []byte(out), err
+}
+
+// TestSnapshotClassifiesPlacedBridgeWindows covers both shared-session shapes
+// (#188) through the production read path: a real tmux.Client reading a scratch
+// -L server. A shared session whose current window is a placed mirror is still
+// a local session, its mirror window is omitted, and the (host, remote-session)
+// pair is recorded for restore; a dedicated mirror session is omitted whole.
+func TestSnapshotClassifiesPlacedBridgeWindows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	srv := testutil.StartServerL(t)
+
+	if _, err := srv.Tmux("new-session", "-d", "-s", "shared", "-n", "local", "-x", "80", "-y", "24"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.Tmux("new-window", "-t", "shared", "-n", "mirror"); err != nil {
+		t.Fatal(err)
+	}
+	for _, opt := range [][2]string{
+		{"@bridge_host", "halo"},
+		{"@bridge_session", "work"},
+		{"@bridge_placed", "1"},
+	} {
+		if _, err := srv.Tmux("set-option", "-w", "-t", "shared:1", opt[0], opt[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := srv.Tmux("new-session", "-d", "-s", "halo-remote", "-n", "mirror", "-x", "80", "-y", "24"); err != nil {
+		t.Fatal(err)
+	}
+	for _, opt := range [][2]string{
+		{"@bridge_host", "halo"},
+		{"@bridge_session", "work"},
+	} {
+		if _, err := srv.Tmux("set-option", "-t", "halo-remote", opt[0], opt[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The real tmux.Client finds the scratch server through $TMUX.
+	t.Setenv("TMUX", srv.Socket+",0,0")
+	client := tmux.NewClient("tmux")
+	ctx := context.Background()
+
+	check := func(m snapshot.Manifest) {
+		t.Helper()
+		var shared *snapshot.Session
+		for i := range m.Sessions {
+			if m.Sessions[i].Name == "shared" {
+				shared = &m.Sessions[i]
+			}
+			if m.Sessions[i].Name == "halo-remote" {
+				t.Errorf("dedicated mirror session leaked into Sessions: %+v", m.Sessions[i])
+			}
+		}
+		if shared == nil {
+			t.Fatalf("shared session missing; sessions=%+v bridged=%v", m.Sessions, m.Bridged)
+		}
+		if len(shared.Windows) != 1 || shared.Windows[0].Index != 0 {
+			t.Errorf("shared.Windows = %+v, want only the local window 0", shared.Windows)
+		}
+		if len(shared.PlacedBridges) != 1 || shared.PlacedBridges[0].Host != "halo" || shared.PlacedBridges[0].RemoteSession != "work" {
+			t.Errorf("shared.PlacedBridges = %+v, want [{halo work}]", shared.PlacedBridges)
+		}
+		if len(m.Bridged) != 1 || m.Bridged[0] != "halo-remote" {
+			t.Errorf("Bridged = %v, want [halo-remote]", m.Bridged)
+		}
+	}
+
+	// Shape 1: the placed mirror is the current window.
+	if _, err := client.Run(ctx, []string{"select-window", "-t", "shared:1"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := snapshot.Build(ctx, client, "h", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(m)
+
+	// Shape 2: the local window is current.
+	if _, err := client.Run(ctx, []string{"select-window", "-t", "shared:0"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = snapshot.Build(ctx, client, "h", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(m)
 }
 
 func TestSaveRestoreRoundtrip(t *testing.T) {

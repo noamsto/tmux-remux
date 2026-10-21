@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"sort"
 
 	"golang.org/x/sync/errgroup"
 
@@ -75,7 +76,17 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 			continue
 		}
 		sess := Session{Name: s.Name, LastAttached: s.LastAttached}
+		bridges := map[PlacedBridge]bool{}
 		for _, w := range winsBySess[s.Name] {
+			// A placed bridge mirror renders a remote window: leave it out of the
+			// snapshot and re-open it on restore, never recreate it as an ordinary
+			// local window.
+			if w.BridgeHost != "" || w.BridgePlaced {
+				if w.BridgeHost != "" && w.BridgeSession != "" {
+					bridges[PlacedBridge{Host: w.BridgeHost, RemoteSession: w.BridgeSession}] = true
+				}
+				continue
+			}
 			layout := w.Layout
 			if normalized, err := tmux.NormalizeLayout(layout); err == nil {
 				layout = normalized
@@ -104,7 +115,27 @@ func Build(ctx context.Context, l Lister, host string, savedAt int64) (Manifest,
 			}
 			sess.Windows = append(sess.Windows, win)
 		}
+		sess.PlacedBridges = sortedPlacedBridges(bridges)
 		m.Sessions = append(m.Sessions, sess)
 	}
 	return m, nil
+}
+
+// sortedPlacedBridges returns the pairs as a stable, deduped slice: Build owns
+// the dedup, so restore appends one ReopenBridge per entry.
+func sortedPlacedBridges(set map[PlacedBridge]bool) []PlacedBridge {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]PlacedBridge, 0, len(set))
+	for b := range set {
+		out = append(out, b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Host != out[j].Host {
+			return out[i].Host < out[j].Host
+		}
+		return out[i].RemoteSession < out[j].RemoteSession
+	})
+	return out
 }

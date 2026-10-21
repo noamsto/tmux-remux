@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// bridgeLauncher is the tmux-og script that re-places a remote session's mirror
+// windows into a local session.
+const bridgeLauncher = "og-remote-open"
+
 // Runner is the subset of tmux.Client used by Apply (lets tests inject a fake).
 type Runner interface {
 	Run(ctx context.Context, args []string) (string, error)
@@ -57,6 +61,9 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]FailedAction, error)
 	// SetLayout aimed at the same index would still run and land on whatever
 	// unrelated live window happens to sit there.
 	failedWindows := map[string]bool{}
+	// createdSessions records the sessions this plan actually created, so a
+	// ReopenBridge is never aimed at a session whose CreateWindow failed.
+	createdSessions := map[string]bool{}
 	for _, a := range plan {
 		switch v := a.(type) {
 		case CreateWindow:
@@ -67,6 +74,7 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]FailedAction, error)
 				failedWindows[target] = true
 				continue
 			}
+			createdSessions[v.Session] = true
 			if paneID == "" && v.StartupCommand != "" {
 				failed = append(failed, FailedAction{Action: a, Err: fmt.Errorf("new-window %s: no pane id reported", target)})
 				continue
@@ -104,6 +112,16 @@ func Apply(ctx context.Context, t Runner, plan []Action) ([]FailedAction, error)
 				flags = "-pq"
 			}
 			if _, err := t.Run(ctx, []string{cmd, flags, "-t", v.Target, v.Name, v.Value}); err != nil {
+				failed = append(failed, FailedAction{Action: a, Err: err})
+			}
+		case ReopenBridge:
+			if !createdSessions[v.Session] {
+				// The session was filtered out or its window never arrived;
+				// there is nothing to place the mirror into.
+				continue
+			}
+			cmd := bridgeLauncher + " " + shellQuote(v.Host) + " " + shellQuote(v.RemoteSession) + " --into " + shellQuote(v.Session)
+			if _, err := t.Run(ctx, []string{"run-shell", cmd}); err != nil {
 				failed = append(failed, FailedAction{Action: a, Err: err})
 			}
 		default:
@@ -275,4 +293,11 @@ func reenableAutomaticRename(ctx context.Context, t Runner, on bool, target stri
 		return
 	}
 	_, _ = t.Run(ctx, []string{"set-window-option", "-t", target, "automatic-rename", "on"})
+}
+
+// shellQuote wraps s in single quotes for the shell tmux runs a `run-shell`
+// command in, escaping an embedded single quote the POSIX way (close, escaped
+// quote, reopen).
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

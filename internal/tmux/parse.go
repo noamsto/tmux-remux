@@ -14,11 +14,13 @@ const FieldSep = "\x1f"
 type SessionRow struct {
 	Name         string
 	LastAttached int64
-	BridgeHost   string // @bridge_host session option; non-empty means this session is a lazytmux remote-bridge mirror
+	BridgeHost   string // session-scoped @bridge_host; non-empty marks a dedicated bridge-mirror session
 }
 
 // ParseSessions parses the output of
-// `tmux list-sessions -F "<name>\x1f<last_attached>\x1f<@bridge_host>"`.
+// `tmux list-sessions -F "<name>\x1f<last_attached>"`. BridgeHost is filled by
+// Client.ListSessions, which reads it session-scoped (show-options), never from
+// this -F output — a session format resolves the current window first.
 func ParseSessions(s string) ([]SessionRow, error) {
 	if s == "" {
 		return nil, nil
@@ -26,14 +28,14 @@ func ParseSessions(s string) ([]SessionRow, error) {
 	var out []SessionRow
 	for i, line := range splitLines(s) {
 		fields := strings.Split(line, FieldSep)
-		if len(fields) != 3 {
-			return nil, fmt.Errorf("line %d: expected 3 fields, got %d (%q)", i+1, len(fields), line)
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("line %d: expected 2 fields, got %d (%q)", i+1, len(fields), line)
 		}
 		la, err := parseIntOrZero(fields[1])
 		if err != nil {
 			return nil, fmt.Errorf("line %d: parse last_attached: %w", i+1, err)
 		}
-		out = append(out, SessionRow{Name: fields[0], LastAttached: la, BridgeHost: fields[2]})
+		out = append(out, SessionRow{Name: fields[0], LastAttached: la})
 	}
 	return out, nil
 }
@@ -52,9 +54,17 @@ type WindowRow struct {
 	Index           int
 	Name            string
 	Layout          string
-	ID              string            // tmux window id, e.g. "@4"
-	AutomaticRename bool              // #{E:automatic-rename} == "1"
-	Decoration      map[string]string // allow-listed options captured via show-options -qv; nil when none set
+	ID              string // tmux window id, e.g. "@4"
+	AutomaticRename bool   // #{E:automatic-rename} == "1"
+	// BridgeHost, BridgeSession and BridgePlaced are the window-scoped
+	// @bridge_host/@bridge_session/@bridge_placed a placed bridge mirror
+	// carries (og-remote-open --into, tmux-og #985). ListWindows captures them
+	// with show-options -w, so a dedicated mirror's session-scoped @bridge_host
+	// never appears here.
+	BridgeHost    string
+	BridgeSession string
+	BridgePlaced  bool
+	Decoration    map[string]string // allow-listed options captured via show-options -qv; nil when none set
 }
 
 // ParseWindows parses tmux list-windows -F output (baseWindowFormat only;

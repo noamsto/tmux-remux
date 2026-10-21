@@ -379,6 +379,41 @@ func TestBuildPlanNoDecorationNoSetOption(t *testing.T) {
 	}
 }
 
+// A placed bridge mirror is re-opened by re-running the launcher once per
+// (host, remote session) pair, after the session's own windows exist.
+func TestBuildPlanReopensPlacedBridges(t *testing.T) {
+	m := snapshot.Manifest{
+		Sessions: []snapshot.Session{{
+			Name: "shared",
+			Windows: []snapshot.Window{{
+				Index: 0, Name: "local", Layout: "L",
+				Panes: []snapshot.Pane{{Index: 0, Cwd: "/a", Command: "nvim", ChildCount: 1}},
+			}},
+			PlacedBridges: []snapshot.PlacedBridge{
+				{Host: "a", RemoteSession: "x"},
+				{Host: "b", RemoteSession: "y"},
+			},
+		}},
+	}
+	plan, _ := restore.BuildPlan(m, filter.Filter{}, nil, defaultOpts)
+	var got []restore.ReopenBridge
+	for _, a := range plan {
+		if rb, ok := a.(restore.ReopenBridge); ok {
+			got = append(got, rb)
+		}
+	}
+	want := []restore.ReopenBridge{
+		{Session: "shared", Host: "a", RemoteSession: "x"},
+		{Session: "shared", Host: "b", RemoteSession: "y"},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ReopenBridge mismatch (-want +got):\n%s", diff)
+	}
+	if _, ok := plan[len(plan)-1].(restore.ReopenBridge); !ok {
+		t.Errorf("last plan action = %T, want ReopenBridge", plan[len(plan)-1])
+	}
+}
+
 // Mirrors are kept out of new snapshots, but an older snapshot still holds
 // them — it predates the exclusion, or the bridge, or the option. Restoring
 // one recreates a fake mirror session full of the renderer's local shells, so

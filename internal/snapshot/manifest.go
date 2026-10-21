@@ -50,6 +50,19 @@ type Session struct {
 	Name         string   `json:"name"`
 	LastAttached int64    `json:"last_attached"`
 	Windows      []Window `json:"windows"`
+	// PlacedBridges records the remote-bridge mirrors placed into this session
+	// by og-remote-open --into, one entry per deduped (host, remote session)
+	// pair. Build leaves their renderer windows out of Windows and restore
+	// re-opens them with og-remote-open --into instead of recreating them as
+	// ordinary local windows. Absent from snapshots written before it existed.
+	PlacedBridges []PlacedBridge `json:"placed_bridges,omitempty"`
+}
+
+// PlacedBridge is one remote-bridge mirror placed into a local session:
+// `og-remote-open <Host> <RemoteSession> --into <session>` re-creates it.
+type PlacedBridge struct {
+	Host          string `json:"host"`
+	RemoteSession string `json:"remote_session"`
 }
 
 // Window captures one tmux window's structure within a session.
@@ -122,6 +135,9 @@ func (m Manifest) StructureFingerprint() string {
 	var ids []string
 	for _, s := range m.Sessions {
 		ids = append(ids, "s\x1f"+s.Name)
+		for _, b := range s.PlacedBridges {
+			ids = append(ids, "b\x1f"+b.Host+"\x1f"+b.RemoteSession)
+		}
 		for _, w := range s.Windows {
 			ids = append(ids, fmt.Sprintf("w\x1f%s\x1f%d", w.ID, w.Index))
 			for _, p := range w.Panes {
