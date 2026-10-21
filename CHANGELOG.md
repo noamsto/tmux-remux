@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/noamsto/tmux-remux/compare/v0.7.5...v0.7.6) (2026-10-21)
+
+
+### Bug Fixes
+
+* **persist:** detect bridge mirror windows per window ([#188](https://github.com/noamsto/tmux-remux/issues/188)) ([#189](https://github.com/noamsto/tmux-remux/issues/189)) ([0ec7640](https://github.com/noamsto/tmux-remux/commit/0ec7640796d4c84a47e999078467707e142c4595))
+
 ## [0.7.5](https://github.com/noamsto/tmux-remux/compare/v0.7.4...v0.7.5) (2026-10-10)
 
 
