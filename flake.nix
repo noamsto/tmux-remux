@@ -57,6 +57,8 @@
         self',
         ...
       }: {
+        pre-commit.settings.package = pkgs.prek;
+
         pre-commit.settings.hooks = {
           gofmt.enable = true;
           govet = {
