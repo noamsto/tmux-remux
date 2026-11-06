@@ -23,7 +23,6 @@ jobs:
       - uses: cachix/cachix-action@v17
         with:
           name: lazytmux
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix develop --command go test -tags=integration -race ./...
 
   lint:
@@ -50,7 +49,6 @@ jobs:
       - uses: cachix/cachix-action@v17
         with:
           name: lazytmux
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix develop --command nilaway -test=false -include-pkgs=github.com/noamsto/tmux-remux ./...
 
   build:
@@ -64,5 +62,4 @@ jobs:
       - uses: cachix/cachix-action@v17
         with:
           name: lazytmux
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix build .
