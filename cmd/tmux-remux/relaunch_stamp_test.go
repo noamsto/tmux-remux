@@ -21,6 +21,13 @@ type fakeSetter struct {
 	panePID      int
 	defaultShell string
 	paneErr      error
+
+	options map[string]string
+	optErr  error
+}
+
+func (f *fakeSetter) PaneOption(_ context.Context, _, name string) (string, error) {
+	return f.options[name], f.optErr
 }
 
 func (f *fakeSetter) SetPaneOption(_ context.Context, pane, name, value string) error {
@@ -410,4 +417,39 @@ func TestRelaunchOwner(t *testing.T) {
 			}
 		})
 	}
+}
+
+func pinnedSetter() *fakeSetter {
+	return &fakeSetter{options: map[string]string{relaunchPinnedOption: "1"}}
+}
+
+func TestRelaunchStampPinnedPaneIsUntouched(t *testing.T) {
+	for _, opts := range []relaunchStampOpts{
+		{agent: "claude", pane: "%3"},
+		{agent: "codex", pane: "%3"},
+		{cmdTemplate: "mytool --resume {id}", pane: "%3"},
+		{pane: "%3", clear: true},
+		{agent: "bogus", pane: "%3"},
+	} {
+		f := runWith(t, pinnedSetter(), `{"session_id":"abc-123"}`, opts)
+		assertCalls(t, f.calls)
+	}
+}
+
+func TestRelaunchStampPinReadErrorStillStamps(t *testing.T) {
+	f := pinnedSetter()
+	f.optErr = errors.New("no pane")
+	runWith(t, f, `{"session_id":"abc-123"}`, relaunchStampOpts{agent: "claude", pane: "%3"})
+	assertCalls(t, f.calls,
+		setCall{"%3", "@remux_relaunch_owner", ""},
+		setCall{"%3", "@remux_relaunch", "claude --resume abc-123"})
+}
+
+func TestRelaunchStampPinReadErrorStillClears(t *testing.T) {
+	f := pinnedSetter()
+	f.optErr = errors.New("no pane")
+	runWith(t, f, ``, relaunchStampOpts{pane: "%3", clear: true})
+	assertCalls(t, f.calls,
+		setCall{"%3", "@remux_relaunch_owner", ""},
+		setCall{"%3", "@remux_relaunch", ""})
 }

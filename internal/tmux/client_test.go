@@ -358,6 +358,29 @@ func TestSetPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
 	}
 }
 
+func TestPaneOptionIssuesQuietPaneScopedArgs(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	fake := writeFakeTmux(t, fmt.Sprintf(`printf '%%s\n' "$@" > %s; echo " 1 "`, argsFile))
+	c := tmux.NewClient(fake)
+
+	got, err := c.PaneOption(context.Background(), "%3", "@remux_relaunch_pinned")
+	if err != nil {
+		t.Fatalf("PaneOption: %v", err)
+	}
+	if got != "1" {
+		t.Errorf("value = %q, want %q", got, "1")
+	}
+
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "show-options\n-pqv\n-t\n%3\n@remux_relaunch_pinned\n"
+	if string(args) != want {
+		t.Errorf("tmux args =\n%q\nwant\n%q", args, want)
+	}
+}
+
 // writeFakeTmux drops a tiny shell script in t.TempDir whose body is `body`
 // and returns its path so tests can use it as the Client binary.
 //
