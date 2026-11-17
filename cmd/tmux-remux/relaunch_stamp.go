@@ -17,6 +17,10 @@ import (
 
 const relaunchOption = "@remux_relaunch"
 
+// relaunchPinnedOption is set by a tool that manages @remux_relaunch itself;
+// while non-empty, relaunch-stamp leaves the pane's options alone.
+const relaunchPinnedOption = "@remux_relaunch_pinned"
+
 // relaunchOwnerOption binds @remux_relaunch to the process that owns it, so
 // snapshot.Build can drop a stamp that outlived its agent.
 const relaunchOwnerOption = "@remux_relaunch_owner"
@@ -47,6 +51,7 @@ var relaunchPresets = map[string]relaunchPreset{
 // can assert the (pane, name, value) triple without a real tmux server.
 type paneOptionSetter interface {
 	SetPaneOption(ctx context.Context, pane, name, value string) error
+	PaneOption(ctx context.Context, pane, name string) (string, error)
 	PaneProcess(ctx context.Context, pane string) (int, string, error)
 }
 
@@ -191,12 +196,17 @@ func (c RelaunchStampCmd) Run() error {
 // is written first so a capture between the two writes sees a record bound to
 // a different stamp, which counts as owner-less rather than stale. It no-ops
 // (returns nil) with no pane, or (stamp mode) when no session id is present —
-// it must never fail a start hook. Only a wiring bug (unknown --agent and no
-// --cmd) returns an error. The SetPaneOption error is intentionally swallowed:
+// it must never fail a start hook. A pane whose @remux_relaunch_pinned is set
+// exits 0 before --agent is validated and its options stay untouched. Only a
+// wiring bug (unknown --agent and no --cmd) returns an error. The SetPaneOption error is intentionally swallowed:
 // the pane may have vanished between the hook firing and this call
 // (SetPaneOption already uses -q).
 func runRelaunchStamp(ctx context.Context, setter paneOptionSetter, r io.Reader, opts relaunchStampOpts) error {
 	if opts.pane == "" {
+		return nil
+	}
+	// A read error counts as unpinned: fail open so a hook still stamps.
+	if pinned, err := setter.PaneOption(ctx, opts.pane, relaunchPinnedOption); err == nil && pinned != "" {
 		return nil
 	}
 	if opts.clear {

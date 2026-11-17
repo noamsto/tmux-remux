@@ -338,6 +338,16 @@ func (c *Client) PaneProcess(ctx context.Context, pane string) (pid int, default
 	return pid, defaultShell, nil
 }
 
+// PaneOption reads a pane-scoped option with show-options -pqv. An unset
+// option is an empty value, not an error.
+func (c *Client) PaneOption(ctx context.Context, pane, name string) (string, error) {
+	out, err := c.Run(ctx, []string{"show-options", "-pqv", "-t", pane, name})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // SetPaneOption sets a pane-scoped option (tmux set-option -p). The -q flag
 // keeps it quiet: a pane that vanished between a hook firing and this call must
 // not surface an error to the caller. Pass value="" to unset.

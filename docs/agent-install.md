@@ -97,6 +97,13 @@ but one left on a pane that went on to run another program is still replayed.
 Clear it yourself when your session ends: `tmux set -p @remux_relaunch ""`, or
 tie it to a `SessionEnd`-equivalent hook.
 
+If other tools' `relaunch-stamp` hooks run in your pane, also set
+`tmux set -p @remux_relaunch_pinned 1`: while set, `relaunch-stamp` neither
+stamps nor clears there. Also run `tmux set -p @remux_relaunch_owner ""` when
+pinning, so an earlier hook's owner record can't judge your stamp. Clear both
+options on exit; the pin is not captured or
+restored, so your restored command should re-stamp and re-pin.
+
 ## 5. Verify
 
 ```bash
