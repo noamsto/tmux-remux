@@ -97,7 +97,7 @@
             version = releaseVersion;
             src = ./.;
             ldflags = ["-s" "-w" "-X main.Version=${releaseVersion}"];
-            vendorHash = "sha256-L5xNenLz4SClxn4urFv9NXEbc65u3M3UCAyCEphqOU4=";
+            vendorHash = "sha256-thkQTf/ZnKfFXGcVDT9kzQZchYlwbY8P9JRp8RlNLbM=";
             subPackages = ["cmd/tmux-remux"];
             doCheck = true;
             meta = {
