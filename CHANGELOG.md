@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/noamsto/tmux-remux/compare/v0.7.5...v0.8.0) (2026-11-17)
+
+
+### Features
+
+* **relaunch-stamp:** let tools pin their [@remux](https://github.com/remux)_relaunch stamp ([#204](https://github.com/noamsto/tmux-remux/issues/204)) ([d2a7f6a](https://github.com/noamsto/tmux-remux/commit/d2a7f6a2da6b0828e927c20b34eb3cfedf1a1129))
+
+
+### Bug Fixes
+
+* **persist:** detect bridge mirror windows per window ([#188](https://github.com/noamsto/tmux-remux/issues/188)) ([#189](https://github.com/noamsto/tmux-remux/issues/189)) ([0ec7640](https://github.com/noamsto/tmux-remux/commit/0ec7640796d4c84a47e999078467707e142c4595))
+
 ## [0.7.5](https://github.com/noamsto/tmux-remux/compare/v0.7.4...v0.7.5) (2026-10-10)
 
 
