@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -926,6 +927,40 @@ type ListCmd struct {
 	JSON bool `name:"json" help:"emit one JSON object per line (newline-delimited)"`
 }
 
+// listEventRow freezes the wire format for `tmux-remux list --json`.
+// Field names match store.Event's prior default Go JSON encoding so external
+// consumers (e.g. tmux-og) see byte-identical NDJSON output.
+type listEventRow struct {
+	ID            int64  `json:"ID"`
+	Ts            int64  `json:"Ts"`
+	Kind          string `json:"Kind"`
+	Scope         string `json:"Scope"`
+	Reason        string `json:"Reason"`
+	Host          string `json:"Host"`
+	ParentEventID *int64 `json:"ParentEventID"`
+	ManifestJSON  string `json:"ManifestJSON"`
+}
+
+func writeListJSON(w io.Writer, evs []store.Event) error {
+	enc := json.NewEncoder(w)
+	for _, ev := range evs {
+		row := listEventRow{
+			ID:            ev.ID,
+			Ts:            ev.Ts,
+			Kind:          ev.Kind,
+			Scope:         ev.Scope,
+			Reason:        ev.Reason,
+			Host:          ev.Host,
+			ParentEventID: ev.ParentEventID,
+			ManifestJSON:  ev.ManifestJSON,
+		}
+		if err := enc.Encode(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c ListCmd) Run() error {
 	return withStore(func(ctx context.Context, _ config.Config, db *store.Store) error {
 		evs, err := db.ListEvents(ctx, store.ListOpts{Limit: 100})
@@ -933,13 +968,7 @@ func (c ListCmd) Run() error {
 			return err
 		}
 		if c.JSON {
-			enc := json.NewEncoder(os.Stdout)
-			for _, ev := range evs {
-				if err := enc.Encode(ev); err != nil {
-					return err
-				}
-			}
-			return nil
+			return writeListJSON(os.Stdout, evs)
 		}
 		for _, ev := range evs {
 			t := time.UnixMilli(ev.Ts).Format("2006-01-02 15:04:05")

@@ -1,0 +1,2 @@
+{"ID":1,"Ts":1700000000000,"Kind":"snapshot","Scope":"server","Reason":"periodic","Host":"host-a","ParentEventID":null,"ManifestJSON":"{\"v\":1,\"host\":\"host-a\",\"saved_at\":1700000000000,\"sessions\":[]}"}
+{"ID":2,"Ts":1700000060000,"Kind":"close","Scope":"pane","Reason":"pane_closed","Host":"host-a","ParentEventID":1,"ManifestJSON":"{\"v\":1,\"host\":\"host-a\",\"saved_at\":1700000060000,\"sessions\":[]}"}
