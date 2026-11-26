@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/noamsto/tmux-remux/compare/v0.8.0...v0.9.0) (2026-11-26)
+
+
+### Features
+
+* **manifest:** publish snapshot manifest as pkg/manifest with golden list --json fixture ([#218](https://github.com/noamsto/tmux-remux/issues/218)) ([b3b8381](https://github.com/noamsto/tmux-remux/commit/b3b83819c1a614b48b726afb88055e94396939c3))
+
 ## [0.8.0](https://github.com/noamsto/tmux-remux/compare/v0.7.5...v0.8.0) (2026-11-17)
 
 
