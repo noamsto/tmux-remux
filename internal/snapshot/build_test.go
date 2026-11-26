@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 type fakeClient struct {

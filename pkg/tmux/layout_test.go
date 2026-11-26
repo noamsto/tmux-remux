@@ -3,7 +3,7 @@ package tmux_test
 import (
 	"testing"
 
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 func TestNormalizeLayout(t *testing.T) {

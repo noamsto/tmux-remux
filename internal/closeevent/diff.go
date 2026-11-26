@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/noamsto/tmux-remux/internal/snapshot"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 // CloseManifest is the unmarshalled close-event ManifestJSON payload.

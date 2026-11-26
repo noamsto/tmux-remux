@@ -10,7 +10,7 @@ import (
 	"github.com/noamsto/tmux-remux/internal/picker"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 func TestPartitionRecoverable(t *testing.T) {

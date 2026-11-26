@@ -12,7 +12,7 @@ import (
 
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 const relaunchOption = "@remux_relaunch"

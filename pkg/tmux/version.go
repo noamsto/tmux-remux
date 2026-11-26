@@ -16,6 +16,7 @@ type Version struct {
 	Minor int
 }
 
+// String formats v as "major.minor".
 func (v Version) String() string { return fmt.Sprintf("%d.%d", v.Major, v.Minor) }
 
 // AtLeast reports whether v is major.minor or newer.
