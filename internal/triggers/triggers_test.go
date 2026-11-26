@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/noamsto/tmux-remux/internal/tmux"
 	"github.com/noamsto/tmux-remux/internal/triggers"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

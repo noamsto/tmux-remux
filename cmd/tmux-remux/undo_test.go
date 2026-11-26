@@ -15,7 +15,7 @@ import (
 	"github.com/noamsto/tmux-remux/internal/restore"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 func TestUndoFailuresDemotesOnlySetLayout(t *testing.T) {

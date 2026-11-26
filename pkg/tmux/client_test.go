@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 func TestRunReturnsStdoutTrimmed(t *testing.T) {

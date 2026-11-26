@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 func TestParseVersion(t *testing.T) {

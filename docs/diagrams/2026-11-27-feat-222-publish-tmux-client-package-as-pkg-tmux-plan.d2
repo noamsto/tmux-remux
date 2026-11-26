@@ -1,0 +1,28 @@
+direction: right
+
+pkg_tmux: "pkg/tmux (public API)" {
+  style.stroke: "#228833"
+  client: "client.go\nClient, ListSessions/Windows/Panes"
+  parse: "parse.go\nSessionRow, WindowRow, PaneRow"
+  layout: "layout.go\nNormalizeLayout"
+  options: "options.go\nGlobalOptions, ParseOptionLines"
+  version: "version.go\nVersion, ParseVersion, String()"
+}
+
+callers: "tmux-remux callers (migrated)" {
+  cmd: "cmd/tmux-remux"
+  snapshot: "internal/snapshot"
+  restore: "internal/restore"
+  closeevent: "internal/closeevent"
+  picker: "internal/picker"
+  triggers: "internal/triggers"
+}
+
+external: "houston (external module)" {
+  style.stroke: "#228833"
+}
+
+callers -> pkg_tmux: "imports"
+external -> pkg_tmux: "imports" {
+  style.stroke: "#228833"
+}

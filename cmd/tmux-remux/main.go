@@ -26,8 +26,8 @@ import (
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
-	"github.com/noamsto/tmux-remux/internal/tmux"
 	"github.com/noamsto/tmux-remux/internal/triggers"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 // Version is the released version. release-please bumps the annotated value on

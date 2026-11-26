@@ -9,7 +9,7 @@ import (
 
 	"github.com/noamsto/tmux-remux/internal/filter"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 // Action is one step of a restore plan. Concrete types are in this file.

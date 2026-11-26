@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/noamsto/tmux-remux/internal/tmux"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
 
 // Params configures a render.

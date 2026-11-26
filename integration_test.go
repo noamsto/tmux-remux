@@ -23,8 +23,8 @@ import (
 	"github.com/noamsto/tmux-remux/internal/scrollback"
 	"github.com/noamsto/tmux-remux/internal/snapshot"
 	"github.com/noamsto/tmux-remux/internal/store"
-	"github.com/noamsto/tmux-remux/internal/tmux"
 	"github.com/noamsto/tmux-remux/internal/triggers"
+	"github.com/noamsto/tmux-remux/pkg/tmux"
 	"github.com/noamsto/tmux-remux/testutil"
 )
 
@@ -622,7 +622,7 @@ func TestRelaunchStampOwnerUnderShell(t *testing.T) {
 // resulting restore plan against a fresh server and confirms the options
 // land back on the recreated window. tmux.Client has no -S flag of its own —
 // it resolves its target socket from $TMUX (see withSynthesizedTmuxEnv in
-// internal/tmux/client.go) — so each phase points Client at the right server
+// pkg/tmux/client.go) — so each phase points Client at the right server
 // by setting TMUX to that server's socket.
 func TestDecorationRestoreRoundtrip(t *testing.T) {
 	if testing.Short() {

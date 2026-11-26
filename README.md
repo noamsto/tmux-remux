@@ -265,7 +265,7 @@ Don't sync `$XDG_DATA_HOME/tmux-remux/` to cloud storage, don't commit it, don't
 - `cmd/tmux-remux/main.go` — cobra CLI with the 11 subcommands above
 - `internal/store` — SQLite layer (atomic transactional migrations, prepared queries)
 - `internal/scrollback` — content-addressed file store with zstd compression and refcount-driven GC
-- `internal/tmux` — wrapper around `exec.Command("tmux", …)` and parsers for `-F` output
+- `pkg/tmux` — wrapper around `exec.Command("tmux", …)` and parsers for `-F` output
 - `internal/snapshot` — manifest types, parallel `capture-pane`, fingerprint-based throttle
 - `internal/filter` — smart-restore filter as pure functions
 - `internal/restore` — plan builder + apply (best-effort tmux command sequence)
