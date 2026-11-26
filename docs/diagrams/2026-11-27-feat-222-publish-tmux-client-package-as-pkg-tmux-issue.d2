@@ -1,0 +1,28 @@
+direction: right
+
+internal_tmux: "internal/tmux (unimportable)" {
+  client: "client.go\nClient, ListSessions/Windows/Panes"
+  parse: "parse.go\nSessionRow, WindowRow, PaneRow"
+  layout: "layout.go\nNormalizeLayout"
+  options: "options.go\nGlobalOptions, ParseOptionLines"
+  version: "version.go\nVersion, ParseVersion"
+}
+
+callers: "tmux-remux callers" {
+  cmd: "cmd/tmux-remux"
+  snapshot: "internal/snapshot"
+  restore: "internal/restore"
+  closeevent: "internal/closeevent"
+  picker: "internal/picker"
+  triggers: "internal/triggers"
+}
+
+external: "houston (external module)" {
+  style.stroke-dash: 4
+}
+
+callers -> internal_tmux: "imports"
+external -> internal_tmux: "blocked by Go internal/ rule" {
+  style.stroke: "#cc3333"
+  style.stroke-dash: 4
+}
