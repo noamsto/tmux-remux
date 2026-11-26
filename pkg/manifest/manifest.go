@@ -40,10 +40,7 @@ func StripFormat(s string) string {
 
 // Manifest is the top-level snapshot envelope persisted in events.manifest_json.
 type Manifest struct {
-	// V is the manifest schema version. CurrentVersion (1) is current;
-	// additive optional fields with `omitempty` do not bump V, breaking
-	// changes bump V, and readers ignore unknown fields and treat missing
-	// optional fields as zero values.
+	// V is the manifest schema version (see package doc for the v version policy).
 	V       int    `json:"v"`
 	Host    string `json:"host"`
 	TmuxPID int    `json:"tmux_pid,omitempty"`

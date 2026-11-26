@@ -927,9 +927,8 @@ type ListCmd struct {
 	JSON bool `name:"json" help:"emit one JSON object per line (newline-delimited)"`
 }
 
-// listEventRow freezes the wire format for `tmux-remux list --json`.
-// Field names match store.Event's prior default Go JSON encoding so external
-// consumers (e.g. tmux-og) see byte-identical NDJSON output.
+// listEventRow freezes the wire format for `tmux-remux list --json`,
+// preserving store.Event's exported JSON field names.
 type listEventRow struct {
 	ID            int64  `json:"ID"`
 	Ts            int64  `json:"Ts"`
