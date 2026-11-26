@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/noamsto/tmux-remux/compare/v0.9.0...v0.10.0) (2026-11-26)
+
+
+### Features
+
+* **tmux:** publish internal/tmux as pkg/tmux ([#223](https://github.com/noamsto/tmux-remux/issues/223)) ([d829efc](https://github.com/noamsto/tmux-remux/commit/d829efceadae6fbfa216712ab2f5caf6259e2106))
+
 ## [0.9.0](https://github.com/noamsto/tmux-remux/compare/v0.8.0...v0.9.0) (2026-11-26)
 
 
