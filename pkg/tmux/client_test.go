@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/noamsto/tmux-remux/pkg/tmux"
 )
@@ -434,5 +435,51 @@ func TestSocketPath(t *testing.T) {
 				t.Errorf("SocketPath() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunGlobalFlagsPrecedeSubcommand(t *testing.T) {
+	c := tmux.NewClient("echo").SetUTF8(true).SetSocket("/tmp/s")
+	out, err := c.Run(context.Background(), []string{"list-sessions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(out); got != "-u -S /tmp/s list-sessions" {
+		t.Errorf("args = %q", got)
+	}
+	out, _ = tmux.NewClient("echo").Run(context.Background(), []string{"x"})
+	if strings.TrimSpace(out) != "x" {
+		t.Errorf("default Run must add no args, got %q", out)
+	}
+}
+
+func TestSetTimeoutCancels(t *testing.T) {
+	fake := writeFakeTmux(t, "exec sleep 5")
+	c := tmux.NewClient(fake).SetTimeout(100 * time.Millisecond)
+	start := time.Now()
+	if _, err := c.Run(context.Background(), []string{"x"}); err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Error("timeout did not cancel")
+	}
+}
+
+func TestListPanesSingleShotExtras(t *testing.T) {
+	const fs = tmux.FieldSep
+	fake := writeFakeTmux(t, `case "$*" in *show-options*) echo "unexpected show-options" >&2; exit 1;; esac
+printf 's`+fs+`1`+fs+`0`+fs+`/c`+fs+`zsh`+fs+`9`+fs+`7`+fs+`%%1`+fs+fs+`0`+fs+fs+`1`+fs+`t`+fs+`5`+fs+`busy\n'
+echo "$*" >"$0.args"`)
+	c := tmux.NewClient(fake).SetExtraFormats(nil, nil, []string{"@claude_status"})
+	rows, err := c.ListPanes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Extra["@claude_status"] != "busy" || rows[0].ServerPID != 5 {
+		t.Errorf("rows = %+v", rows)
+	}
+	args, _ := os.ReadFile(fake + ".args")
+	if !strings.Contains(string(args), "#{@claude_status}") {
+		t.Errorf("format lacks extra: %s", args)
 	}
 }

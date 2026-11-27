@@ -106,3 +106,54 @@ func TestParsePanesDeadPane(t *testing.T) {
 		t.Errorf("mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestParseSupersetRows(t *testing.T) {
+	const fs = tmux.FieldSep
+	sess, err := tmux.ParseSessionsExtra("w"+fs+"5"+fs+"100"+fs+"3"+fs+"2"+fs+"200"+fs+"busy\n", []string{"@claude_status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantS := []tmux.SessionRow{{Name: "w", LastAttached: 5, Created: 100, Windows: 3, Attached: 2, LastActivity: 200, Extra: map[string]string{"@claude_status": "busy"}}}
+	if diff := cmp.Diff(wantS, sess); diff != "" {
+		t.Errorf("sessions (-want +got):\n%s", diff)
+	}
+
+	wins, err := tmux.ParseWindowsExtra("s"+fs+"1"+fs+"n"+fs+"L"+fs+"@4"+fs+"1"+fs+"1"+fs+"2"+fs+"300"+fs+"/p"+fs+"x\n", []string{"@crew_role"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantW := []tmux.WindowRow{{Session: "s", Index: 1, Name: "n", Layout: "L", ID: "@4", AutomaticRename: true, Active: true, Panes: 2, LastActivity: 300, Path: "/p", Extra: map[string]string{"@crew_role": "x"}}}
+	if diff := cmp.Diff(wantW, wins); diff != "" {
+		t.Errorf("windows (-want +got):\n%s", diff)
+	}
+
+	panes, err := tmux.ParsePanesExtra("s"+fs+"1"+fs+"2"+fs+"/c"+fs+"zsh"+fs+"9"+fs+"7"+fs+"%3"+fs+fs+"0"+fs+fs+"1"+fs+"a|b"+fs+"4242"+fs+"v\n", []string{"@agent_screen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantP := []tmux.PaneRow{{Session: "s", WindowIndex: 1, PaneIndex: 2, Cwd: "/c", Command: "zsh", PID: 9, LastUsed: 7, ID: "%3", Active: true, Title: "a|b", ServerPID: 4242, Extra: map[string]string{"@agent_screen": "v"}}}
+	if diff := cmp.Diff(wantP, panes); diff != "" {
+		t.Errorf("panes (-want +got):\n%s", diff)
+	}
+}
+
+// With extras the legacy field count must be rejected, so legacy+extras is
+// never confused with the superset form.
+func TestParseExtraRejectsLegacyCount(t *testing.T) {
+	const fs = tmux.FieldSep
+	if _, err := tmux.ParseSessionsExtra("w"+fs+"1"+fs+"a"+fs+"b"+fs+"c"+fs+"d\n", []string{"a", "b", "c", "d"}); err == nil {
+		t.Error("expected field-count error")
+	}
+}
+
+func TestStripTmuxEscapes(t *testing.T) {
+	for in, want := range map[string]string{
+		"#[fg=red]name#[default] ": "name",
+		"plain":                    "plain",
+		"":                         "",
+	} {
+		if got := tmux.StripTmuxEscapes(in); got != want {
+			t.Errorf("StripTmuxEscapes(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
