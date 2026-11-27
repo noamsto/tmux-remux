@@ -253,7 +253,8 @@ var tmuxStyleRe = regexp.MustCompile(`#\[[^\]]*\]`)
 
 // StripTmuxEscapes removes tmux style directives such as "#[fg=red]" from s
 // (as found in window and session names set from a status format) and trims
-// surrounding whitespace. It does not unescape backslash sequences: with -u
+// surrounding whitespace. Matching is purely textual: an escaped literal
+// "##[x]" is not special-cased. It does not unescape backslash sequences: with -u
 // and a synthesized TMUX (see Client.Run), -F output is already literal.
 func StripTmuxEscapes(s string) string {
 	return strings.TrimSpace(tmuxStyleRe.ReplaceAllString(s, ""))

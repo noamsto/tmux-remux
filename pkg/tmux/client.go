@@ -82,7 +82,9 @@ func (c *Client) SetSocket(path string) *Client {
 // "@crew_role") read in the single list-sessions / list-windows / list-panes
 // call and returned in each row's Extra map, instead of one show-options exec
 // per target. Names are tmux format variables or @-prefixed user options.
-// Values must not contain FieldSep. Chainable.
+// Values must not contain FieldSep or newlines. A session extra resolves
+// through the session's current window (see ListSessions' note on
+// @bridge_host). Chainable.
 func (c *Client) SetExtraFormats(sessions, windows, panes []string) *Client {
 	c.extraSessions, c.extraWindows, c.extraPanes = sessions, windows, panes
 	return c
