@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/noamsto/tmux-remux/compare/v0.10.0...v0.11.0) (2026-11-27)
+
+
+### Features
+
+* **tmux:** superset row fields, single-shot extra -F fields, StripTmuxEscapes ([#226](https://github.com/noamsto/tmux-remux/issues/226)) ([258d409](https://github.com/noamsto/tmux-remux/commit/258d409a11d4ce3675c0b996e51d8e89ddf2a3d7))
+
 ## [0.10.0](https://github.com/noamsto/tmux-remux/compare/v0.9.0...v0.10.0) (2026-11-26)
 
 
