@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrNoServer is returned by Run (and surfaced via ListSessions/Windows/Panes
@@ -29,6 +30,12 @@ type Client struct {
 	binary             string
 	decorationOpts     []string
 	paneDecorationOpts []string
+	timeout            time.Duration
+	utf8               bool
+	socket             string
+	extraSessions      []string
+	extraWindows       []string
+	extraPanes         []string
 }
 
 // NewClient returns a Client that invokes binary; if empty, "tmux" is used.
@@ -49,6 +56,50 @@ func (c *Client) SetPaneDecorationOptions(names []string) *Client {
 	return c
 }
 
+// SetTimeout bounds every tmux invocation made by Run; zero (the default)
+// leaves only the caller's context in force. Chainable.
+func (c *Client) SetTimeout(d time.Duration) *Client {
+	c.timeout = d
+	return c
+}
+
+// SetUTF8 makes Run pass -u, forcing tmux to treat its output as UTF-8:
+// outside a UTF-8 locale tmux rewrites control characters in -F output to
+// "_", corrupting FieldSep. Off by default. Chainable.
+func (c *Client) SetUTF8(on bool) *Client {
+	c.utf8 = on
+	return c
+}
+
+// SetSocket makes Run pass -S path, targeting an explicit tmux socket; empty
+// (the default) uses tmux's own resolution. Chainable.
+func (c *Client) SetSocket(path string) *Client {
+	c.socket = path
+	return c
+}
+
+// SetExtraFormats sets extra option or format names (e.g. "@claude_status",
+// "@crew_role") read in the single list-sessions / list-windows / list-panes
+// call and returned in each row's Extra map, instead of one show-options exec
+// per target. Names are tmux format variables or @-prefixed user options.
+// Values must not contain FieldSep or newlines. A session extra resolves
+// through the session's current window (see ListSessions' note on
+// @bridge_host). Chainable.
+func (c *Client) SetExtraFormats(sessions, windows, panes []string) *Client {
+	c.extraSessions, c.extraWindows, c.extraPanes = sessions, windows, panes
+	return c
+}
+
+// formatWithExtras appends #{name} fields for each extra to base.
+func formatWithExtras(base string, extras []string) string {
+	var b strings.Builder
+	b.WriteString(base)
+	for _, n := range extras {
+		b.WriteString(FieldSep + "#{" + n + "}")
+	}
+	return b.String()
+}
+
 // Run executes the binary with the given args and returns stdout. Non-zero
 // exit with a "no server" stderr is mapped to ErrNoServer; other failures are
 // wrapped with stderr.
@@ -60,6 +111,19 @@ func (c *Client) SetPaneDecorationOptions(names []string) *Client {
 // friends. Setting TMUX to any non-empty value with a real socket path makes
 // tmux preserve those bytes. See parse.go FieldSep.
 func (c *Client) Run(ctx context.Context, args []string) (string, error) {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+	var global []string
+	if c.utf8 {
+		global = append(global, "-u")
+	}
+	if c.socket != "" {
+		global = append(global, "-S", c.socket)
+	}
+	args = append(global, args...)
 	cmd := exec.CommandContext(ctx, c.binary, args...) //nolint:gosec // binary and args are trusted callers
 	cmd.Env = withSynthesizedTmuxEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
@@ -117,9 +181,9 @@ func withSynthesizedTmuxEnv(env []string) []string {
 }
 
 const (
-	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}"
-	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}"
-	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}" + FieldSep + "#{@remux_relaunch_owner}"
+	sessionFormat    = "#{session_name}" + FieldSep + "#{session_last_attached}" + FieldSep + "#{session_created}" + FieldSep + "#{session_windows}" + FieldSep + "#{session_attached}" + FieldSep + "#{session_activity}"
+	baseWindowFormat = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{window_name}" + FieldSep + "#{window_layout}" + FieldSep + "#{window_id}" + FieldSep + "#{E:automatic-rename}" + FieldSep + "#{window_active}" + FieldSep + "#{window_panes}" + FieldSep + "#{window_activity}" + FieldSep + "#{pane_current_path}"
+	paneFormat       = "#{session_name}" + FieldSep + "#{window_index}" + FieldSep + "#{pane_index}" + FieldSep + "#{pane_current_path}" + FieldSep + "#{pane_current_command}" + FieldSep + "#{pane_pid}" + FieldSep + "#{pane_last_used}" + FieldSep + "#{pane_id}" + FieldSep + "#{@remux_relaunch}" + FieldSep + "#{pane_floating_flag}" + FieldSep + "#{@remux_relaunch_owner}" + FieldSep + "#{pane_active}" + FieldSep + "#{pane_title}" + FieldSep + "#{pid}"
 )
 
 // bridgeWindowOptions are captured by ListWindows in addition to the caller's
@@ -133,20 +197,20 @@ var bridgeWindowOptions = []string{"@bridge_host", "@bridge_session", "@bridge_p
 // WindowFormat returns the list-windows -F format. Decoration is captured
 // separately via CaptureDecoration, not embedded in this format.
 func (c *Client) WindowFormat() string {
-	return baseWindowFormat
+	return formatWithExtras(baseWindowFormat, c.extraWindows)
 }
 
 // ListSessions runs `tmux list-sessions -F …` and parses the result.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListSessions(ctx context.Context) ([]SessionRow, error) {
-	out, err := c.Run(ctx, []string{"list-sessions", "-F", sessionFormat})
+	out, err := c.Run(ctx, []string{"list-sessions", "-F", formatWithExtras(sessionFormat, c.extraSessions)})
 	if errors.Is(err, ErrNoServer) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	rows, err := ParseSessions(out)
+	rows, err := ParseSessionsExtra(out, c.extraSessions)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +254,7 @@ func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := ParseWindows(out)
+	rows, err := ParseWindowsExtra(out, c.extraWindows)
 	if err != nil {
 		return nil, err
 	}
@@ -225,14 +289,14 @@ func (c *Client) ListWindows(ctx context.Context) ([]WindowRow, error) {
 // captures each pane's decoration via CaptureDecoration keyed by pane id.
 // Returns (nil, nil) when no tmux server is running; propagates other errors.
 func (c *Client) ListPanes(ctx context.Context) ([]PaneRow, error) {
-	out, err := c.Run(ctx, []string{"list-panes", "-a", "-F", paneFormat})
+	out, err := c.Run(ctx, []string{"list-panes", "-a", "-F", formatWithExtras(paneFormat, c.extraPanes)})
 	if errors.Is(err, ErrNoServer) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	rows, err := ParsePanes(out)
+	rows, err := ParsePanesExtra(out, c.extraPanes)
 	if err != nil {
 		return nil, err
 	}
